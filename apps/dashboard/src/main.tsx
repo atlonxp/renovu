@@ -38,7 +38,7 @@ import { WebhooksPage } from '@/pages/webhooks-page';
 import { CreateIntegrationSidebar } from './components/integrations/components/create-integration-sidebar';
 import { UpdateIntegrationSidebar } from './components/integrations/components/update-integration-sidebar';
 import { ChannelPreferences } from './components/workflow-editor/channel-preferences';
-import { IS_ENTERPRISE, IS_SELF_HOSTED } from './config';
+import { IS_SELF_HOSTED } from './config';
 import { FeatureFlagsProvider } from './context/feature-flags-provider';
 import { ContextsPage } from './pages/contexts';
 import { CreateContextPage } from './pages/create-context';
@@ -557,20 +557,24 @@ const router = createBrowserRouter([
             ),
           },
           {
+            // ReNovu: Settings page accessible for self-hosted deployments
             path: ROUTES.SETTINGS,
-            element: IS_SELF_HOSTED && !IS_ENTERPRISE ? <Navigate to={ROUTES.ROOT} /> : <SettingsPage />,
+            element: <SettingsPage />,
           },
           {
+            // ReNovu: Settings page accessible for self-hosted deployments
             path: ROUTES.SETTINGS_ACCOUNT,
-            element: IS_SELF_HOSTED && !IS_ENTERPRISE ? <Navigate to={ROUTES.ROOT} /> : <SettingsPage />,
+            element: <SettingsPage />,
           },
           {
+            // ReNovu: Settings page accessible for self-hosted deployments
             path: ROUTES.SETTINGS_ORGANIZATION,
-            element: IS_SELF_HOSTED && !IS_ENTERPRISE ? <Navigate to={ROUTES.ROOT} /> : <SettingsPage />,
+            element: <SettingsPage />,
           },
           {
+            // ReNovu: Settings page accessible for self-hosted deployments
             path: ROUTES.SETTINGS_TEAM,
-            element: IS_SELF_HOSTED && !IS_ENTERPRISE ? <Navigate to={ROUTES.ROOT} /> : <SettingsPage />,
+            element: <SettingsPage />,
           },
           {
             path: ROUTES.SETTINGS_BILLING,

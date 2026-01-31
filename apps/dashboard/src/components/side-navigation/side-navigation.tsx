@@ -22,7 +22,7 @@ import { useEnvironment } from '@/context/environment/hooks';
 import { useFeatureFlag } from '@/hooks/use-feature-flag';
 import { Protect } from '@/utils/protect';
 import { buildRoute, ROUTES } from '@/utils/routes';
-import { IS_ENTERPRISE, IS_SELF_HOSTED } from '../../config';
+import { IS_SELF_HOSTED } from '../../config';
 import { useFetchSubscription } from '../../hooks/use-fetch-subscription';
 import { ChangelogStack } from './changelog-cards';
 import { EnvironmentDropdown } from './environment-dropdown';
@@ -291,14 +291,13 @@ export const SideNavigation = () => {
                 </Protect>
               </NavigationGroup>
             </Protect>
-            {!IS_SELF_HOSTED || IS_ENTERPRISE ? (
-              <NavigationGroup label="Application">
-                <NavigationLink to={ROUTES.SETTINGS}>
-                  <RiSettings4Line className="size-4" />
-                  <span>Settings</span>
-                </NavigationLink>
-              </NavigationGroup>
-            ) : null}
+            {/* ReNovu: Settings menu accessible for self-hosted deployments */}
+            <NavigationGroup label="Application">
+              <NavigationLink to={ROUTES.SETTINGS}>
+                <RiSettings4Line className="size-4" />
+                <span>Settings</span>
+              </NavigationLink>
+            </NavigationGroup>
           </div>
 
           <BottomSection
