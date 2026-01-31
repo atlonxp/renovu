@@ -60,7 +60,9 @@ export class DuplicateLayoutUseCase {
     if (duplicatedLayout.isTranslationEnabled) {
       await this.duplicateTranslationsForLayout({
         sourceResourceId: originalLayout.layoutId,
+        sourceResourceInternalId: originalLayout._id!,
         targetResourceId: duplicatedLayout.layoutId,
+        targetResourceInternalId: duplicatedLayout._id,
         command,
       });
     }
@@ -70,18 +72,24 @@ export class DuplicateLayoutUseCase {
 
   private async duplicateTranslationsForLayout({
     sourceResourceId,
+    sourceResourceInternalId,
     targetResourceId,
+    targetResourceInternalId,
     command,
   }: {
     sourceResourceId: string;
+    sourceResourceInternalId: string;
     targetResourceId: string;
+    targetResourceInternalId: string;
     command: DuplicateLayoutCommand;
   }) {
     try {
       await this.duplicateLocalesUseCase.execute({
         sourceResourceId,
+        sourceResourceInternalId,
         sourceResourceType: LocalizationResourceEnum.LAYOUT,
         targetResourceId,
+        targetResourceInternalId,
         organizationId: command.organizationId,
         environmentId: command.environmentId,
         userId: command.userId,

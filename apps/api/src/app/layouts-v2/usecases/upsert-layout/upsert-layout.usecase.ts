@@ -216,13 +216,13 @@ export class UpsertLayout {
   private async toggleTranslationsForLayout(command: UpsertLayoutCommand, layoutDto: LayoutDto) {
     try {
       await this.manageTranslations.execute({
-        enabled: command.layoutDto.isTranslationEnabled,
+        enabled: command.layoutDto.isTranslationEnabled ?? false,
         resourceId: layoutDto.identifier,
         resourceType: LocalizationResourceEnum.LAYOUT,
         organizationId: command.organizationId,
         environmentId: command.environmentId,
         userId: command.userId,
-        resourceEntity: layoutDto,
+        resourceEntity: layoutDto as unknown as Record<string, unknown>,
       });
     } catch (error) {
       this.logger.error(
