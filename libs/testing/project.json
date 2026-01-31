@@ -3,6 +3,14 @@
   "sourceRoot": "libs/testing/src",
   "projectType": "library",
   "targets": {
+    "build": {
+      "executor": "nx:run-script",
+      "options": {
+        "script": "build"
+      },
+      "dependsOn": ["@novu/dal:build", "@novu/shared:build"],
+      "cache": true
+    },
     "lint": {
       "executor": "nx:run-commands",
       "options": {
