@@ -154,7 +154,7 @@ export class PatchWorkflowUsecase {
   private async toggleV2TranslationsForWorkflow(workflowIdentifier: string, command: PatchWorkflowCommand) {
     try {
       await this.manageTranslations.execute({
-        enabled: command.isTranslationEnabled,
+        enabled: command.isTranslationEnabled ?? false,
         resourceId: workflowIdentifier,
         resourceType: LocalizationResourceEnum.WORKFLOW,
         organizationId: command.user.organizationId,

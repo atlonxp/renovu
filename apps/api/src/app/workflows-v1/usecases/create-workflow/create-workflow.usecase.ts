@@ -153,14 +153,14 @@ export class CreateWorkflow {
   ) {
     try {
       await this.manageTranslations.execute({
-        enabled: command.isTranslationEnabled,
+        enabled: command.isTranslationEnabled ?? false,
         resourceId: workflowIdentifier,
         resourceType: LocalizationResourceEnum.WORKFLOW,
         organizationId: command.organizationId,
         environmentId: command.environmentId,
         userId: command.userId,
         session,
-        resourceEntity: workflowEntity,
+        resourceEntity: workflowEntity as unknown as Record<string, unknown>,
       });
     } catch (error) {
       this.logger.error(

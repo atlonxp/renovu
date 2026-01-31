@@ -53,7 +53,9 @@ export class DuplicateWorkflowUseCase {
     if (duplicatedWorkflow.isTranslationEnabled) {
       await this.duplicateTranslationsForWorkflow({
         sourceResourceId: workflow.workflowId,
+        sourceResourceInternalId: workflow._id,
         targetResourceId: duplicatedWorkflow.workflowId,
+        targetResourceInternalId: duplicatedWorkflow._id,
         command,
       });
     }
@@ -121,18 +123,24 @@ export class DuplicateWorkflowUseCase {
 
   private async duplicateTranslationsForWorkflow({
     sourceResourceId,
+    sourceResourceInternalId,
     targetResourceId,
+    targetResourceInternalId,
     command,
   }: {
     sourceResourceId: string;
+    sourceResourceInternalId: string;
     targetResourceId: string;
+    targetResourceInternalId: string;
     command: DuplicateWorkflowCommand;
   }) {
     try {
       await this.duplicateLocalesUseCase.execute({
         sourceResourceId,
+        sourceResourceInternalId,
         sourceResourceType: LocalizationResourceEnum.WORKFLOW,
         targetResourceId,
+        targetResourceInternalId,
         organizationId: command.user.organizationId,
         environmentId: command.user.environmentId,
         userId: command.user._id,
