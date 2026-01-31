@@ -5,7 +5,6 @@ import { DashboardLayout } from '../components/dashboard-layout';
 import { CreateEnvironmentButton } from '../components/environments/create-environment-button';
 import { FreeTierState } from '../components/environments/environments-free-state';
 import { EnvironmentsList } from '../components/environments/environments-list';
-import { IS_ENTERPRISE, IS_SELF_HOSTED } from '../config';
 import { useAuth } from '../context/auth/hooks';
 import { useFetchEnvironments } from '../context/environment/hooks';
 import { useFetchSubscription } from '../hooks/use-fetch-subscription';
@@ -27,7 +26,8 @@ export function EnvironmentsPage() {
   const isTrialActive = subscription?.trial?.isActive;
   const allowedToAccessEnvironments =
     areEnvironmentsInitialLoading || !subscription || (isTierEligibleForCustomEnvironments && !isTrialActive);
-  const canAccessEnvironments = allowedToAccessEnvironments && (!IS_SELF_HOSTED || IS_ENTERPRISE);
+  // ReNovu: Environments page accessible for self-hosted deployments
+  const canAccessEnvironments = allowedToAccessEnvironments;
 
   useEffect(() => {
     track(TelemetryEvent.ENVIRONMENTS_PAGE_VIEWED);
