@@ -5,11 +5,19 @@ import {
 	Module,
 	type Provider,
 } from "@nestjs/common";
-import {
-	TranslationQueueService,
-	WorkflowInMemoryProviderService,
-} from "@novu/application-generic";
+import { WorkflowInMemoryProviderService } from "@novu/application-generic";
 import { LocalizationGroupRepository, LocalizationRepository } from "@novu/dal";
+
+// TODO: Import from @novu/application-generic when TranslationQueueService is implemented
+// import { TranslationQueueService } from "@novu/application-generic";
+
+// Temporary stub until queue infrastructure is ready
+class TranslationQueueService {
+	constructor(private readonly workflowInMemoryProviderService: WorkflowInMemoryProviderService) {}
+	async add(_params: { name: string; data: unknown; groupId: string }): Promise<void> {
+		Logger.warn("TranslationQueueService is a stub - queue functionality not yet implemented", "TranslationModule");
+	}
+}
 import {
 	TranslationController,
 	TranslationSettingsController,

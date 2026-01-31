@@ -15,13 +15,13 @@ import { ApiExcludeController, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { UserSession } from '@novu/application-generic';
 import type { UserSessionData } from '@novu/shared';
 
-import type { TranslationSettingsRepository } from '../dal';
+import { OpenAIModelEnum, TranslationSettingsRepository } from '../dal';
 import type {
   ConnectionTestResponseDto,
   TranslationSettingsResponseDto,
   UpdateTranslationSettingsDto,
 } from '../dtos';
-import type { OpenAITranslationService } from '../services';
+import { OpenAITranslationService } from '../services';
 
 /**
  * Controller for managing organization translation settings
@@ -245,10 +245,10 @@ export class TranslationSettingsController {
     }
 
     // Validate openaiModel is a valid enum value
-    const validModels = ['gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo'];
+    const validModels = Object.values(OpenAIModelEnum) as string[];
     const openaiModel = validModels.includes(settings.openaiModel)
-      ? (settings.openaiModel as 'gpt-4o-mini' | 'gpt-4o' | 'gpt-4-turbo')
-      : 'gpt-4o-mini';
+      ? (settings.openaiModel as OpenAIModelEnum)
+      : OpenAIModelEnum.GPT_4O_MINI;
 
     return {
       _id: settings._id,

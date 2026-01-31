@@ -2,7 +2,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import {
 	LocalizationResourceEnum as DalLocalizationResourceEnum,
 	type LocalizationGroupEntity,
-	type LocalizationGroupRepository,
+	LocalizationGroupRepository,
 } from "@novu/dal";
 
 import {

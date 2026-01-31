@@ -1,4 +1,4 @@
-import { OpenAIModelEnum, type TranslationSettingsRepository } from "../dal";
+import { OpenAIModelEnum, TranslationSettingsRepository } from "../dal";
 import type { TranslationSettingsEntity } from "../dal/translation-settings.entity";
 import { OpenAITranslationService } from "./openai-translation.service";
 import { TranslationValidatorService } from "./translation-validator.service";

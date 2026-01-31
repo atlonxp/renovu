@@ -1,7 +1,7 @@
 import { Injectable, Logger } from "@nestjs/common";
 import OpenAI from "openai";
 
-import { OpenAIModelEnum, type TranslationSettingsRepository } from "../dal";
+import { OpenAIModelEnum, TranslationSettingsRepository } from "../dal";
 import {
 	ApiKeyNotConfiguredError,
 	type BatchTranslateRequest,
@@ -13,8 +13,8 @@ import {
 	type TranslateResponse,
 	type ValidationResult,
 } from "../types/translation.types";
-import type { TranslationValidatorService } from "./translation-validator.service";
-import type { VariableTokenizerService } from "./variable-tokenizer.service";
+import { TranslationValidatorService } from "./translation-validator.service";
+import { VariableTokenizerService } from "./variable-tokenizer.service";
 
 /**
  * Default configuration for translation

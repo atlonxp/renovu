@@ -1,7 +1,48 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
-import { TranslationQueueService } from '@novu/application-generic';
-import { type ITranslationJobData, JobTopicNameEnum, TranslationResourceTypeEnum } from '@novu/shared';
 import { v4 as uuidv4 } from 'uuid';
+
+// TODO: Import from @novu/application-generic when TranslationQueueService is implemented
+// import { TranslationQueueService } from '@novu/application-generic';
+// import { type ITranslationJobData, JobTopicNameEnum, TranslationResourceTypeEnum } from '@novu/shared';
+
+// Temporary stub types until queue infrastructure is ready
+interface ITranslationJobData {
+  jobReferenceId: string;
+  resourceId: string;
+  resourceInternalId?: string;
+  resourceType: string;
+  organizationId: string;
+  environmentId: string;
+  userId: string;
+  sourceContent: Record<string, string>;
+  targetLocales?: string[];
+  sourceLocale?: string;
+  contentType?: string;
+  customInstructions?: string;
+  createdAt?: string;
+}
+
+interface IAddJobParams {
+  name: string;
+  data: ITranslationJobData;
+  groupId: string;
+}
+
+// Stub class for dependency injection
+class TranslationQueueService {
+  async add(_params: IAddJobParams): Promise<void> {
+    // Stub - queue functionality not yet implemented
+  }
+}
+
+const JobTopicNameEnum = {
+  TRANSLATION: 'translation',
+} as const;
+
+enum TranslationResourceTypeEnum {
+  WORKFLOW = 'workflow',
+  LAYOUT = 'layout',
+}
 
 import {
   type EnqueueTranslationCommand,
@@ -98,9 +139,9 @@ export class EnqueueTranslation {
     try {
       // Create job data
       const jobData: ITranslationJobData = {
-        _organizationId: organizationId,
-        _environmentId: environmentId,
-        _userId: userId,
+        organizationId,
+        environmentId,
+        userId,
         resourceId,
         resourceInternalId,
         resourceType: this.mapResourceType(resourceType),

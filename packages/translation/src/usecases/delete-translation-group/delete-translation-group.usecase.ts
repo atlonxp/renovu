@@ -1,8 +1,9 @@
 import { Injectable, Logger } from "@nestjs/common";
 import {
 	LocalizationResourceEnum as DalLocalizationResourceEnum,
-	type LocalizationGroupRepository,
-	type LocalizationRepository,
+	type LocalizationGroupEntity,
+	LocalizationGroupRepository,
+	LocalizationRepository,
 } from "@novu/dal";
 
 import {
@@ -93,7 +94,7 @@ export class DeleteTranslationGroup {
 		const dalResourceType = this.convertToDalResourceType(resourceType);
 
 		// Find the LocalizationGroup
-		let localizationGroup = null;
+		let localizationGroup: LocalizationGroupEntity | null = null;
 
 		if (resourceInternalId) {
 			localizationGroup = await this.localizationGroupRepository.findByResource(

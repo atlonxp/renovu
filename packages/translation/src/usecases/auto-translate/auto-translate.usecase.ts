@@ -2,12 +2,12 @@ import { Injectable, Logger } from "@nestjs/common";
 import {
 	LocalizationResourceEnum as DalLocalizationResourceEnum,
 	type LocalizationGroupEntity,
-	type LocalizationGroupRepository,
-	type LocalizationRepository,
+	LocalizationGroupRepository,
+	LocalizationRepository,
 } from "@novu/dal";
 
-import type { TranslationSettingsRepository } from "../../dal";
-import type { OpenAITranslationService } from "../../services";
+import { TranslationSettingsRepository } from "../../dal";
+import { OpenAITranslationService } from "../../services";
 import {
 	type AutoTranslateCommand,
 	type AutoTranslateResult,

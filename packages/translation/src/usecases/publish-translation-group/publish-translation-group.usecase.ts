@@ -3,8 +3,8 @@ import {
 	LocalizationResourceEnum as DalLocalizationResourceEnum,
 	type LocalizationEntity,
 	type LocalizationGroupEntity,
-	type LocalizationGroupRepository,
-	type LocalizationRepository,
+	LocalizationGroupRepository,
+	LocalizationRepository,
 } from "@novu/dal";
 
 import {

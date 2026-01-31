@@ -10,18 +10,10 @@ import {
 	Matches,
 } from "class-validator";
 
-import { LocalizationResourceEnum } from "../usecases/auto-translate/auto-translate.command";
-
-/**
- * Supported content types for translation
- * Helps the AI provide better quality translations
- */
-export type TranslationContentType =
-	| "email"
-	| "sms"
-	| "push"
-	| "in-app"
-	| "chat";
+import {
+	LocalizationResourceEnum,
+	TranslationContentType,
+} from "../usecases/auto-translate/auto-translate.command";
 
 /**
  * DTO for auto-translate request

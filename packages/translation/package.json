@@ -29,7 +29,8 @@
 	},
 	"peerDependencies": {
 		"@nestjs/common": ">=10.0.0",
-		"@nestjs/core": ">=10.0.0"
+		"@nestjs/core": ">=10.0.0",
+		"@nestjs/swagger": ">=7.0.0"
 	},
 	"dependencies": {
 		"@novu/application-generic": "workspace:*",
@@ -42,6 +43,7 @@
 		"uuid": "^9.0.0"
 	},
 	"devDependencies": {
+		"@nestjs/swagger": "^7.0.0",
 		"@nestjs/testing": "^10.0.0",
 		"@types/jest": "29.5.2",
 		"@types/node": "^20.15.0",

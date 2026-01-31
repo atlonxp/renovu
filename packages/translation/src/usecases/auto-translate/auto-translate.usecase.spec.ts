@@ -215,6 +215,8 @@ describe("AutoTranslate Usecase", () => {
 				_localizationGroupId: mockGroupId,
 				_environmentId: mockEnvironmentId,
 				_organizationId: mockOrganizationId,
+				createdAt: new Date().toISOString(),
+				updatedAt: new Date().toISOString(),
 			};
 
 			settingsRepository.findByOrganization.mockResolvedValue({

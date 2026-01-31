@@ -21,9 +21,9 @@ import {
   TranslationJobStatus,
   type TranslationStatusDto,
 } from '../dtos';
-import { type AutoTranslate, AutoTranslateCommand } from '../usecases/auto-translate';
+import { AutoTranslate, AutoTranslateCommand } from '../usecases/auto-translate';
 import {
-  type EnqueueTranslation,
+  EnqueueTranslation,
   EnqueueTranslationCommand,
   EnqueueTranslationResourceTypeEnum,
 } from '../usecases/enqueue-translation';
