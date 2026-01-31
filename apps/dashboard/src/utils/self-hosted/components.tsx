@@ -4,20 +4,418 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '../../components/primitives/button';
 import { Input } from '../../components/primitives/input';
 import { API_HOSTNAME } from '../../config';
+import { useEnvironment } from '../../context/environment/hooks';
 
 const JWT_STORAGE_KEY = 'self-hosted-jwt';
+
+// Helper to get auth headers with environment ID
+function useAuthHeaders() {
+  const { currentEnvironment } = useEnvironment();
+  const token = localStorage.getItem(JWT_STORAGE_KEY);
+
+  return {
+    'Content-Type': 'application/json',
+    ...(token && { Authorization: `Bearer ${token}` }),
+    ...(currentEnvironment?._id && { 'Novu-Environment-Id': currentEnvironment._id }),
+  };
+}
 
 export function OrganizationList() {
   return <></>;
 }
 
-export function OrganizationProfile() {
-  return <></>;
+export function OrganizationProfile({ children }: { children?: React.ReactNode }) {
+  const [orgName, setOrgName] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const authHeaders = useAuthHeaders();
+
+  useEffect(() => {
+    const fetchOrganization = async () => {
+      try {
+        const token = localStorage.getItem(JWT_STORAGE_KEY);
+        if (!token) return;
+
+        const response = await fetch(`${API_HOSTNAME}/v1/organizations/me`, {
+          headers: authHeaders,
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          setOrgName(data.data?.name || '');
+        }
+      } catch (e) {
+        console.error('Failed to fetch organization:', e);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchOrganization();
+  }, []);
+
+  const handleUpdateName = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!orgName.trim()) return;
+
+    setIsUpdating(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`${API_HOSTNAME}/v1/organizations`, {
+        method: 'PATCH',
+        headers: authHeaders,
+        body: JSON.stringify({ name: orgName.trim() }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.message || 'Failed to update organization');
+      }
+
+      setIsEditing(false);
+    } catch (e: any) {
+      setError(e.message || 'Failed to update organization');
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  if (isLoading) {
+    return <div className="py-4 text-center text-sm text-gray-500">Loading...</div>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-lg border border-neutral-200 bg-white p-4">
+        <h3 className="mb-3 text-sm font-medium text-gray-900">Organization Name</h3>
+        {isEditing ? (
+          <form onSubmit={handleUpdateName} className="space-y-3">
+            <Input
+              type="text"
+              value={orgName}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setOrgName(e.target.value)}
+              placeholder="Organization name"
+              required
+              disabled={isUpdating}
+              className="h-10"
+            />
+            {error && <p className="text-sm text-red-600">{error}</p>}
+            <div className="flex gap-2">
+              <Button type="submit" disabled={isUpdating} variant="primary" mode="filled" size="sm">
+                {isUpdating ? 'Saving...' : 'Save'}
+              </Button>
+              <Button
+                type="button"
+                onClick={() => setIsEditing(false)}
+                disabled={isUpdating}
+                variant="secondary"
+                mode="outline"
+                size="sm"
+              >
+                Cancel
+              </Button>
+            </div>
+          </form>
+        ) : (
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-700">{orgName || 'Not set'}</span>
+            <Button onClick={() => setIsEditing(true)} variant="secondary" mode="ghost" size="sm">
+              Edit
+            </Button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
-export function UserProfile() {
-  return <></>;
+// Add static Page property for compatibility
+OrganizationProfile.Page = function Page({ label }: { label: string }) {
+  return null;
+};
+
+export function UserProfile({ children }: { children?: React.ReactNode }) {
+  const [user, setUser] = useState<{ firstName?: string; lastName?: string; email?: string } | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [isUpdatingName, setIsUpdatingName] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Password change state
+  const [showPasswordForm, setShowPasswordForm] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [passwordSuccess, setPasswordSuccess] = useState(false);
+
+  const authHeaders = useAuthHeaders();
+
+  useEffect(() => {
+    const fetchUser = async () => {
+      try {
+        const token = localStorage.getItem(JWT_STORAGE_KEY);
+        if (!token) return;
+
+        const response = await fetch(`${API_HOSTNAME}/v1/users/me`, {
+          headers: authHeaders,
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          setUser(data.data);
+          setFirstName(data.data?.firstName || '');
+          setLastName(data.data?.lastName || '');
+        }
+      } catch (e) {
+        console.error('Failed to fetch user:', e);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchUser();
+  }, []);
+
+  const handleUpdateName = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!firstName.trim()) return;
+
+    setIsUpdatingName(true);
+    setError(null);
+
+    try {
+      const response = await fetch(`${API_HOSTNAME}/v1/users/profile`, {
+        method: 'PUT',
+        headers: authHeaders,
+        body: JSON.stringify({ firstName: firstName.trim(), lastName: lastName.trim() || undefined }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.message || 'Failed to update profile');
+      }
+
+      setUser((prev) => (prev ? { ...prev, firstName, lastName } : prev));
+      setIsEditingName(false);
+    } catch (e: any) {
+      setError(e.message || 'Failed to update profile');
+    } finally {
+      setIsUpdatingName(false);
+    }
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordError(null);
+    setPasswordSuccess(false);
+
+    if (newPassword !== confirmPassword) {
+      setPasswordError('Passwords do not match');
+      return;
+    }
+
+    if (newPassword.length < 8) {
+      setPasswordError('Password must be at least 8 characters');
+      return;
+    }
+
+    setIsChangingPassword(true);
+
+    try {
+      // Use the correct auth endpoint for password change
+      const response = await fetch(`${API_HOSTNAME}/v1/auth/update-password`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ currentPassword, newPassword, confirmPassword }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.message || 'Failed to change password');
+      }
+
+      setShowPasswordForm(false);
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setPasswordSuccess(true);
+      setTimeout(() => setPasswordSuccess(false), 3000);
+    } catch (e: any) {
+      setPasswordError(e.message || 'Failed to change password');
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
+
+  if (isLoading) {
+    return <div className="py-4 text-center text-sm text-gray-500">Loading...</div>;
+  }
+
+  if (!user) {
+    return <div className="py-4 text-center text-sm text-gray-500">No user data available</div>;
+  }
+
+  const fullName = [user.firstName, user.lastName].filter(Boolean).join(' ') || 'User';
+
+  return (
+    <div className="space-y-8">
+      {/* Profile Section */}
+      <div className="space-y-4">
+        <div className="border-b border-neutral-100 pb-4">
+          <h2 className="text-lg font-semibold text-gray-900">Profile</h2>
+          <p className="mt-1 text-sm text-gray-600">Manage your account information</p>
+        </div>
+
+        <div className="rounded-lg border border-neutral-200 bg-white p-4">
+          <h3 className="mb-3 text-sm font-medium text-gray-900">Full Name</h3>
+          {isEditingName ? (
+            <form onSubmit={handleUpdateName} className="space-y-3">
+              <div className="flex gap-2">
+                <Input
+                  type="text"
+                  value={firstName}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setFirstName(e.target.value)}
+                  placeholder="First name"
+                  required
+                  disabled={isUpdatingName}
+                  className="h-10 flex-1"
+                />
+                <Input
+                  type="text"
+                  value={lastName}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setLastName(e.target.value)}
+                  placeholder="Last name"
+                  disabled={isUpdatingName}
+                  className="h-10 flex-1"
+                />
+              </div>
+              {error && <p className="text-sm text-red-600">{error}</p>}
+              <div className="flex gap-2">
+                <Button type="submit" disabled={isUpdatingName} variant="primary" mode="filled" size="sm">
+                  {isUpdatingName ? 'Saving...' : 'Save'}
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    setIsEditingName(false);
+                    setFirstName(user.firstName || '');
+                    setLastName(user.lastName || '');
+                  }}
+                  disabled={isUpdatingName}
+                  variant="secondary"
+                  mode="outline"
+                  size="sm"
+                >
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          ) : (
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-700">{fullName}</span>
+              <Button onClick={() => setIsEditingName(true)} variant="secondary" mode="ghost" size="sm">
+                Edit
+              </Button>
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-lg border border-neutral-200 bg-white p-4">
+          <h3 className="mb-3 text-sm font-medium text-gray-900">Email Address</h3>
+          <span className="text-sm text-gray-700">{user.email}</span>
+        </div>
+      </div>
+
+      {/* Security Section */}
+      <div className="space-y-4">
+        <div className="border-b border-neutral-100 pb-4">
+          <h2 className="text-lg font-semibold text-gray-900">Security</h2>
+          <p className="mt-1 text-sm text-gray-600">Manage your password</p>
+        </div>
+
+        <div className="rounded-lg border border-neutral-200 bg-white p-4">
+          <h3 className="mb-3 text-sm font-medium text-gray-900">Password</h3>
+          {passwordSuccess && (
+            <p className="mb-3 text-sm text-green-600">Password updated successfully!</p>
+          )}
+          {showPasswordForm ? (
+            <form onSubmit={handleChangePassword} className="space-y-3">
+              <Input
+                type="password"
+                value={currentPassword}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCurrentPassword(e.target.value)}
+                placeholder="Current password"
+                required
+                disabled={isChangingPassword}
+                className="h-10"
+              />
+              <Input
+                type="password"
+                value={newPassword}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewPassword(e.target.value)}
+                placeholder="New password"
+                required
+                disabled={isChangingPassword}
+                className="h-10"
+              />
+              <Input
+                type="password"
+                value={confirmPassword}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setConfirmPassword(e.target.value)}
+                placeholder="Confirm new password"
+                required
+                disabled={isChangingPassword}
+                className="h-10"
+              />
+              {passwordError && <p className="text-sm text-red-600">{passwordError}</p>}
+              <div className="flex gap-2">
+                <Button type="submit" disabled={isChangingPassword} variant="primary" mode="filled" size="sm">
+                  {isChangingPassword ? 'Updating...' : 'Update Password'}
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    setShowPasswordForm(false);
+                    setCurrentPassword('');
+                    setNewPassword('');
+                    setConfirmPassword('');
+                    setPasswordError(null);
+                  }}
+                  disabled={isChangingPassword}
+                  variant="secondary"
+                  mode="outline"
+                  size="sm"
+                >
+                  Cancel
+                </Button>
+              </div>
+            </form>
+          ) : (
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-700">••••••••</span>
+              <Button onClick={() => setShowPasswordForm(true)} variant="secondary" mode="ghost" size="sm">
+                Change Password
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
+
+// Add static Page property for compatibility
+UserProfile.Page = function Page({ label }: { label: string }) {
+  return null;
+};
 
 export function SignIn() {
   const navigate = useNavigate();
