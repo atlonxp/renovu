@@ -4,7 +4,7 @@
 # Builds all ReNovu service images and pushes to GitHub Container Registry.
 #
 # Triggers:
-#   - Push to main branch
+#   - Push to release branch (for controlled Docker builds)
 #   - Manual workflow dispatch
 #   - Release published
 #
@@ -20,7 +20,7 @@ name: Build and Push to GHCR
 on:
   push:
     branches:
-      - next
+      - release
     paths:
       - 'apps/**'
       - 'libs/**'
