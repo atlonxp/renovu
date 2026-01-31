@@ -32,7 +32,9 @@ const enterpriseImports = (): Array<Type | DynamicModule | Promise<DynamicModule
 };
 
 function getControllers() {
-  if (isClerkEnabled() || isBetterAuthEnabled()) {
+  // ReNovu: Enable EEOrganizationController for self-hosted to provide /settings endpoints
+  const isSelfHosted = process.env.IS_SELF_HOSTED === 'true';
+  if (isClerkEnabled() || isBetterAuthEnabled() || isSelfHosted) {
     return [EEOrganizationController];
   }
 

@@ -15,11 +15,15 @@ import { Card } from '@/components/primitives/card';
 import { InlineToast } from '@/components/primitives/inline-toast';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/primitives/tabs';
 import { OrganizationSettings } from '@/components/settings/organization-settings';
-import { EE_AUTH_PROVIDER, IS_SELF_HOSTED } from '@/config';
+import { CLERK_PUBLISHABLE_KEY, EE_AUTH_PROVIDER, IS_SELF_HOSTED } from '@/config';
 import { useFeatureFlag } from '@/hooks/use-feature-flag';
 import { useHasPermission } from '@/hooks/use-has-permission';
 import { TeamMembers } from '@/utils/better-auth/components/team-members';
 import { UserProfile as BetterAuthUserProfile } from '@/utils/better-auth/index';
+import {
+  OrganizationProfile as SelfHostedOrganizationProfile,
+  UserProfile as SelfHostedUserProfile,
+} from '@/utils/self-hosted/components';
 import { ROUTES } from '@/utils/routes';
 import { Plan } from '../components/billing/plan';
 import { DashboardLayout } from '../components/dashboard-layout';
@@ -88,7 +92,14 @@ export function SettingsPage() {
   const hasBillingPermission = has({ permission: PermissionsEnum.BILLING_WRITE });
 
   const clerkAppearance = getClerkComponentAppearance(isRbacEnabled);
-  const UserProfile = EE_AUTH_PROVIDER === 'clerk' ? ClerkUserProfile : BetterAuthUserProfile;
+
+  // ReNovu: Use self-hosted components when in self-hosted mode without enterprise auth
+  const useSelfHostedAuth = IS_SELF_HOSTED && !CLERK_PUBLISHABLE_KEY && EE_AUTH_PROVIDER === 'clerk';
+  const UserProfile = useSelfHostedAuth
+    ? SelfHostedUserProfile
+    : EE_AUTH_PROVIDER === 'clerk'
+      ? ClerkUserProfile
+      : BetterAuthUserProfile;
 
   function checkRbacEnabled(subscription: GetSubscriptionDto | undefined, featureFlag: boolean) {
     const apiServiceLevel = subscription?.apiServiceLevel || ApiServiceLevelEnum.FREE;
@@ -159,16 +170,23 @@ export function SettingsPage() {
             <motion.div {...FADE_ANIMATION}>
               <Card className="border-none shadow-none">
                 <div className="pb-6 pt-4 flex flex-col">
-                  <UserProfile appearance={clerkAppearance}>
-                    <UserProfile.Page label="account" />
-                    <UserProfile.Page label="security" />
-                  </UserProfile>
+                  {useSelfHostedAuth ? (
+                    // ReNovu: Self-hosted UserProfile already includes both Profile and Security sections
+                    <UserProfile />
+                  ) : (
+                    <>
+                      <UserProfile appearance={clerkAppearance}>
+                        <UserProfile.Page label="account" />
+                        <UserProfile.Page label="security" />
+                      </UserProfile>
 
-                  <h1 className="text-foreground mb-6 mt-10 text-xl font-semibold">Security</h1>
-                  <UserProfile appearance={clerkAppearance}>
-                    <UserProfile.Page label="security" />
-                    <UserProfile.Page label="account" />
-                  </UserProfile>
+                      <h1 className="text-foreground mb-6 mt-10 text-xl font-semibold">Security</h1>
+                      <UserProfile appearance={clerkAppearance}>
+                        <UserProfile.Page label="security" />
+                        <UserProfile.Page label="account" />
+                      </UserProfile>
+                    </>
+                  )}
                 </div>
               </Card>
             </motion.div>
@@ -210,7 +228,9 @@ export function SettingsPage() {
                       variant="tip"
                     />
                   )}
-                  {EE_AUTH_PROVIDER === 'clerk' ? (
+                  {useSelfHostedAuth ? (
+                    <SelfHostedOrganizationProfile />
+                  ) : EE_AUTH_PROVIDER === 'clerk' ? (
                     <OrganizationProfile appearance={clerkAppearance}>
                       <OrganizationProfile.Page label="members" />
                     </OrganizationProfile>
