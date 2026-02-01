@@ -1,41 +1,46 @@
 import { PermissionsEnum } from '@novu/shared';
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useState } from 'react';
-import { RiCheckLine, RiCloseLine, RiFileDownloadLine, RiUploadLine } from 'react-icons/ri';
+import { RiCheckLine, RiCloseLine, RiFileDownloadLine, RiSparklingLine, RiUploadLine } from 'react-icons/ri';
 import { FlagCircle } from '@/components/flag-circle';
 import { Button } from '@/components/primitives/button';
 import { CopyButton } from '@/components/primitives/copy-button';
 import { PermissionButton } from '@/components/primitives/permission-button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/primitives/tooltip';
 import { TranslationWithPlaceholder } from '@/hooks/use-fetch-translation';
+import { useTriggerAutoTranslate } from '@/hooks/use-trigger-auto-translate';
 import { TranslationImportTrigger } from '../translation-import-trigger';
 import { getLocaleDisplayName } from '../utils';
 import { useTranslationFileOperations } from './hooks';
 
-function UploadButton({
-  isUploading,
-  uploadSuccess,
-  uploadError,
+function ActionButton({
+  isLoading,
+  isSuccess,
+  isError,
   disabled,
   onClick,
+  icon: Icon,
   children,
+  minWidth = 'min-w-[120px]',
 }: {
-  isUploading?: boolean;
-  uploadSuccess?: boolean;
-  uploadError?: boolean;
+  isLoading?: boolean;
+  isSuccess?: boolean;
+  isError?: boolean;
   disabled?: boolean;
   onClick?: () => void;
+  icon: React.ComponentType<{ className?: string }>;
   children: React.ReactNode;
+  minWidth?: string;
 }) {
   const [showResult, setShowResult] = useState(false);
 
   useEffect(() => {
-    if (uploadSuccess || uploadError) {
+    if (isSuccess || isError) {
       setShowResult(true);
       const timer = setTimeout(() => setShowResult(false), 1500);
       return () => clearTimeout(timer);
     }
-  }, [uploadSuccess, uploadError]);
+  }, [isSuccess, isError]);
 
   return (
     <PermissionButton
@@ -43,10 +48,10 @@ function UploadButton({
       variant="secondary"
       mode="outline"
       size="xs"
-      leadingIcon={showResult ? undefined : RiFileDownloadLine}
-      disabled={disabled || isUploading}
+      leadingIcon={showResult ? undefined : Icon}
+      disabled={disabled || isLoading}
       onClick={onClick}
-      className="relative min-w-[120px]" // Fixed width to prevent resizing
+      className={`relative ${minWidth}`}
     >
       <div className="relative">
         {/* Default content - normal layout */}
@@ -76,7 +81,7 @@ function UploadButton({
               }}
               className="absolute inset-0 flex items-center justify-center"
             >
-              {uploadSuccess ? (
+              {isSuccess ? (
                 <div className="flex items-center gap-1">
                   <RiCheckLine className="size-4 text-green-600" />
                   <span className="text-xs text-green-600">Success!</span>
@@ -95,14 +100,50 @@ function UploadButton({
   );
 }
 
+function UploadButton({
+  isUploading,
+  uploadSuccess,
+  uploadError,
+  disabled,
+  onClick,
+  children,
+}: {
+  isUploading?: boolean;
+  uploadSuccess?: boolean;
+  uploadError?: boolean;
+  disabled?: boolean;
+  onClick?: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <ActionButton
+      isLoading={isUploading}
+      isSuccess={uploadSuccess}
+      isError={uploadError}
+      disabled={disabled}
+      onClick={onClick}
+      icon={RiFileDownloadLine}
+    >
+      {children}
+    </ActionButton>
+  );
+}
+
 type EditorActionsProps = {
   selectedTranslation: TranslationWithPlaceholder;
   modifiedContent?: Record<string, unknown> | null;
   isReadOnly?: boolean;
+  defaultLocale?: string;
 };
 
-export function EditorActions({ selectedTranslation, modifiedContent, isReadOnly = false }: EditorActionsProps) {
+export function EditorActions({
+  selectedTranslation,
+  modifiedContent,
+  isReadOnly = false,
+  defaultLocale,
+}: EditorActionsProps) {
   const { handleDownload } = useTranslationFileOperations();
+  const translateMutation = useTriggerAutoTranslate();
 
   const selectedLocale = selectedTranslation.locale;
   const displayName = getLocaleDisplayName(selectedLocale);
@@ -117,6 +158,17 @@ export function EditorActions({ selectedTranslation, modifiedContent, isReadOnly
     resourceType: selectedTranslation.resourceType,
   };
 
+  // Check if this is a translatable locale (not the default/source locale)
+  const isTranslatableLocale = defaultLocale ? selectedLocale !== defaultLocale : true;
+
+  const handleTranslate = () => {
+    translateMutation.mutate({
+      resourceId: selectedTranslation.resourceId,
+      resourceType: selectedTranslation.resourceType,
+      targetLocales: [selectedLocale],
+    });
+  };
+
   return (
     <>
       <div className="flex flex-col items-start gap-6 self-stretch px-3 pb-3 pt-3">
@@ -129,9 +181,31 @@ export function EditorActions({ selectedTranslation, modifiedContent, isReadOnly
             </div>
           </div>
 
-          <TranslationImportTrigger resource={resource}>
-            <UploadButton disabled={isReadOnly}>Import translation(s)</UploadButton>
-          </TranslationImportTrigger>
+          <div className="flex items-center gap-2">
+            {isTranslatableLocale && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span>
+                    <ActionButton
+                      isLoading={translateMutation.isPending}
+                      isSuccess={translateMutation.isSuccess}
+                      isError={translateMutation.isError}
+                      disabled={isReadOnly}
+                      onClick={handleTranslate}
+                      icon={RiSparklingLine}
+                      minWidth="min-w-[90px]"
+                    >
+                      Translate
+                    </ActionButton>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>Auto-translate this locale using AI</TooltipContent>
+              </Tooltip>
+            )}
+            <TranslationImportTrigger resource={resource}>
+              <UploadButton disabled={isReadOnly}>Import translation(s)</UploadButton>
+            </TranslationImportTrigger>
+          </div>
         </div>
 
         <div className="flex w-full items-center justify-between">

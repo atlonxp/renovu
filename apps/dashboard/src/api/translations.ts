@@ -195,3 +195,45 @@ export const uploadMasterJson = async ({
 
   return response.data;
 };
+
+// Auto-translate types
+export type TriggerAutoTranslateRequest = {
+  resourceId: string;
+  resourceType: ResourceType;
+  targetLocales?: string[];
+};
+
+export type LocaleTranslateResult = {
+  locale: string;
+  success: boolean;
+  error?: string;
+  warnings?: string[];
+};
+
+export type TriggerAutoTranslateResponse = {
+  success: boolean;
+  sourceLocale: string;
+  results: LocaleTranslateResult[];
+  metadata: {
+    totalLocales: number;
+    successfulLocales: number;
+    failedLocales: number;
+    totalLatencyMs: number;
+  };
+};
+
+export const triggerAutoTranslate = async ({
+  environment,
+  resourceId,
+  resourceType,
+  targetLocales,
+}: TriggerAutoTranslateRequest & { environment: IEnvironment }): Promise<TriggerAutoTranslateResponse> => {
+  const endpoint = `/translations/auto-translate/${resourceType}/${resourceId}`;
+  const body = targetLocales ? { targetLocales } : {};
+  const response = await postV2<TriggerAutoTranslateResponse>(endpoint, {
+    body,
+    environment,
+  });
+
+  return response;
+};

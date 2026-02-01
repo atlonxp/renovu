@@ -46,7 +46,11 @@ import {
   PreferencesTypeEnum,
   ResourceOriginEnum,
 } from '@novu/shared';
-import { ManageTranslations } from '@novu/translation';
+import {
+  AutoTranslate,
+  LocalizationResourceEnum as TranslationResourceEnum,
+  ManageTranslations,
+} from '@novu/translation';
 import { computeWorkflowStatus } from '../../../workflows-v2/shared/compute-workflow-status';
 import { WorkflowWithPreferencesResponseDto } from '../../dtos/get-workflow-with-preferences.dto';
 import { GetWorkflowWithPreferencesCommand } from '../get-workflow-with-preferences/get-workflow-with-preferences.command';
@@ -75,7 +79,8 @@ export class UpdateWorkflow {
     private getWorkflowWithPreferencesUseCase: GetWorkflowWithPreferencesUseCase,
     private controlValuesRepository: ControlValuesRepository,
     private resourceValidatorService: ResourceValidatorService,
-    private manageTranslations: ManageTranslations
+    private manageTranslations: ManageTranslations,
+    private autoTranslate: AutoTranslate
   ) {}
 
   @InstrumentUsecase()
@@ -181,7 +186,14 @@ export class UpdateWorkflow {
       updatePayload._updatedBy = command.updatedBy;
 
       if (command.isTranslationEnabled !== undefined) {
-        await this.toggleV2TranslationsForWorkflow(existingTemplate.triggers[0].identifier, command);
+        updatePayload.isTranslationEnabled = command.isTranslationEnabled;
+        await this.toggleV2TranslationsForWorkflow(
+          existingTemplate.triggers[0].identifier,
+          existingTemplate._id,
+          existingTemplate.name,
+          command,
+          existingTemplate
+        );
       }
 
       // defaultPreferences is required, so we always call the upsert
@@ -367,21 +379,70 @@ export class UpdateWorkflow {
     }
   }
 
-  private async toggleV2TranslationsForWorkflow(workflowIdentifier: string, command: UpdateWorkflowCommand) {
+  private async toggleV2TranslationsForWorkflow(
+    workflowIdentifier: string,
+    workflowInternalId: string,
+    workflowName: string,
+    command: UpdateWorkflowCommand,
+    workflowEntity?: NotificationTemplateEntity
+  ) {
     try {
-      await this.manageTranslations.execute({
+      const result = await this.manageTranslations.execute({
         enabled: command.isTranslationEnabled ?? false,
         resourceId: workflowIdentifier,
+        resourceInternalId: workflowInternalId,
+        resourceName: workflowName,
         resourceType: LocalizationResourceEnum.WORKFLOW,
         organizationId: command.organizationId,
         environmentId: command.environmentId,
         userId: command.userId,
+        session: command.session,
+        // Pass workflow entity for content extraction when enabling translations
+        resourceEntity: command.isTranslationEnabled && workflowEntity
+          ? (workflowEntity as unknown as Record<string, unknown>)
+          : undefined,
       });
+
+      // Trigger auto-translation when translations are first enabled or re-enabled with missing locales
+      if (result.shouldAutoTranslate && result.extractedContent && Object.keys(result.extractedContent).length > 0) {
+        this.logger.info(
+          `Triggering auto-translation for workflow ${workflowIdentifier}`,
+          {
+            workflowIdentifier,
+            workflowInternalId,
+            contentKeys: Object.keys(result.extractedContent).length,
+            organizationId: command.organizationId,
+          }
+        );
+
+        const translateResult = await this.autoTranslate.execute({
+          resourceId: workflowIdentifier,
+          resourceInternalId: workflowInternalId,
+          resourceType: TranslationResourceEnum.WORKFLOW,
+          organizationId: command.organizationId,
+          environmentId: command.environmentId,
+          userId: command.userId,
+          sourceContent: result.extractedContent,
+          session: command.session,
+        });
+
+        this.logger.info(
+          `Auto-translation completed for workflow ${workflowIdentifier}`,
+          {
+            workflowIdentifier,
+            success: translateResult.success,
+            successfulLocales: translateResult.metadata.successfulLocales,
+            failedLocales: translateResult.metadata.failedLocales,
+            totalLatencyMs: translateResult.metadata.totalLatencyMs,
+          }
+        );
+      }
     } catch (error) {
       this.logger.error(
         `Failed to ${command.isTranslationEnabled ? 'enable' : 'disable'} V2 translations for workflow`,
         {
           workflowIdentifier,
+          workflowInternalId,
           enabled: command.isTranslationEnabled,
           organizationId: command.organizationId,
           error: error instanceof Error ? error.message : String(error),
