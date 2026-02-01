@@ -6,7 +6,12 @@ import {
 	type Provider,
 } from "@nestjs/common";
 import { WorkflowInMemoryProviderService } from "@novu/application-generic";
-import { LocalizationGroupRepository, LocalizationRepository } from "@novu/dal";
+import {
+	ControlValuesRepository,
+	DalService,
+	LocalizationGroupRepository,
+	LocalizationRepository,
+} from "@novu/dal";
 
 // TODO: Import from @novu/application-generic when TranslationQueueService is implemented
 // import { TranslationQueueService } from "@novu/application-generic";
@@ -24,6 +29,8 @@ import {
 } from "./controllers";
 import { TranslationSettingsRepository } from "./dal";
 import {
+	ContentExtractorService,
+	LocaleNormalizerService,
 	OpenAITranslationService,
 	TranslationValidatorService,
 	VariableTokenizerService,
@@ -146,7 +153,10 @@ export class TranslationModule {
 				// Repositories
 				{
 					provide: TranslationSettingsRepository,
-					useFactory: () => new TranslationSettingsRepository(),
+					// Depend on DalService to ensure MongoDB connection is ready (if available)
+					useFactory: (_dalService: DalService | null) =>
+						new TranslationSettingsRepository(),
+					inject: [{ token: DalService, optional: true }],
 				},
 				{
 					provide: LocalizationGroupRepository,
@@ -156,7 +166,13 @@ export class TranslationModule {
 					provide: LocalizationRepository,
 					useFactory: () => new LocalizationRepository(),
 				},
+				{
+					provide: ControlValuesRepository,
+					useFactory: () => new ControlValuesRepository(),
+				},
 				// Services
+				ContentExtractorService,
+				LocaleNormalizerService,
 				VariableTokenizerService,
 				TranslationValidatorService,
 				OpenAITranslationService,
@@ -175,7 +191,10 @@ export class TranslationModule {
 				TranslationSettingsRepository,
 				LocalizationGroupRepository,
 				LocalizationRepository,
+				ControlValuesRepository,
 				// Services
+				ContentExtractorService,
+				LocaleNormalizerService,
 				VariableTokenizerService,
 				TranslationValidatorService,
 				OpenAITranslationService,

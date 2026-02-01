@@ -24,6 +24,8 @@ export type TranslationSettingsDto = {
   openaiModel: OpenAIModelEnum;
   defaultLocale: string;
   targetLocales: string[];
+  /** Custom locale aliases for mapping external locale codes (e.g., { "zh-hans": "zh_CN" }) */
+  localeAliases?: Record<string, string>;
   createdAt: string;
   updatedAt: string;
 };
@@ -38,6 +40,8 @@ export type UpdateTranslationSettingsDto = {
   openaiModel?: OpenAIModelEnum;
   defaultLocale?: string;
   targetLocales?: string[];
+  /** Custom locale aliases for mapping external locale codes (e.g., { "zh-hans": "zh_CN" }) */
+  localeAliases?: Record<string, string>;
 };
 
 /**
@@ -63,7 +67,9 @@ export async function getTranslationSettings({
 }: {
   environment: IEnvironment;
 }): Promise<TranslationSettingsDto | null> {
-  return get<TranslationSettingsDto | null>('/translation-settings', { environment });
+  const response = await get<{ data: TranslationSettingsDto | null }>('/translation-settings', { environment });
+
+  return response.data;
 }
 
 /**
@@ -85,10 +91,12 @@ export async function updateTranslationSettings({
   data: UpdateTranslationSettingsDto;
   environment: IEnvironment;
 }): Promise<TranslationSettingsDto> {
-  return put<TranslationSettingsDto>('/translation-settings', {
+  const response = await put<{ data: TranslationSettingsDto }>('/translation-settings', {
     body: data,
     environment,
   });
+
+  return response.data;
 }
 
 /**
@@ -108,9 +116,11 @@ export async function testTranslationConnection({
 }: {
   environment: IEnvironment;
 }): Promise<ConnectionTestResponseDto> {
-  return post<ConnectionTestResponseDto>('/translation-settings/test', {
+  const response = await post<{ data: ConnectionTestResponseDto }>('/translation-settings/test', {
     environment,
   });
+
+  return response.data;
 }
 
 /**

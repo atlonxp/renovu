@@ -59,6 +59,13 @@ export class TranslationSettingsEntity {
 	targetLocales: string[];
 
 	/**
+	 * Custom locale aliases for mapping external locale codes to internal ones
+	 * Allows integration with systems that use different locale formats
+	 * Example: { "zh-hans": "zh_CN", "zh-hant": "zh_TW", "chinese": "zh_CN" }
+	 */
+	localeAliases?: Record<string, string>;
+
+	/**
 	 * Timestamp when settings were created
 	 */
 	createdAt: string;

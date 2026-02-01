@@ -73,7 +73,7 @@ export class TranslationSettingsController {
   })
   async saveSettings(
     @UserSession() user: UserSessionData,
-    @Body() dto: { openaiApiKey?: string; openaiModel?: OpenAIModelEnum; defaultLocale?: string; targetLocales?: string[] }
+    @Body() dto: { openaiApiKey?: string; openaiModel?: OpenAIModelEnum; defaultLocale?: string; targetLocales?: string[]; localeAliases?: Record<string, string> }
   ) {
     this.logger.log(`Updating translation settings for org: ${user.organizationId}`);
 
@@ -90,6 +90,7 @@ export class TranslationSettingsController {
       openaiModel: dto.openaiModel,
       defaultLocale: dto.defaultLocale,
       targetLocales: dto.targetLocales,
+      localeAliases: dto.localeAliases,
     });
 
     this.logger.log(`Translation settings updated for org: ${user.organizationId}`);
@@ -331,6 +332,7 @@ export class TranslationSettingsController {
     openaiModel: string;
     defaultLocale: string;
     targetLocales: string[];
+    localeAliases?: Record<string, string>;
     createdAt: string;
     updatedAt: string;
   }) {
@@ -353,6 +355,7 @@ export class TranslationSettingsController {
       openaiModel,
       defaultLocale: settings.defaultLocale,
       targetLocales: settings.targetLocales,
+      localeAliases: settings.localeAliases || {},
       createdAt: settings.createdAt,
       updatedAt: settings.updatedAt,
     };

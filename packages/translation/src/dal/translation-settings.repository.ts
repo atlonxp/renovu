@@ -17,6 +17,7 @@ export interface UpsertTranslationSettingsInput {
 	openaiModel?: OpenAIModelEnum;
 	defaultLocale?: string;
 	targetLocales?: string[];
+	localeAliases?: Record<string, string>;
 }
 
 /**
@@ -129,6 +130,10 @@ export class TranslationSettingsRepository {
 
 		if (settings.targetLocales !== undefined) {
 			updateData.targetLocales = settings.targetLocales;
+		}
+
+		if (settings.localeAliases !== undefined) {
+			updateData.localeAliases = settings.localeAliases;
 		}
 
 		const result = await this.model.findOneAndUpdate(

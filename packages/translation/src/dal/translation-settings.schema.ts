@@ -1,4 +1,6 @@
-import mongoose, { Schema } from "mongoose";
+import { mongoose } from "@novu/dal";
+
+const { Schema } = mongoose;
 
 import {
 	OpenAIModelEnum,
@@ -51,6 +53,10 @@ const translationSettingsSchema = new Schema<TranslationSettingsDBModel>(
 			type: [Schema.Types.String],
 			default: [],
 			required: true,
+		},
+		localeAliases: {
+			type: Schema.Types.Mixed,
+			default: {},
 		},
 	},
 	schemaOptions,
