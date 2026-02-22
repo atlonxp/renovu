@@ -151,7 +151,7 @@ export function useTranslatedPreview({
     const secondaryActionLabelKey = `step.${stepId}.secondaryAction.label`;
 
     // Get original preview
-    const originalPreview = previewData.result.preview as Record<string, unknown>;
+    const originalPreview = previewData.result.preview as unknown as Record<string, unknown>;
 
     // Apply translations if available
     const translatedPreview = { ...originalPreview };
@@ -201,7 +201,7 @@ export function useTranslatedPreview({
         ...previewData.result,
         preview: translatedPreview,
       },
-    };
+    } as unknown as GeneratePreviewResponseDto;
   }, [previewData, shouldFetchTranslation, translation, stepId]);
 
   return {

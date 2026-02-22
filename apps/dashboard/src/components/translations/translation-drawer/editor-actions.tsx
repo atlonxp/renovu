@@ -1,6 +1,7 @@
 import { PermissionsEnum } from '@novu/shared';
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useState } from 'react';
+import { IconType } from 'react-icons';
 import { RiCheckLine, RiCloseLine, RiFileDownloadLine, RiSparklingLine, RiUploadLine } from 'react-icons/ri';
 import { FlagCircle } from '@/components/flag-circle';
 import { Button } from '@/components/primitives/button';
@@ -28,7 +29,7 @@ function ActionButton({
   isError?: boolean;
   disabled?: boolean;
   onClick?: () => void;
-  icon: React.ComponentType<{ className?: string }>;
+  icon: IconType;
   children: React.ReactNode;
   minWidth?: string;
 }) {

@@ -263,7 +263,8 @@ export function LocaleAliasesDialog({
                             {!isReadOnly && (
                               <Button
                                 type="button"
-                                variant="ghost"
+                                variant="secondary"
+                                mode="ghost"
                                 size="xs"
                                 onClick={() => handleRemoveAlias(entry.id)}
                                 className="h-8 w-8 p-0 text-neutral-400 hover:text-red-500"

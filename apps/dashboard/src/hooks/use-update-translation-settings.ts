@@ -21,7 +21,7 @@ export function useUpdateTranslationSettings() {
   const { currentEnvironment } = useEnvironment();
   const queryClient = useQueryClient();
 
-  return useMutation<TranslationSettingsDto, Error, UpdateTranslationSettingsDto>({
+  return useMutation<TranslationSettingsDto, Error, UpdateTranslationSettingsDto, { previousData: TranslationSettingsDto | null | undefined }>({
     mutationFn: async (data) => {
       if (!currentEnvironment) {
         throw new Error('Environment not available. Please try again.');

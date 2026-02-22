@@ -19,7 +19,7 @@ export function useDeleteTranslationSettings() {
   const { currentEnvironment } = useEnvironment();
   const queryClient = useQueryClient();
 
-  return useMutation<void, Error, void>({
+  return useMutation<void, Error, void, { previousData: TranslationSettingsDto | null | undefined }>({
     mutationFn: async () => {
       if (!currentEnvironment) {
         throw new Error('Environment not available. Please try again.');
