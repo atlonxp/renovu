@@ -1,6 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
-import { RiCalendarEventLine, RiExternalLinkLine, RiLogoutBoxRLine, RiSignpostFill } from 'react-icons/ri';
+import { RiExternalLinkLine, RiLogoutBoxRLine, RiSettings4Line, RiSignpostFill } from 'react-icons/ri';
 import { useNavigate } from 'react-router-dom';
 import { Avatar, AvatarImage } from '@/components/primitives/avatar';
 import { Button } from '@/components/primitives/button';
@@ -65,21 +65,20 @@ export function UserButton() {
           <DropdownMenuSeparator />
           <DropdownMenuItem
             className="flex cursor-pointer items-center gap-2 text-gray-700 hover:bg-gray-50"
+            onClick={() => navigate('/settings')}
+          >
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <RiSettings4Line className="h-3.5 w-3.5 shrink-0 text-gray-500" />
+              <span>Settings</span>
+            </div>
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            className="flex cursor-pointer items-center gap-2 text-gray-700 hover:bg-gray-50"
             onClick={() => openInNewTab(SELF_HOSTED_UPGRADE_REDIRECT_URL + '?utm_campaign=user_button_learn_more')}
           >
             <div className="flex min-w-0 flex-1 items-center gap-2">
               <RiSignpostFill className="h-3.5 w-3.5 shrink-0 text-gray-500" />
               <span>Learn more about Novu Cloud</span>
-              <RiExternalLinkLine className="m-1 ml-auto h-3 w-3 shrink-0 text-gray-500" />
-            </div>
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            className="flex cursor-pointer items-center gap-2 text-gray-700 hover:bg-gray-50"
-            onClick={() => openInNewTab(SELF_HOSTED_UPGRADE_REDIRECT_URL + '?utm_campaign=user_button_contact_sales')}
-          >
-            <div className="flex min-w-0 flex-1 items-center gap-2">
-              <RiCalendarEventLine className="h-3.5 w-3.5 shrink-0 text-gray-500" />
-              <span>Contact Sales</span>
               <RiExternalLinkLine className="m-1 ml-auto h-3 w-3 shrink-0 text-gray-500" />
             </div>
           </DropdownMenuItem>

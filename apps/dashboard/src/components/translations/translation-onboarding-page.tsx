@@ -1,5 +1,5 @@
 import { DEFAULT_LOCALE, PermissionsEnum } from '@novu/shared';
-import { useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { RiBookMarkedLine, RiRouteFill, RiSettings4Line } from 'react-icons/ri';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -42,6 +42,9 @@ export const TranslationOnboardingPage = () => {
     },
   });
 
+  // Debounce timer ref for target locales
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   const handleDefaultLocaleChange = (value: string) => {
     form.setValue('defaultLocale', value);
     updateOrganizationSettings.mutate({
@@ -49,12 +52,32 @@ export const TranslationOnboardingPage = () => {
     });
   };
 
-  const handleTargetLocalesChange = (value: string[]) => {
-    form.setValue('targetLocales', value);
-    updateOrganizationSettings.mutate({
-      targetLocales: value,
-    });
-  };
+  const handleTargetLocalesChange = useCallback(
+    (value: string[]) => {
+      form.setValue('targetLocales', value);
+
+      // Debounce the API call to avoid multiple rapid saves
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+
+      debounceTimerRef.current = setTimeout(() => {
+        updateOrganizationSettings.mutate({
+          targetLocales: value,
+        });
+      }, 500);
+    },
+    [form, updateOrganizationSettings]
+  );
+
+  // Cleanup debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, []);
 
   // Update form when organization settings change (but not during mutations)
   useEffect(() => {

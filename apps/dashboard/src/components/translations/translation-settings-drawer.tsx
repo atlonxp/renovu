@@ -1,8 +1,9 @@
 import { DEFAULT_LOCALE, EnvironmentTypeEnum, PermissionsEnum } from '@novu/shared';
 import { forwardRef, useCallback, useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
-import { RiLoader4Line, RiSettings4Line } from 'react-icons/ri';
+import { RiExternalLinkLine, RiLoader4Line, RiSettings4Line } from 'react-icons/ri';
 import { OpenAIModelEnum } from '@/api/translation-settings';
+import { LocaleAliasesDialog } from './locale-aliases-dialog';
 import { Button } from '@/components/primitives/button';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormRoot } from '@/components/primitives/form/form';
 import { InlineToast } from '@/components/primitives/inline-toast';
@@ -13,6 +14,7 @@ import { Separator } from '@/components/primitives/separator';
 import { Sheet, SheetContent, SheetTitle } from '@/components/primitives/sheet';
 import { Skeleton } from '@/components/primitives/skeleton';
 import { showSuccessToast } from '@/components/primitives/sonner-helpers';
+import { IS_SELF_HOSTED } from '@/config';
 import { useEnvironment } from '@/context/environment/hooks';
 import { useCombinedRefs } from '@/hooks/use-combined-refs';
 import { useFormProtection } from '@/hooks/use-form-protection';
@@ -34,6 +36,7 @@ interface TranslationSettingsFormData {
   openaiModel: OpenAIModelEnum;
   defaultLocale: string;
   targetLocales: string[];
+  localeAliases: Record<string, string>;
 }
 
 /** Connection test result state */
@@ -54,7 +57,8 @@ export const TranslationSettingsDrawer = forwardRef<HTMLDivElement, TranslationS
     const { currentEnvironment } = useEnvironment();
     const canWrite = has({ permission: PermissionsEnum.WORKFLOW_WRITE });
     const isDevEnvironment = currentEnvironment?.type === EnvironmentTypeEnum.DEV;
-    const isReadOnly = !canWrite || !isDevEnvironment;
+    // For self-hosted (ReNovu), allow editing in any environment since there's no strict dev/prod promotion workflow
+    const isReadOnly = !canWrite || (!IS_SELF_HOSTED && !isDevEnvironment);
 
     // Fetch translation settings (includes OpenAI config)
     const { data: translationSettings, isLoading, refetch } = useTranslationSettings();
@@ -63,6 +67,8 @@ export const TranslationSettingsDrawer = forwardRef<HTMLDivElement, TranslationS
 
     // Connection test result state
     const [connectionTestResult, setConnectionTestResult] = useState<ConnectionTestResult | null>(null);
+    // Locale aliases dialog state
+    const [isLocaleAliasesOpen, setIsLocaleAliasesOpen] = useState(false);
 
     const {
       protectedOnValueChange,
@@ -80,6 +86,7 @@ export const TranslationSettingsDrawer = forwardRef<HTMLDivElement, TranslationS
         openaiModel: OpenAIModelEnum.GPT_4O_MINI,
         defaultLocale: DEFAULT_LOCALE,
         targetLocales: [],
+        localeAliases: {},
       },
     });
 
@@ -99,6 +106,7 @@ export const TranslationSettingsDrawer = forwardRef<HTMLDivElement, TranslationS
           openaiModel: translationSettings.openaiModel || OpenAIModelEnum.GPT_4O_MINI,
           defaultLocale: translationSettings.defaultLocale || DEFAULT_LOCALE,
           targetLocales: translationSettings.targetLocales || [],
+          localeAliases: translationSettings.localeAliases || {},
         });
       }
     }, [translationSettings, reset]);
@@ -122,12 +130,13 @@ export const TranslationSettingsDrawer = forwardRef<HTMLDivElement, TranslationS
           openaiModel: formValues.openaiModel,
           defaultLocale: formValues.defaultLocale,
           targetLocales: formValues.targetLocales,
+          localeAliases: formValues.localeAliases,
         });
 
         showSuccessToast('Translation settings updated successfully');
         refetch();
         onOpenChange(false);
-      } catch (error) {
+      } catch {
         // Error handling is already handled by the mutation
       }
     }, [form, updateSettings, isReadOnly, refetch, onOpenChange]);
@@ -186,7 +195,7 @@ export const TranslationSettingsDrawer = forwardRef<HTMLDivElement, TranslationS
               </header>
 
               <div className="flex-1 overflow-auto p-3.5">
-                {!isDevEnvironment && (
+                {!IS_SELF_HOSTED && !isDevEnvironment && (
                   <div className="mb-6">
                     <InlineToast
                       variant="warning"
@@ -366,6 +375,34 @@ export const TranslationSettingsDrawer = forwardRef<HTMLDivElement, TranslationS
                                 </FormItem>
                               )}
                             />
+
+                            {/* Locale Aliases */}
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <span className="text-text-sub text-xs font-medium">Locale Aliases</span>
+                                  <p className="text-text-soft text-2xs">
+                                    Map external locale codes to your target locales (e.g., zh-hans → zh_CN)
+                                  </p>
+                                </div>
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  mode="outline"
+                                  size="xs"
+                                  onClick={() => setIsLocaleAliasesOpen(true)}
+                                >
+                                  <RiExternalLinkLine className="mr-1.5 size-3" />
+                                  Configure
+                                </Button>
+                              </div>
+                              {Object.keys(form.watch('localeAliases') || {}).length > 0 && (
+                                <div className="text-text-soft text-2xs">
+                                  {Object.keys(form.watch('localeAliases') || {}).length} custom alias
+                                  {Object.keys(form.watch('localeAliases') || {}).length === 1 ? '' : 'es'} configured
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </FormRoot>
                       </Form>
@@ -393,6 +430,14 @@ export const TranslationSettingsDrawer = forwardRef<HTMLDivElement, TranslationS
         </Sheet>
 
         {ProtectionAlert}
+
+        <LocaleAliasesDialog
+          isOpen={isLocaleAliasesOpen}
+          onOpenChange={setIsLocaleAliasesOpen}
+          value={form.watch('localeAliases') || {}}
+          onChange={(aliases) => form.setValue('localeAliases', aliases)}
+          isReadOnly={isReadOnly}
+        />
       </>
     );
   }

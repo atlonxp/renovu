@@ -8,6 +8,7 @@ import { Client, NovuModule } from '@novu/framework/nest';
 import { usageLimitsWorkflow } from '@novu/notifications';
 import { isClerkEnabled } from '@novu/shared';
 import { TranslationModule } from '@novu/translation';
+import { ApiTranslationModule } from './app/translation/translation.module';
 import { SentryModule } from '@sentry/nestjs/setup';
 import packageJson from '../package.json';
 import { ActivityModule } from './app/activity/activity.module';
@@ -133,7 +134,8 @@ const baseModules: Array<Type | DynamicModule | Promise<DynamicModule> | Forward
   NovuModule,
   ChannelConnectionsModule,
   ChannelEndpointsModule,
-  TranslationModule.forRoot({ includeControllers: true }),
+  TranslationModule.forRoot({ includeControllers: false }),
+  ApiTranslationModule,
 ];
 
 const enterpriseModules = enterpriseImports();

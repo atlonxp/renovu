@@ -17,6 +17,10 @@ const localizationGroupSchema = new Schema<LocalizationGroupDBModel>(
       type: Schema.Types.String,
       required: true,
     },
+    enabled: {
+      type: Schema.Types.Boolean,
+      default: true,
+    },
     _resourceInternalId: {
       type: Schema.Types.ObjectId,
       required: true,

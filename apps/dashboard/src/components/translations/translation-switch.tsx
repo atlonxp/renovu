@@ -2,6 +2,7 @@ import { Switch } from '@/components/primitives/switch';
 import { UpgradeCTATooltip } from '@/components/upgrade-cta-tooltip';
 import { IS_ENTERPRISE, IS_SELF_HOSTED } from '@/config';
 import { useFetchSubscription } from '@/hooks/use-fetch-subscription';
+import { useTranslationSettings } from '@/hooks/use-translation-settings';
 import { ApiServiceLevelEnum, FeatureNameEnum, getFeatureForTierAsBoolean, PermissionsEnum } from '@novu/shared';
 import { PermissionSwitch } from '../primitives/permission-switch';
 
@@ -14,13 +15,22 @@ type TranslationSwitchProps = {
 
 export function TranslationSwitch({ id, value, onChange, isReadOnly }: TranslationSwitchProps) {
   const { subscription, isLoading } = useFetchSubscription();
+  const { data: translationSettings } = useTranslationSettings();
 
-  const canUseTranslationFeature =
+  // For self-hosted (ReNovu): check if OpenAI API key is configured
+  const hasOpenAIKeyConfigured = translationSettings?.hasApiKey ?? false;
+
+  // For cloud (Novu): check tier/subscription features
+  const hasCloudFeatureAccess =
     getFeatureForTierAsBoolean(
       FeatureNameEnum.AUTO_TRANSLATIONS,
       subscription?.apiServiceLevel || ApiServiceLevelEnum.FREE
     ) &&
     (!IS_SELF_HOSTED || IS_ENTERPRISE);
+
+  // Self-hosted can use translations if OpenAI key is configured
+  // Cloud can use translations if they have the feature access
+  const canUseTranslationFeature = IS_SELF_HOSTED ? hasOpenAIKeyConfigured : hasCloudFeatureAccess;
 
   const disabled = !canUseTranslationFeature || isLoading || isReadOnly;
   const checked = disabled ? false : value;

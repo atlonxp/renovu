@@ -14,6 +14,13 @@ export class LocalizationGroupEntity {
   resourceId: string;
   resourceName: string;
 
+  /**
+   * Whether translations are enabled for this resource.
+   * When false, this group should be filtered out from the translations list.
+   * Optional because legacy records may not have this field (defaults to true in schema).
+   */
+  enabled?: boolean;
+
   _resourceInternalId: string;
   _environmentId: EnvironmentId;
   _organizationId: OrganizationId;

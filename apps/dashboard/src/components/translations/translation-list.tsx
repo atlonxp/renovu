@@ -213,7 +213,10 @@ export function TranslationList(props: TranslationListProps) {
   const handleTranslationClick = (translation: TranslationGroupDto) => {
     if (currentEnvironment?.slug) {
       const orgDefaultLocale = organizationSettings?.data?.defaultLocale || DEFAULT_LOCALE;
-      const selectedLocale = translation.locales.includes(orgDefaultLocale) ? orgDefaultLocale : translation.locales[0];
+      // Use org default locale if the translation has it, otherwise first available locale, or fallback to org default
+      const selectedLocale = translation.locales.includes(orgDefaultLocale)
+        ? orgDefaultLocale
+        : translation.locales[0] || orgDefaultLocale;
 
       navigate(
         buildRoute(ROUTES.TRANSLATIONS_EDIT, {
@@ -230,6 +233,15 @@ export function TranslationList(props: TranslationListProps) {
     useDeleteTranslationModal();
 
   const limit = data?.limit || DEFAULT_TRANSLATIONS_LIMIT;
+
+  // Check if translation settings are already configured (has target locales set)
+  const hasTargetLocalesConfigured =
+    organizationSettings?.data?.targetLocales && organizationSettings.data.targetLocales.length > 0;
+
+  // Settings are considered configured if:
+  // - For self-hosted: has OpenAI API key
+  // - For any: has target locales set up
+  const isSettingsConfigured = hasOpenAIKeyConfigured || hasTargetLocalesConfigured;
 
   if (!canUseTranslationFeature) {
     return <TranslationListUpgradeCta />;
@@ -251,7 +263,11 @@ export function TranslationList(props: TranslationListProps) {
     );
   }
 
-  if (!areFiltersApplied && !data?.data.length) {
+  // Show onboarding only if:
+  // - No filters are applied AND
+  // - No translations exist AND
+  // - Settings are NOT configured (no API key and no target locales)
+  if (!areFiltersApplied && !data?.data.length && !isSettingsConfigured) {
     return <TranslationOnboardingPage />;
   }
 

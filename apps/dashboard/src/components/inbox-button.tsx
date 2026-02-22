@@ -89,7 +89,7 @@ export const InboxButton = () => {
   const { user } = useUser();
   const { currentEnvironment } = useEnvironment();
   const { isWorkflowEditorPage: isTestPage } = useWorkflowEditorPage();
-  const { currentOrganization } = useAuth();
+  const { currentOrganization, currentUser } = useAuth();
 
   const appId = isTestPage ? currentEnvironment?.identifier : APP_ID;
   const localizationTestSuffix = isTestPage ? ' (Test)' : '';
@@ -97,20 +97,28 @@ export const InboxButton = () => {
   const isNovuStagingEnvironment = apiHostnameManager.getHostname() === 'https://api.novu-staging.co';
   const shouldUseProductionApi = (isNovuProductionDashboard || isNovuStagingEnvironment) && !isTestPage;
 
+  // For self-hosted, use currentUser from auth context; for cloud, use Clerk user
+  const subscriberId = IS_SELF_HOSTED
+    ? currentUser?._id ?? ''
+    : isTestPage
+      ? (user?.externalId ?? '')
+      : `org_${currentOrganization?._id}:user_${user?.externalId}`;
+
   const subscriber = useMemo(
     () => ({
-      subscriberId: isTestPage ? (user?.externalId ?? '') : `org_${currentOrganization?._id}:user_${user?.externalId}`,
-      email: user?.primaryEmailAddress?.emailAddress ?? '',
-      firstName: user?.firstName ?? '',
-      lastName: user?.lastName ?? '',
+      subscriberId,
+      email: IS_SELF_HOSTED ? (currentUser?.email ?? '') : (user?.primaryEmailAddress?.emailAddress ?? ''),
+      firstName: IS_SELF_HOSTED ? (currentUser?.firstName ?? '') : (user?.firstName ?? ''),
+      lastName: IS_SELF_HOSTED ? (currentUser?.lastName ?? '') : (user?.lastName ?? ''),
     }),
     [
-      isTestPage,
-      user?.externalId,
+      subscriberId,
+      currentUser?.email,
+      currentUser?.firstName,
+      currentUser?.lastName,
       user?.primaryEmailAddress?.emailAddress,
       user?.firstName,
       user?.lastName,
-      currentOrganization?._id,
     ]
   );
 
@@ -125,10 +133,16 @@ export const InboxButton = () => {
     [isTestPage, localizationTestSuffix]
   );
 
-  if (!user?.externalId || !currentEnvironment || !currentOrganization) {
+  // For cloud: need Clerk user and org; for self-hosted: need currentUser and org
+  const hasRequiredUserData = IS_SELF_HOSTED
+    ? currentUser?._id && currentOrganization
+    : user?.externalId && currentOrganization;
+
+  if (!hasRequiredUserData || !currentEnvironment) {
     return null;
   }
 
+  // Self-hosted only shows inbox on test pages (workflow editor)
   if (!isTestPage && IS_SELF_HOSTED) {
     return null;
   }

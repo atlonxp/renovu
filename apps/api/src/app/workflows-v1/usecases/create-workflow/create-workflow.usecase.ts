@@ -155,6 +155,8 @@ export class CreateWorkflow {
       await this.manageTranslations.execute({
         enabled: command.isTranslationEnabled ?? false,
         resourceId: workflowIdentifier,
+        resourceInternalId: workflowEntity._id,
+        resourceName: workflowEntity.name,
         resourceType: LocalizationResourceEnum.WORKFLOW,
         organizationId: command.organizationId,
         environmentId: command.environmentId,
@@ -167,6 +169,7 @@ export class CreateWorkflow {
         `Failed to ${command.isTranslationEnabled ? 'enable' : 'disable'} V2 translations for workflow`,
         {
           workflowIdentifier,
+          workflowInternalId: workflowEntity._id,
           enabled: command.isTranslationEnabled,
           organizationId: command.organizationId,
           error: error instanceof Error ? error.message : String(error),
