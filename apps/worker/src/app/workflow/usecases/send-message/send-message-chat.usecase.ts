@@ -159,6 +159,16 @@ export class SendMessageChat extends SendMessageBase {
       step.template = template;
     }
 
+    // Apply ReNovu translations if subscriber has a locale
+    await this.applyTranslationsToStep(
+      step,
+      ChannelTypeEnum.CHAT,
+      command._templateId,
+      subscriber.locale,
+      command.environmentId,
+      command.organizationId
+    );
+
     const bridgeOutput = command.bridgeData?.outputs as ChatOutput | undefined;
     let content: string = bridgeOutput?.body || '';
 

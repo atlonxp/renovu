@@ -93,6 +93,16 @@ export class SendMessageSms extends SendMessageBase {
       step.template = template;
     }
 
+    // Apply ReNovu translations if subscriber has a locale
+    await this.applyTranslationsToStep(
+      step,
+      ChannelTypeEnum.SMS,
+      command._templateId,
+      subscriber.locale,
+      command.environmentId,
+      command.organizationId
+    );
+
     const bridgeOutput = command.bridgeData?.outputs as SmsOutput | undefined;
     let content: string = bridgeOutput?.body || '';
 

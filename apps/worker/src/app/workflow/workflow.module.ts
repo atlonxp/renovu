@@ -38,6 +38,8 @@ import {
   CommunityUserRepository,
   ContextRepository,
   JobRepository,
+  LocalizationGroupRepository,
+  LocalizationRepository,
   PreferencesRepository,
 } from '@novu/dal';
 import { JobTopicNameEnum } from '@novu/shared';
@@ -104,6 +106,8 @@ const REPOSITORIES = [
   ChannelEndpointRepository,
   ChannelConnectionRepository,
   ContextRepository,
+  LocalizationGroupRepository,
+  LocalizationRepository,
 ];
 
 const webhookProvider: Provider = {

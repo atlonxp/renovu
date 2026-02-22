@@ -197,9 +197,12 @@ export class OpenAITranslationService {
 				throw new InvalidResponseError("Empty response from OpenAI");
 			}
 
-			// 4. Detokenize the translated content
+			// 4. Strip markdown code blocks if present (LLM sometimes wraps output)
+			const cleanedTranslation = this.stripCodeBlocks(rawTranslation.trim());
+
+			// 5. Detokenize the translated content
 			const translated = this.tokenizer.detokenize(
-				rawTranslation.trim(),
+				cleanedTranslation,
 				variableMap,
 			);
 
@@ -609,5 +612,20 @@ Translated content:`;
 	 */
 	getSupportedLocales(): Record<string, string> {
 		return { ...LOCALE_NAMES };
+	}
+
+	/**
+	 * Strip markdown code blocks from LLM output.
+	 * GPT models sometimes wrap translations in ```html ... ``` or ``` ... ```.
+	 */
+	private stripCodeBlocks(text: string): string {
+		// Match ```lang\n...\n``` or ```\n...\n```
+		const codeBlockRegex = /^```(?:\w+)?\s*\n?([\s\S]*?)\n?\s*```$/;
+		const match = text.match(codeBlockRegex);
+		if (match) {
+			return match[1].trim();
+		}
+
+		return text;
 	}
 }
