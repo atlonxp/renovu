@@ -1,207 +1,456 @@
-<div align="center">
-  <a href="https://go.novu.co/github" target="_blank" rel="noopener noreferrer"
->
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://user-images.githubusercontent.com/2233092/213641039-220ac15f-f367-4d13-9eaf-56e79433b8c1.png">
-    <img alt="Novu Logo" src="https://user-images.githubusercontent.com/2233092/213641043-3bbb3f21-3c53-4e67-afe5-755aeb222159.png" width="280"/>
-  </picture>
-  </a>
-</div>
+[//]: # (<p align="center">)
+[//]: # (  <img src="https://raw.githubusercontent.com/novuhq/novu/next/apps/dashboard/public/images/novu-logo-light-bg.svg" width="200" alt="ReNovu Logo">)
+[//]: # (</p>)
 
-<br/>
-<p align="center">
-  <a href="https://www.producthunt.com/products/novu" target="_blank" rel="noopener noreferrer"
->
-    <img src="https://img.shields.io/badge/Product%20Hunt-Golden%20Kitty%20Award%202023-yellow" alt="Product Hunt">
-  </a>
-  <a href="https://news.ycombinator.com/item?id=38419513" target="_blank" rel="noopener noreferrer"
-><img src="https://img.shields.io/badge/Hacker%20News-%231-%23FF6600" alt="Hacker News"></a>
-  <a href="https://www.npmjs.com/package/@novu/react" target="_blank" rel="noopener noreferrer"
->
-    <img src="https://img.shields.io/npm/v/@novu/react" alt="NPM">
-  </a>
-  <a href="https://www.npmjs.com/package/@novu/react" target="_blank" rel="noopener noreferrer"
->
-    <img src="https://img.shields.io/npm/dm/@novu/react" alt="npm downloads">
-  </a>
-</p>
-
-<h1 align="center">
- The &lt;Inbox /&gt; infrastructure for modern products
-</h1>
-
-<div align="center">
-  The notification platform that turns complex multi-channel delivery into a single component. Built for developers, designed for growth, powered by open source.
-</div>
+<h1 align="center">ReNovu</h1>
 
 <p align="center">
-  <br />
-  <a href="https://go.novu.co/github" rel="dofollow"><strong>Learn More »</strong></a>
-  <br />
-
-<br/>
-  <a href="https://github.com/novuhq/novu/issues/new?assignees=&labels=type%3A+bug&template=bug_report.yml&title=%F0%9F%90%9B+Bug+Report%3A+" target="_blank" rel="noopener noreferrer"
->Report a bug</a>
-  ·
-  <a href="https://docs.novu.co" target="_blank" rel="noopener noreferrer"
->Docs</a>
-  ·
-  <a href="https://go.novu.co/github" target="_blank" rel="noopener noreferrer"
->Website</a>
-  ·
-  <a href="https://discord.novu.co" target="_blank" rel="noopener noreferrer"
->Join our Discord</a>
-  ·
-  <a href="https://go.novu.co/changelog" target="_blank" rel="noopener noreferrer"
->Changelog</a>
-  ·
-  <a href="https://go.novu.co/roadmap" target="_blank" rel="noopener noreferrer"
->Roadmap</a>
-  ·
-  <a href="https://twitter.com/novuhq" target="_blank" rel="noopener noreferrer"
->X</a>
-  ·
-  <a href="https://novu.co/contact-us/?utm_campaign=github-readme" target="_blank" rel="noopener noreferrer"
->Contact us</a>
-.
-<a href="https://www.recent.dev">Recent.dev</a>
+  <strong>Re</strong>verse-Engineered <strong>Novu</strong> — Self-hosted notifications with enterprise features unlocked
 </p>
 
-## ⭐️ Why Novu?
+<p align="center">
+  <em>Like <a href="https://github.com/ReVanced">ReVanced</a> for YouTube, but for <a href="https://novu.co">Novu</a> notifications</em>
+</p>
 
-Novu provides a unified API that makes it simple to send notifications through multiple channels, including Inbox/In-App, Push, Email, SMS, and Chat.
-With Novu, you can create custom workflows and define conditions for each channel, ensuring that your notifications are delivered in the most effective way possible.
+<p align="center">
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#whats-unlocked">What's Unlocked</a> •
+  <a href="#ai-translation">AI Translation</a> •
+  <a href="#providers">Providers</a> •
+  <a href="#testing">Testing</a> •
+  <a href="#changelog">Changelog</a>
+</p>
 
-## ✨ Features
+---
 
-- Embeddable Inbox component with real-time support
-- Single API for all messaging providers (Inbox/In-App, Email, SMS, Push, Chat)
-- Digest Engine to combine multiple notification in to a single E-mail
-- No-Code Block Editor for Email
-- Notification Workflow Engine
-- Embeddable user preferences component gives your subscribers control over their notifications
-- Community-driven
+## Team
 
-## 🚀 Getting Started
+| Role | Name | Contact |
+|------|------|---------|
+| **Chief Architect & Lead Developer** | atlonxp | [GitHub](https://github.com/atlonxp) |
 
-[Create a free account](https://go.novu.co/dashboard?utm_campaign=github-readme) and follow the instructions on the dashboard.
+---
 
-## 📚 Table of contents
+## Why ReNovu?
 
-- [Getting Started](https://github.com/novuhq/novu#-getting-started)
-- [Embeddable Inbox and Preferences](https://github.com/novuhq/novu#embeddable-notification-center)
-- [Providers](https://github.com/novuhq/novu#providers)
-  - [Email](https://github.com/novuhq/novu#-email)
-  - [SMS](https://github.com/novuhq/novu#-sms)
-  - [Push](https://github.com/novuhq/novu#-push)
-  - [Chat](https://github.com/novuhq/novu#-chat)
-  - [In-App](https://github.com/novuhq/novu#-in-app)
-  - [Others](https://github.com/novuhq/novu#other-coming-soon)
-- [Need Help?](https://github.com/novuhq/novu#-need-help)
-- [Links](https://github.com/novuhq/novu#-links)
-- [License](https://github.com/novuhq/novu#%EF%B8%8F-license)
+Novu is an excellent open-source notification infrastructure, but many features are locked behind enterprise tiers. **ReNovu** reverse-engineers these restrictions to give self-hosters the full experience:
 
-## Embeddable Inbox component
+| Feature | Novu Free | Novu Enterprise | ReNovu |
+|---------|:---------:|:---------------:|:------:|
+| Unlimited workflows | Limited | Yes | **Yes** |
+| Custom layouts | Limited | Yes | **Yes** |
+| Remove branding | No | Yes | **Yes** |
+| Multi-org support | No | Yes | **Yes** |
+| Priority support | No | Yes | Community |
+| AI Translation | No | $250+/mo | **Yes** |
 
-Using the Novu API and admin panel, you can easily add a real-time notification center to your web app without building it yourself. You can use our [React](https://docs.novu.co/inbox/react/get-started?utm_campaign=github-readme), or build your own via our API and SDK. React native, Vue, and Angular are coming soon.
+## Quick Start
 
-<div align="center">
-<img width="4800" height="2700" alt="Novu's Embeddable Inbox components" src="https://github.com/user-attachments/assets/00224c75-7ed0-4e19-b6fd-2a0bdced6258" />
+```bash
+# Clone
+git clone https://github.com/atlonxp/renovu.git
+cd renovu
 
-Read more about how to add a [notification center Inbox](https://docs.novu.co/inbox/react/get-started?utm_campaign=github-readme) to your app.
+# Configure
+cp .env.example .env
 
-</div>
+# Build & Launch
+docker compose build
+docker compose up -d
+```
+
+**That's it.** Open [http://localhost:3000](http://localhost:3000) and start sending notifications.
+
+## Access Points
+
+| Service | URL | Description |
+|---------|-----|-------------|
+| Dashboard | [localhost:3000](http://localhost:3000) | Web admin interface |
+| API | [localhost:3001](http://localhost:3001) | REST API & OpenAPI docs |
+| WebSocket | [localhost:3002](http://localhost:3002) | Real-time updates |
+
+## What's Unlocked
+
+### Tier System
+All organizations automatically receive **UNLIMITED** tier:
+- Unlimited workflows and notification templates
+- Unlimited team members
+- Unlimited API calls
+- All premium features enabled
+
+### Branding Freedom
+- "Powered by Novu" banners removed
+- Inbox component footer hidden
+- Full white-label capability
+
+### Self-Hosted Auth
+- No Clerk dependency
+- JWT-based authentication
+- Auto-organization creation on first login
+
+### AI Translation
+- Full translation management (enterprise-gated in upstream Novu at $250+/mo)
+- OpenAI GPT-4o integration for high-quality translations
+- See [AI Translation](#ai-translation) section below
+
+## AI Translation
+
+ReNovu includes a fully working AI-powered translation system that replaces Novu's enterprise-gated `@novu/ee-translation` package.
+
+### Features
+
+- **OpenAI GPT Integration** — supports gpt-4o-mini, gpt-4o, gpt-4-turbo
+- **Variable Protection** — `{{subscriber.firstName}}` and other Handlebars variables are tokenized before translation, preventing corruption
+- **HTML Validation** — translated content is validated for structural integrity
+- **Organization-Level Settings** — API keys encrypted with AES-256, configurable per organization
+- **Locale Aliases** — map non-standard locale codes (e.g., `zh-hans` → `zh_CN`)
+- **Async Translation** — optional Bull queue processing for large batches
+- **Dashboard UI** — full settings panel, translate button, and preview in the dashboard
+
+### Configuration
+
+1. Open Dashboard → **Translations** → **Settings**
+2. Enter your OpenAI API key
+3. Select model and configure target locales
+4. Click **Auto-Translate** on any workflow
+
+### API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/v1/translation-settings` | Get organization settings |
+| PUT | `/v1/translation-settings` | Create/update settings |
+| POST | `/v1/translation-settings/test` | Test OpenAI connection |
+| DELETE | `/v1/translation-settings` | Delete settings |
+| POST | `/v1/translations/auto-translate` | Trigger translation |
+| GET | `/v1/translations/status/:jobId` | Check async job status |
+
+### Subscriber Locale
+
+Novu stores a `locale` field on each subscriber record. This can be set at creation time or updated later:
+
+```bash
+# Create subscriber with locale
+curl -X POST http://localhost:3001/v1/subscribers \
+  -H "Authorization: ApiKey YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"subscriberId": "user-123", "locale": "ja", "firstName": "Taro"}'
+
+# Update subscriber locale
+curl -X PUT http://localhost:3001/v1/subscribers/user-123 \
+  -H "Authorization: ApiKey YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"locale": "th"}'
+```
+
+> **Note:** Passing `locale` inline in the trigger `to` field **mutates the subscriber record permanently** — it is not ephemeral.
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        ReNovu Stack                         │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   │
+│  │Dashboard │  │   API    │  │  Worker  │  │    WS    │   │
+│  │  :3000   │  │  :3001   │  │  :3004   │  │  :3002   │   │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘   │
+│       │             │             │             │          │
+│       └─────────────┴──────┬──────┴─────────────┘          │
+│                            │                                │
+│              ┌─────────────┴─────────────┐                 │
+│              │                           │                  │
+│         ┌────┴────┐               ┌──────┴──────┐          │
+│         │ MongoDB │               │    Redis    │          │
+│         │  :27017 │               │    :6379    │          │
+│         └─────────┘               └─────────────┘          │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Configuration
+
+Edit `.env` for your environment:
+
+```bash
+# Security (CHANGE IN PRODUCTION!)
+JWT_SECRET=your-super-secret-jwt-key
+STORE_ENCRYPTION_KEY=32-character-encryption-key!!
+NOVU_SECRET_KEY=your-novu-secret-key
+
+# Database
+MONGO_USER=renovu
+MONGO_PASSWORD=secure-password
+
+# URLs (update for production)
+API_ROOT_URL=http://localhost:3001
+FRONT_BASE_URL=http://localhost:3000
+
+# Ports
+DASHBOARD_PORT=3000
+API_PORT=3001
+WS_PORT=3002
+```
 
 ## Providers
 
-Novu provides a single API to manage providers across multiple channels with a simple-to-use API and UI interface.
+ReNovu supports 50+ notification providers out of the box:
 
-#### 💌 Email
+<details>
+<summary><strong>Email Providers</strong></summary>
 
-- [x] [Sendgrid](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/email/sendgrid)
-- [x] [Netcore](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/email/netcore)
-- [x] [Mailgun](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/email/mailgun)
-- [x] [SES](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/email/ses)
-- [x] [Postmark](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/email/postmark)
-- [x] [Custom SMTP](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/email/nodemailer)
-- [x] [Mailjet](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/email/mailjet)
-- [x] [Mandrill](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/email/mandrill)
-- [x] [Brevo (formerly SendinBlue)](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/email/brevo)
-- [x] [MailerSend](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/email/mailersend)
-- [x] [Infobip](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/email/infobip)
-- [x] [Resend](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/email/resend)
-- [x] [SparkPost](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/email/sparkpost)
-- [x] [Outlook 365](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/email/outlook365)
+- Sendgrid
+- Mailgun
+- Amazon SES
+- Postmark
+- SMTP (any)
+- Mailjet
+- Mandrill
+- Brevo (Sendinblue)
+- MailerSend
+- Resend
+- SparkPost
+- Outlook 365
 
-#### 📞 SMS
+</details>
 
-- [x] [Twilio](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/sms/twilio)
-- [x] [Plivo](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/sms/plivo)
-- [x] [SNS](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/sms/sns)
-- [x] [Nexmo - Vonage](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/sms/nexmo)
-- [x] [Sms77](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/sms/sms77)
-- [x] [Telnyx](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/sms/telnyx)
-- [x] [Termii](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/sms/termii)
-- [x] [Gupshup](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/sms/gupshup)
-- [x] [SMS Central](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/sms/sms-central)
-- [x] [Maqsam](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/sms/maqsam)
-- [x] [46elks](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/sms/forty-six-elks)
-- [x] [Clickatell](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/sms/clickatell)
-- [x] [Burst SMS](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/sms/burst-sms)
-- [x] [Firetext](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/sms/firetext)
-- [x] [Infobip](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/sms/infobip)
-- [ ] Bandwidth
-- [ ] RingCentral
+<details>
+<summary><strong>SMS Providers</strong></summary>
 
-#### 📱 Push
+- Twilio
+- Plivo
+- Amazon SNS
+- Vonage (Nexmo)
+- Telnyx
+- Termii
+- Gupshup
+- Clickatell
+- Infobip
 
-- [x] [FCM](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/push/fcm)
-- [x] [Expo](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/push/expo)
-- [x] [APNS](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/push/apns)
-- [x] [OneSignal](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/push/one-signal)
-- [x] [Pushpad](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/push/pushpad)
-- [ ] Pushwoosh
+</details>
 
-#### 👇 Chat
+<details>
+<summary><strong>Push Providers</strong></summary>
 
-- [x] [Slack](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/chat/slack)
-- [x] [Discord](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/chat/discord)
-- [x] [MS Teams](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/chat/msTeams)
-- [x] [Mattermost](https://github.com/novuhq/novu/tree/next/packages/providers/src/lib/chat/mattermost)
+- Firebase Cloud Messaging (FCM)
+- Expo
+- Apple Push Notification Service (APNS)
+- OneSignal
+- Pushpad
 
-#### 📱 In-App
+</details>
 
-- [x] [Novu](https://docs.novu.co/inbox/react/get-started?utm_campaign=github-readme)
+<details>
+<summary><strong>Chat Providers</strong></summary>
 
-## 📋 Read Our Code Of Conduct
+- Slack
+- Discord
+- Microsoft Teams
+- Mattermost
 
-Before you begin coding and collaborating, please read our [Code of Conduct](https://github.com/novuhq/novu/blob/main/CODE_OF_CONDUCT.md) thoroughly to understand the standards (that you are required to adhere to) for community engagement. As part of our open-source community, we hold ourselves and other contributors to a high standard of communication. As a participant and contributor to this project, you agree to abide by our [Code of Conduct](https://github.com/novuhq/novu/blob/main/CODE_OF_CONDUCT.md).
+</details>
 
-## 💻 Need Help?
+## Testing
 
-We are more than happy to help you. If you are getting any errors or facing problems while working on this project, join our [Discord server](https://discord.novu.co) and ask for help. We are open to discussing anything related to the project.
+ReNovu includes comprehensive E2E test suites:
 
-## 🔗 Links
+```bash
+# Run full test suite (all 10 suites, 64 tests)
+./test-renovu-e2e.sh
 
-- [Home page](https://novu.co?utm_campaign=github-readme)
-- [Contribution guidelines](https://github.com/novuhq/novu/blob/main/CONTRIBUTING.md)
-- [Run Novu locally](https://docs.novu.co/community/run-in-local-machine?utm_campaign=github-readme)
+# Run specific suite
+./test-renovu-e2e.sh --suite health
+./test-renovu-e2e.sh --suite subscribers
+./test-renovu-e2e.sh --suite locale
 
-## 🛡️ License
+# List available suites
+./test-renovu-e2e.sh --list
 
-Novu is a commercial open source company, which means some parts of this open source repository require a commercial license. The concept is called "Open Core," where the core technology is fully open source, licensed under MIT license, and the enterprise code is covered under a commercial license ("/enterprise" Enterprise Edition). Enterprise features are built by the core engineering team of Novu which is hired in full-time.
+# Translation-specific tests
+./test-translation-e2e.sh
+```
 
-The following modules and folders are licensed under the enterprise license:
+### Test Suites
 
-- `enterprise` folder at the root of the project and all of their subfolders and modules
-- `apps/web/src/ee` folder and all of their subfolders and modules
-- `apps/dashboard/src/ee` folder and all of their subfolders and modules
+| Suite | Tests | Coverage |
+|-------|-------|----------|
+| health | 7 | API, WS, Dashboard, Worker, MongoDB, Redis |
+| subscribers | 13 | CRUD, locale, update, delete, list |
+| groups-workflows | 7 | Email, in-app, multi-channel workflows |
+| triggers | 8 | Single, bulk, broadcast, inline locale |
+| in-app | 4 | Feed, unseen count, mark-read |
+| locale | 4 | All 13 ArokaGO locales accepted |
+| preferences | 3 | Get/update subscriber preferences |
+| integrations | 5 | Active channels, provider status |
+| topics | 6 | CRUD, trigger-to-topic |
+| edge-cases | 8 | Error handling, auth validation |
 
-## 💪 Thanks to all of our contributors
+## Development
 
-Thanks a lot for spending your time helping Novu grow. Keep rocking 🥂
+```bash
+# Install dependencies
+pnpm install
 
-<a href="https://novu.co/contributors?utm_source=github" target="_blank" rel="noopener noreferrer"
->
-  <img src="https://contributors-img.web.app/image?repo=novuhq/novu" alt="Contributors"/>
-</a>
+# Start dev servers
+pnpm start:api:dev      # API on :3001
+pnpm start:dashboard    # Dashboard on :3000
+pnpm start:worker       # Background worker
+pnpm start:ws           # WebSocket server
+```
+
+### Build from Source
+
+```bash
+# Build all images
+docker compose build
+
+# Build specific service
+docker compose build api
+docker compose build dashboard
+```
+
+## Project Structure
+
+```
+renovu/
+├── apps/
+│   ├── api/              # NestJS REST API
+│   ├── dashboard/        # React admin dashboard
+│   ├── worker/           # Background job processor
+│   ├── ws/               # WebSocket server
+│   ├── inbound-mail/     # Inbound email processor
+│   └── webhook/          # Webhook delivery service
+├── libs/
+│   ├── dal/              # Data access layer
+│   └── application-generic/
+├── packages/
+│   ├── shared/           # Shared types & constants
+│   ├── framework/        # Workflow framework
+│   ├── translation/      # AI translation (ReNovu extension)
+│   ├── js/               # JavaScript SDK
+│   ├── react/            # React components (Inbox)
+│   └── providers/        # Channel provider implementations
+├── docker/               # Dockerfiles
+├── test-renovu-e2e.sh    # Comprehensive E2E tests
+├── test-translation-e2e.sh # Translation E2E tests
+└── docker-compose.yml
+```
+
+## Changelog
+
+### ReNovu Status
+
+ReNovu is currently synced with **Novu v3.14.0** (upstream `next` branch as of 2026-02-24).
+
+#### ReNovu v1.0.0 — 2026-02-24
+
+**Self-Hosted Enterprise Unlock**
+- Unlock all enterprise tier restrictions for self-hosted deployments
+- UNLIMITED tier auto-assigned to all organizations
+- Remove "Powered by Novu" branding and Inbox footer
+- Self-hosted JWT auth (no Clerk dependency)
+- Auto-organization creation on first login
+- Environments page enabled for self-hosted mode
+- Settings page enabled for self-hosted mode
+
+**AI Translation System** (replaces `@novu/ee-translation`)
+- `packages/translation/` — full translation package with OpenAI GPT integration
+- Variable protection: Handlebars `{{variables}}` tokenized before translation
+- HTML structural validation on translated content
+- Organization-level encrypted settings (AES-256)
+- Locale alias mapping (e.g., `zh-hans` → `zh_CN`)
+- Async Bull queue processing for batch translations
+- Dashboard UI: settings panel, translate button, preview hook
+- Translation bridge in worker for self-hosted notification delivery
+- 6 REST API endpoints for translation management
+
+**Infrastructure**
+- Docker Compose self-hosted deployment configuration
+- Nx circular dependency fix for local Docker builds
+- CI trigger changed from `next` to `release` branch
+- `ee-auth` stub package for self-hosted builds
+
+**Testing**
+- `test-renovu-e2e.sh` — 10 suites, 64 tests covering health, subscribers, workflows, triggers, in-app, locale, preferences, integrations, topics, edge cases
+- `test-translation-e2e.sh` — 6 phases covering translation settings, auto-translate, variable preservation, locale delivery
+
+---
+
+### Upstream Novu Changelog
+
+Changes merged from [novuhq/novu](https://github.com/novuhq/novu) `next` branch:
+
+#### Novu v3.14.0 — 2026-02-12
+- Email step resolver init & publish commands (NV-7094)
+- Monthly usage digest email (NV-6933)
+- CF step resolver dispatch worker (NV-7103)
+- Cache workflow preferences in LRU store (worker performance)
+
+#### Novu v3.13.0 — 2026-01-28
+- Preference optimization flows (API + worker refactor)
+- Enhanced sanitization logic for control values
+- Default queue concurrency and batch flush interval updates
+- Remove Intercom references
+- WebSocket contextKeys made non-optional (NV-7091)
+- User-agent header removal from JS/React SDKs (NV-7073)
+
+#### Novu v3.12.0 — 2026-01-07
+- Get started link URL update (dashboard)
+- SocketWorker event handling simplification
+- Traces schema date type for expire-at
+
+#### Recent Upstream Fixes (synced 2026-02-24)
+- Integration store provider crash fix (NV-7120)
+- Workflow sync environment check
+- Action required card alignment (NV-7122)
+- Environment ID organization check
+- Payload parsing fix
+- MailerSend upgrade + message ID response fix
+- Email layout name saving issue (NV-7084)
+- Conditional preference fetches for global (performance)
+- VariableInput readonly/disabled forwarding
+- Nx build without cloud access
+- Mongo duplicate error handling
+- Allow null controlValues and restore behavior (NV-7112)
+- Workflow step control management with override
+
+---
+
+### Sync Status
+
+| | Version | Branch | Last Synced |
+|---|---------|--------|-------------|
+| **ReNovu** | v1.0.0 | `next` | — |
+| **Upstream Novu** | v3.14.0 | `next` | 2026-02-24 |
+
+To sync with upstream:
+```bash
+git fetch upstream
+git merge upstream/next
+# Resolve conflicts (keep ReNovu customizations)
+git push origin next
+```
+
+## Contributing
+
+ReNovu is community-driven. We welcome contributions for:
+
+- Reverse-engineering additional enterprise features
+- Adding new notification providers
+- Improving documentation
+- Bug fixes and optimizations
+
+## Disclaimer
+
+ReNovu is an independent project that modifies Novu for self-hosted use. It is not affiliated with, endorsed by, or supported by Novu Co. Use at your own discretion.
+
+## License
+
+Based on [Novu](https://github.com/novuhq/novu), licensed under MIT License.
+
+---
+
+<p align="center">
+  <strong>ReNovu</strong> — Your notifications, your infrastructure, your rules.
+</p>
