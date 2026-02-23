@@ -49,6 +49,7 @@ services:
   # API - Production with Traefik
   # ---------------------------------------------------------------------------
   api:
+    image: ghcr.io/atlonxp/renovu-api:${IMAGE_TAG:-latest}
     labels:
       - "traefik.enable=true"
       # HTTP to HTTPS redirect
@@ -83,6 +84,7 @@ services:
   # Worker - Production Settings
   # ---------------------------------------------------------------------------
   worker:
+    image: ghcr.io/atlonxp/renovu-worker:${IMAGE_TAG:-latest}
     deploy:
       resources:
         limits:
@@ -96,6 +98,7 @@ services:
   # WebSocket - Production with Traefik
   # ---------------------------------------------------------------------------
   ws:
+    image: ghcr.io/atlonxp/renovu-ws:${IMAGE_TAG:-latest}
     labels:
       - "traefik.enable=true"
       # HTTP to HTTPS redirect
@@ -126,6 +129,7 @@ services:
   # Dashboard - Production with Traefik
   # ---------------------------------------------------------------------------
   dashboard:
+    image: ghcr.io/atlonxp/renovu-dashboard:${IMAGE_TAG:-latest}
     labels:
       - "traefik.enable=true"
       # HTTP to HTTPS redirect
