@@ -64,7 +64,7 @@ interface CardProps {
 }
 
 export function Card({ children, style }: CardProps) {
-  return <Section style={{ ...cardStyle, ...style }}>{children}</Section>;
+  return <Section style={{ ...cardStyle, ...style }}>{children as any}</Section>;
 }
 
 const defaultStyle: React.CSSProperties = {

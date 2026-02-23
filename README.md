@@ -348,7 +348,6 @@ ReNovu is currently synced with **Novu v3.14.0** (upstream `next` branch as of 2
 **Self-Hosted Enterprise Unlock**
 - Unlock all enterprise tier restrictions for self-hosted deployments
 - UNLIMITED tier auto-assigned to all organizations
-- Remove "Powered by Novu" branding and Inbox footer
 - Self-hosted JWT auth (no Clerk dependency)
 - Auto-organization creation on first login
 - Environments page enabled for self-hosted mode
