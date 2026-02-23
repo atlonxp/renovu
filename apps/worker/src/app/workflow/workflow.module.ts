@@ -29,7 +29,6 @@ import {
   TriggerMulticast,
   VerifyPayload,
   WorkflowInMemoryProviderService,
-  WorkflowRunService,
 } from '@novu/application-generic';
 import {
   ChannelConnectionRepository,
@@ -196,7 +195,6 @@ const USE_CASES = [
   InboundEmailParse,
   ExecuteBridgeJob,
   GetPreferences,
-  WorkflowRunService,
   GetSubscriberSchedule,
   ResolveChannelEndpoints,
 ];

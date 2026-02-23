@@ -5,7 +5,7 @@ import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ApiExcludeController } from '@nestjs/swagger';
 import { cacheService, TracingModule } from '@novu/application-generic';
 import { Client, NovuModule } from '@novu/framework/nest';
-import { usageLimitsWorkflow } from '@novu/notifications';
+import { usageLimitsWorkflow, usageReportWorkflow } from '@novu/notifications';
 import { isClerkEnabled } from '@novu/shared';
 import { TranslationModule } from '@novu/translation';
 import { ApiTranslationModule } from './app/translation/translation.module';
@@ -195,7 +195,7 @@ modules.push(
         process.env.NOVU_STRICT_AUTHENTICATION_ENABLED === 'true',
     }),
     controllerDecorators: [ApiExcludeController()],
-    workflows: [usageLimitsWorkflow],
+    workflows: [usageLimitsWorkflow, usageReportWorkflow],
   })
 );
 
