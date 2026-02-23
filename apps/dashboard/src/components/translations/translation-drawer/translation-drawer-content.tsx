@@ -6,6 +6,7 @@ import { PermissionButton } from '@/components/primitives/permission-button';
 import { UnsavedChangesAlertDialog } from '@/components/unsaved-changes-alert-dialog';
 import { useEnvironment } from '@/context/environment/hooks';
 import { useHasPermission } from '@/hooks/use-has-permission';
+import { useTranslationSettings } from '@/hooks/use-translation-settings';
 import { EditorPanel } from './editor-panel';
 import { LocaleList } from './locale-list';
 import { TranslationHeader } from './translation-header';
@@ -30,6 +31,9 @@ export const TranslationDrawerContent = forwardRef<TranslationDrawerContentRef, 
     const canWrite = has({ permission: PermissionsEnum.WORKFLOW_WRITE });
     const isDevEnvironment = currentEnvironment?.type === EnvironmentTypeEnum.DEV;
     const isReadOnly = !canWrite || !isDevEnvironment;
+
+    const { data: translationSettings } = useTranslationSettings();
+    const defaultLocale = translationSettings?.defaultLocale || translationGroup.locales[0];
 
     const {
       selectedLocale,
@@ -116,6 +120,7 @@ export const TranslationDrawerContent = forwardRef<TranslationDrawerContentRef, 
             onContentChange={editor.handleContentChange}
             outdatedLocales={translationGroup.outdatedLocales}
             isReadOnly={isReadOnly}
+            defaultLocale={defaultLocale}
           />
         </div>
 

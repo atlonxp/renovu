@@ -6,6 +6,7 @@ import { useStepEditor } from '@/components/workflow-editor/steps/context/step-e
 import { InboxPreview } from '@/components/workflow-editor/steps/in-app/inbox-preview';
 import { PushPreview } from '@/components/workflow-editor/steps/push/push-preview';
 import { SmsPreview } from '@/components/workflow-editor/steps/sms/sms-preview';
+import { useTranslatedPreview } from '@/hooks/use-translated-preview';
 import { STEP_TYPE_LABELS } from '@/utils/constants';
 import { EmailCorePreview } from './previews/email-preview-wrapper';
 
@@ -27,11 +28,19 @@ const MobilePreviewWrapper = memo(({ children, description }: { children: React.
 });
 
 export function StepPreviewFactory() {
-  const { step, previewData, isInitialLoad, controlValues } = useStepEditor();
+  const { step, workflow, previewData, isInitialLoad, controlValues, selectedLocale } = useStepEditor();
+
+  // Apply translations to preview data based on selected locale
+  const { translatedPreviewData, isTranslationLoading } = useTranslatedPreview({
+    previewData,
+    selectedLocale,
+    workflowId: workflow.workflowId,
+    stepId: step.stepId,
+  });
 
   const commonProps = {
-    previewData: previewData ?? undefined,
-    isPreviewPending: isInitialLoad,
+    previewData: translatedPreviewData ?? undefined,
+    isPreviewPending: isInitialLoad || isTranslationLoading,
   };
 
   const mobilePreviewDescription =

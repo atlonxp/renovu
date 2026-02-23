@@ -13,10 +13,11 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/primitives/table';
-import { IS_ENTERPRISE, IS_SELF_HOSTED } from '@/config';
+import { IS_SELF_HOSTED } from '@/config';
 import { useEnvironment } from '@/context/environment/hooks';
 import { useFetchOrganizationSettings } from '@/hooks/use-fetch-organization-settings';
 import { useFetchSubscription } from '@/hooks/use-fetch-subscription';
+import { useTranslationSettings } from '@/hooks/use-translation-settings';
 import { buildRoute, ROUTES } from '@/utils/routes';
 import { cn } from '@/utils/ui';
 import { ListNoResults } from '../list-no-results';
@@ -187,13 +188,23 @@ export function TranslationList(props: TranslationListProps) {
   const { currentEnvironment } = useEnvironment();
   const { data: organizationSettings } = useFetchOrganizationSettings();
   const { subscription } = useFetchSubscription();
+  const { data: translationSettings } = useTranslationSettings();
 
-  const canUseTranslationFeature =
-    getFeatureForTierAsBoolean(
-      FeatureNameEnum.AUTO_TRANSLATIONS,
-      subscription?.apiServiceLevel || ApiServiceLevelEnum.FREE
-    ) &&
-    (!IS_SELF_HOSTED || IS_ENTERPRISE);
+  // For self-hosted (ReNovu): check if OpenAI API key is configured
+  const hasOpenAIKeyConfigured = translationSettings?.hasApiKey ?? false;
+
+  // For cloud (Novu): check tier/subscription features
+  const hasCloudFeatureAccess = getFeatureForTierAsBoolean(
+    FeatureNameEnum.AUTO_TRANSLATIONS,
+    subscription?.apiServiceLevel || ApiServiceLevelEnum.FREE
+  );
+
+  // Determine if the translation feature can be used:
+  // - Self-hosted: requires OpenAI API key
+  // - Cloud: requires tier/subscription (or also accepts OpenAI key as override)
+  const canUseTranslationFeature = IS_SELF_HOSTED
+    ? hasOpenAIKeyConfigured
+    : hasCloudFeatureAccess || hasOpenAIKeyConfigured;
 
   // Only make API call if user has proper tier
   const { filterValues, handleFiltersChange, resetFilters, data, isPending, isFetching, areFiltersApplied } =
@@ -202,7 +213,10 @@ export function TranslationList(props: TranslationListProps) {
   const handleTranslationClick = (translation: TranslationGroupDto) => {
     if (currentEnvironment?.slug) {
       const orgDefaultLocale = organizationSettings?.data?.defaultLocale || DEFAULT_LOCALE;
-      const selectedLocale = translation.locales.includes(orgDefaultLocale) ? orgDefaultLocale : translation.locales[0];
+      // Use org default locale if the translation has it, otherwise first available locale, or fallback to org default
+      const selectedLocale = translation.locales.includes(orgDefaultLocale)
+        ? orgDefaultLocale
+        : translation.locales[0] || orgDefaultLocale;
 
       navigate(
         buildRoute(ROUTES.TRANSLATIONS_EDIT, {
@@ -219,6 +233,15 @@ export function TranslationList(props: TranslationListProps) {
     useDeleteTranslationModal();
 
   const limit = data?.limit || DEFAULT_TRANSLATIONS_LIMIT;
+
+  // Check if translation settings are already configured (has target locales set)
+  const hasTargetLocalesConfigured =
+    organizationSettings?.data?.targetLocales && organizationSettings.data.targetLocales.length > 0;
+
+  // Settings are considered configured if:
+  // - For self-hosted: has OpenAI API key
+  // - For any: has target locales set up
+  const isSettingsConfigured = hasOpenAIKeyConfigured || hasTargetLocalesConfigured;
 
   if (!canUseTranslationFeature) {
     return <TranslationListUpgradeCta />;
@@ -240,7 +263,11 @@ export function TranslationList(props: TranslationListProps) {
     );
   }
 
-  if (!areFiltersApplied && !data?.data.length) {
+  // Show onboarding only if:
+  // - No filters are applied AND
+  // - No translations exist AND
+  // - Settings are NOT configured (no API key and no target locales)
+  if (!areFiltersApplied && !data?.data.length && !isSettingsConfigured) {
     return <TranslationOnboardingPage />;
   }
 

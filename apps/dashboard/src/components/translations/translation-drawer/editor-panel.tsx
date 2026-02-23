@@ -139,6 +139,7 @@ type EditorPanelProps = {
   onContentChange: (content: string) => void;
   outdatedLocales?: string[];
   isReadOnly?: boolean;
+  defaultLocale?: string;
 };
 
 export function EditorPanel({
@@ -151,6 +152,7 @@ export function EditorPanel({
   onContentChange,
   outdatedLocales,
   isReadOnly = false,
+  defaultLocale,
 }: EditorPanelProps) {
   if (isLoadingTranslation) {
     return <EditorPanelSkeleton />;
@@ -175,6 +177,7 @@ export function EditorPanel({
         selectedTranslation={selectedTranslation}
         modifiedContent={modifiedContent}
         isReadOnly={isReadOnly}
+        defaultLocale={defaultLocale}
       />
 
       {translationError ? (

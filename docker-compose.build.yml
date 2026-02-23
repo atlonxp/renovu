@@ -1,0 +1,37 @@
+# =============================================================================
+# ReNovu - Build & Push to GHCR
+# =============================================================================
+# Usage:
+#   Build all:  docker compose -f docker-compose.yml -f docker-compose.build.yml build
+#   Push all:   docker compose -f docker-compose.yml -f docker-compose.build.yml push
+#   Build one:  docker compose -f docker-compose.yml -f docker-compose.build.yml build api
+#
+# Environment Variables:
+#   GHCR_REGISTRY  - Registry URL (default: ghcr.io/atlonxp/renovu)
+#   IMAGE_TAG      - Image tag (default: latest)
+# =============================================================================
+
+services:
+  api:
+    image: ghcr.io/atlonxp/renovu-api:${IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+
+  worker:
+    image: ghcr.io/atlonxp/renovu-worker:${IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+
+  ws:
+    image: ghcr.io/atlonxp/renovu-ws:${IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.ws
+
+  dashboard:
+    image: ghcr.io/atlonxp/renovu-dashboard:${IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dashboard

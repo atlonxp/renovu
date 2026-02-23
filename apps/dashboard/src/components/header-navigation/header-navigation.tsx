@@ -17,11 +17,12 @@ import { PublishButton } from './publish-button';
 
 type HeaderNavigationProps = HTMLAttributes<HTMLDivElement> & {
   startItems?: ReactNode;
+  endItems?: ReactNode;
   hideBridgeUrl?: boolean;
 };
 
 export const HeaderNavigation = (props: HeaderNavigationProps) => {
-  const { startItems, hideBridgeUrl = false, className, ...rest } = props;
+  const { startItems, endItems, hideBridgeUrl = false, className, ...rest } = props;
   const { currentEnvironment } = useEnvironment();
   const has = useHasPermission();
   const canPublish = has({ permission: PermissionsEnum.ENVIRONMENT_WRITE });
@@ -37,6 +38,7 @@ export const HeaderNavigation = (props: HeaderNavigationProps) => {
     >
       {startItems}
       <div className="text-foreground-600 ml-auto flex items-center gap-2">
+        {endItems}
         <Button
           variant="secondary"
           mode="outline"

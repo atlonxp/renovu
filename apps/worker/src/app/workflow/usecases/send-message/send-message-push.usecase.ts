@@ -106,6 +106,16 @@ export class SendMessagePush extends SendMessageBase {
       step.template = template;
     }
 
+    // Apply ReNovu translations if subscriber has a locale
+    await this.applyTranslationsToStep(
+      step,
+      ChannelTypeEnum.PUSH,
+      command._templateId,
+      subscriber.locale,
+      command.environmentId,
+      command.organizationId
+    );
+
     const data = this.getCompilePayload(command.compileContext);
     let content = '';
     let title = '';

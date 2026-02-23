@@ -41,6 +41,7 @@ import {
   slugify,
   TriggerTypeEnum,
 } from '@novu/shared';
+import { ManageTranslations } from '@novu/translation';
 import { WorkflowWithPreferencesResponseDto } from '../../dtos/get-workflow-with-preferences.dto';
 import { GetWorkflowWithPreferencesUseCase } from '../get-workflow-with-preferences/get-workflow-with-preferences.usecase';
 import { CreateWorkflowCommand } from './create-workflow.command';
@@ -60,7 +61,8 @@ export class CreateWorkflow {
     protected moduleRef: ModuleRef,
     private upsertPreferences: UpsertPreferences,
     private getWorkflowWithPreferencesUseCase: GetWorkflowWithPreferencesUseCase,
-    private resourceValidatorService: ResourceValidatorService
+    private resourceValidatorService: ResourceValidatorService,
+    private manageTranslations: ManageTranslations
   ) {}
 
   @InstrumentUsecase()
@@ -149,33 +151,25 @@ export class CreateWorkflow {
     workflowEntity: WorkflowWithPreferencesResponseDto,
     session?: ClientSession | null
   ) {
-    const isEnterprise = process.env.NOVU_ENTERPRISE === 'true' || process.env.CI_EE_TEST === 'true';
-    const isSelfHosted = process.env.IS_SELF_HOSTED === 'true';
-
-    if (!isEnterprise || isSelfHosted) {
-      return;
-    }
-
     try {
-      const manageTranslations = this.moduleRef.get(require('@novu/ee-translation')?.ManageTranslations, {
-        strict: false,
-      });
-
-      await manageTranslations.execute({
-        enabled: command.isTranslationEnabled,
+      await this.manageTranslations.execute({
+        enabled: command.isTranslationEnabled ?? false,
         resourceId: workflowIdentifier,
+        resourceInternalId: workflowEntity._id,
+        resourceName: workflowEntity.name,
         resourceType: LocalizationResourceEnum.WORKFLOW,
         organizationId: command.organizationId,
         environmentId: command.environmentId,
         userId: command.userId,
         session,
-        resourceEntity: workflowEntity,
+        resourceEntity: workflowEntity as unknown as Record<string, unknown>,
       });
     } catch (error) {
       this.logger.error(
         `Failed to ${command.isTranslationEnabled ? 'enable' : 'disable'} V2 translations for workflow`,
         {
           workflowIdentifier,
+          workflowInternalId: workflowEntity._id,
           enabled: command.isTranslationEnabled,
           organizationId: command.organizationId,
           error: error instanceof Error ? error.message : String(error),

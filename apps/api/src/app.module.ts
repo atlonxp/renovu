@@ -7,6 +7,8 @@ import { cacheService, TracingModule } from '@novu/application-generic';
 import { Client, NovuModule } from '@novu/framework/nest';
 import { usageLimitsWorkflow } from '@novu/notifications';
 import { isClerkEnabled } from '@novu/shared';
+import { TranslationModule } from '@novu/translation';
+import { ApiTranslationModule } from './app/translation/translation.module';
 import { SentryModule } from '@sentry/nestjs/setup';
 import packageJson from '../package.json';
 import { ActivityModule } from './app/activity/activity.module';
@@ -63,11 +65,6 @@ import { WorkflowModule } from './app/workflows-v2/workflow.module';
 const enterpriseImports = (): Array<Type | DynamicModule | Promise<DynamicModule> | ForwardReference> => {
   const modules: Array<Type | DynamicModule | Promise<DynamicModule> | ForwardReference> = [];
   if (process.env.NOVU_ENTERPRISE === 'true' || process.env.CI_EE_TEST === 'true') {
-    if (require('@novu/ee-translation')?.EnterpriseTranslationModule) {
-      modules.push(require('@novu/ee-translation')?.EnterpriseTranslationModule);
-      modules.push(require('@novu/ee-translation')?.TranslationModule);
-    }
-
     if (require('@novu/ee-billing')?.BillingModule) {
       modules.push(require('@novu/ee-billing')?.BillingModule.forRoot());
     }
@@ -137,6 +134,8 @@ const baseModules: Array<Type | DynamicModule | Promise<DynamicModule> | Forward
   NovuModule,
   ChannelConnectionsModule,
   ChannelEndpointsModule,
+  TranslationModule.forRoot({ includeControllers: false }),
+  ApiTranslationModule,
 ];
 
 const enterpriseModules = enterpriseImports();
