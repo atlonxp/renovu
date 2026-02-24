@@ -21,6 +21,7 @@
 #   IMAGE_TAG              - GHCR image tag (default: latest)
 #   RENOVU_DATA_DIR        - Base data directory (default: /home/arokago/renovu)
 #   PM2_INSTANCES          - PM2 cluster instances per service (default: max = CPU cores)
+#   ADMIN_API_KEY          - API key for admin-tools authentication
 # =============================================================================
 
 name: renovu
@@ -306,6 +307,52 @@ services:
           memory: ${DASHBOARD_MEMORY_LIMIT:-512M}
         reservations:
           memory: ${DASHBOARD_MEMORY_RESERVATION:-256M}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # ---------------------------------------------------------------------------
+  # Admin Tools (pre-built from GHCR)
+  # ---------------------------------------------------------------------------
+  admin-tools:
+    image: ghcr.io/atlonxp/renovu-admin-tools:${IMAGE_TAG:-latest}
+    platform: ${DOCKER_PLATFORM:-linux/amd64}
+    container_name: renovu-admin-tools
+    command: ["pm2-runtime", "start", "dist/main.js", "-i", "1"]
+    restart: unless-stopped
+    ports:
+      - "${ADMIN_TOOLS_PORT:-3005}:3005"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3005
+      # MongoDB (own instance)
+      MONGO_URL: mongodb://${MONGO_USER:-novu}:${MONGO_PASSWORD:-novu-dev-password}@mongodb:27017/novu-db?authSource=admin
+      # Security
+      JWT_SECRET: ${JWT_SECRET}
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-}
+      # Backup
+      BACKUP_DIR: ${BACKUP_DIR:-/tmp/admin-tools-backups}
+    volumes:
+      - ${RENOVU_DATA_DIR:-./data/renovu}/admin-tools-backups:${BACKUP_DIR:-/tmp/admin-tools-backups}
+    networks:
+      - renovu-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3005/v1/health-check || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 240s
+    deploy:
+      resources:
+        limits:
+          memory: ${ADMIN_TOOLS_MEMORY_LIMIT:-512M}
+        reservations:
+          memory: ${ADMIN_TOOLS_MEMORY_RESERVATION:-256M}
     logging:
       driver: "json-file"
       options:

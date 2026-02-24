@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "strictNullChecks": true,
+    "module": "commonjs",
+    "sourceMap": true,
+    "allowSyntheticDefaultImports": true,
+    "emitDecoratorMetadata": true,
+    "types": ["node"],
+    "target": "es6",
+    "allowJs": false,
+    "esModuleInterop": true,
+    "declarationMap": true,
+    "skipLibCheck": true
+  },
+  "exclude": ["node_modules"]
+}

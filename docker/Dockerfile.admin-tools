@@ -1,0 +1,67 @@
+# =============================================================================
+# ReNovu Admin Tools - Self-Hosted Build
+# =============================================================================
+
+FROM node:20-alpine3.20 AS builder
+
+RUN apk add --no-cache g++ make py3-pip bash
+ENV NX_DAEMON=false
+
+WORKDIR /usr/src/app
+
+RUN npm install -g pnpm@10.16.1 pm2 --loglevel notice
+
+# Copy package files first for better caching
+COPY .npmrc .
+COPY package.json .
+COPY pnpm-workspace.yaml .
+COPY pnpm-lock.yaml .
+COPY nx.json .
+COPY tsconfig.json .
+
+# Copy source code
+COPY apps/admin-tools ./apps/admin-tools
+COPY libs ./libs
+COPY packages ./packages
+
+# Install dependencies
+RUN --mount=type=cache,id=pnpm-store-admin-tools,target=/root/.pnpm-store \
+    pnpm install --frozen-lockfile --unsafe-perm
+
+# Build Admin Tools
+RUN NODE_ENV=production pnpm build:admin-tools --skip-nx-cache
+
+# =============================================================================
+# Production Stage
+# =============================================================================
+FROM node:20-alpine3.20
+
+RUN apk add --no-cache g++ make py3-pip
+
+# Copy pnpm and pm2 from builder to avoid slow npm install under QEMU arm64 emulation
+COPY --from=builder /usr/local/lib/node_modules /usr/local/lib/node_modules
+COPY --from=builder /usr/local/bin/pnpm /usr/local/bin/pnpm
+RUN ln -sf /usr/local/lib/node_modules/pm2/bin/pm2 /usr/local/bin/pm2 && \
+    ln -sf /usr/local/lib/node_modules/pm2/bin/pm2-runtime /usr/local/bin/pm2-runtime
+
+# Create backup directory
+RUN mkdir -p /tmp/admin-tools-backups && chown 1000:1000 /tmp/admin-tools-backups
+
+USER 1000
+WORKDIR /usr/src/app
+
+# Copy all necessary files from builder (including workspace packages)
+COPY --chown=1000:1000 --from=builder /usr/src/app/node_modules ./node_modules
+COPY --chown=1000:1000 --from=builder /usr/src/app/packages ./packages
+COPY --chown=1000:1000 --from=builder /usr/src/app/libs ./libs
+COPY --chown=1000:1000 --from=builder /usr/src/app/apps/admin-tools/node_modules ./apps/admin-tools/node_modules
+COPY --chown=1000:1000 --from=builder /usr/src/app/apps/admin-tools/dist ./apps/admin-tools/dist
+COPY --chown=1000:1000 --from=builder /usr/src/app/apps/admin-tools/package.json ./apps/admin-tools/package.json
+
+WORKDIR /usr/src/app/apps/admin-tools
+
+ENV NEW_RELIC_NO_CONFIG_FILE=true
+
+EXPOSE 3005
+
+CMD ["pm2-runtime", "start", "dist/main.js", "-i", "1"]
