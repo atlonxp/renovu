@@ -1,4 +1,4 @@
-import { useOrganization } from '@clerk/clerk-react';
+import { useOrganization } from '@/utils/self-hosted';
 import { ChannelTypeEnum, FeatureFlagsKeysEnum, SeverityLevelEnum } from '@novu/shared';
 import { CalendarIcon } from 'lucide-react';
 import { useMemo } from 'react';

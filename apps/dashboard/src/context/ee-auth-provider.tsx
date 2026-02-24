@@ -1,4 +1,4 @@
-import { ClerkProvider as _ClerkProvider } from '@clerk/clerk-react';
+import { ClerkProvider as _ClerkProvider } from '@/utils/self-hosted';
 import { PropsWithChildren } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { buttonVariants } from '@/components/primitives/button';

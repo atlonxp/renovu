@@ -1,4 +1,4 @@
-import { RedirectToSignIn, SignedIn, SignedOut } from '@clerk/clerk-react';
+import { RedirectToSignIn, SignedIn, SignedOut } from '@/utils/self-hosted';
 import { MemberRoleEnum, PermissionsEnum } from '@novu/shared';
 import { ReactNode } from 'react';
 import { EnvironmentProvider } from '@/context/environment/environment-provider';

@@ -1,4 +1,4 @@
-import { useOrganization, useUser } from '@clerk/clerk-react';
+import { useOrganization, useUser } from '@/utils/self-hosted';
 import type { IEnvironment } from '@novu/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatedPage } from '@/components/onboarding/animated-page';

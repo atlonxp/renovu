@@ -1,4 +1,4 @@
-import { useOrganization } from '@clerk/clerk-react';
+import { useOrganization } from '@/utils/self-hosted';
 import { useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useFetchSubscription } from '@/hooks/use-fetch-subscription';

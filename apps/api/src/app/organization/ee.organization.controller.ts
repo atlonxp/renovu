@@ -1,16 +1,20 @@
-import { Body, ClassSerializerInterceptor, Controller, Get, Patch, Put, UseInterceptors } from '@nestjs/common';
+import { Body, ClassSerializerInterceptor, Controller, Get, Patch, Post, Put, UseInterceptors } from '@nestjs/common';
 import { ApiExcludeController, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { OrganizationEntity } from '@novu/dal';
 import { ExternalApiAccessible, RequirePermissions } from '@novu/application-generic';
 import { PermissionsEnum, UserSessionData } from '@novu/shared';
 import { RequireAuthentication } from '../auth/framework/auth.decorator';
 import { ApiCommonResponses, ApiResponse } from '../shared/framework/response.decorator';
 import { UserSession } from '../shared/framework/user.decorator';
+import { CreateOrganizationDto } from './dtos/create-organization.dto';
 import { IGetMyOrganizationDto } from './dtos/get-my-organization.dto';
 import { GetOrganizationSettingsDto } from './dtos/get-organization-settings.dto';
 import { OrganizationBrandingResponseDto, OrganizationResponseDto } from './dtos/organization-response.dto';
 import { RenameOrganizationDto } from './dtos/rename-organization.dto';
 import { UpdateBrandingDetailsDto } from './dtos/update-branding-details.dto';
 import { UpdateOrganizationSettingsDto } from './dtos/update-organization-settings.dto';
+import { CreateOrganizationCommand } from './usecases/create-organization/create-organization.command';
+import { CreateOrganization } from './usecases/create-organization/create-organization.usecase';
 import { GetMyOrganizationCommand } from './usecases/get-my-organization/get-my-organization.command';
 import { GetMyOrganization } from './usecases/get-my-organization/get-my-organization.usecase';
 import { GetOrganizationSettingsCommand } from './usecases/get-organization-settings/get-organization-settings.command';
@@ -30,12 +34,35 @@ import { UpdateOrganizationSettings } from './usecases/update-organization-setti
 @ApiExcludeController()
 export class EEOrganizationController {
   constructor(
+    private createOrganizationUsecase: CreateOrganization,
     private updateBrandingDetailsUsecase: UpdateBrandingDetails,
     private getMyOrganizationUsecase: GetMyOrganization,
     private renameOrganizationUsecase: RenameOrganization,
     private getOrganizationSettingsUsecase: GetOrganizationSettings,
     private updateOrganizationSettingsUsecase: UpdateOrganizationSettings
   ) {}
+
+  @Post('/')
+  @ExternalApiAccessible()
+  @ApiResponse(OrganizationResponseDto, 201)
+  @ApiOperation({
+    summary: 'Create an organization',
+  })
+  async createOrganization(
+    @UserSession() user: UserSessionData,
+    @Body() body: CreateOrganizationDto
+  ): Promise<OrganizationEntity> {
+    return await this.createOrganizationUsecase.execute(
+      CreateOrganizationCommand.create({
+        userId: user._id,
+        logo: body.logo,
+        name: body.name,
+        jobTitle: body.jobTitle,
+        domain: body.domain,
+        language: body.language,
+      })
+    );
+  }
 
   /**
    * @deprecated - used in v1 legacy web

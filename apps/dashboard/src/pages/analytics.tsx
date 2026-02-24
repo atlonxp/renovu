@@ -1,4 +1,4 @@
-import { useOrganization } from '@clerk/clerk-react';
+import { useOrganization } from '@/utils/self-hosted';
 import { EnvironmentTypeEnum, FeatureFlagsKeysEnum } from '@novu/shared';
 import { CalendarIcon } from 'lucide-react';
 import { motion } from 'motion/react';

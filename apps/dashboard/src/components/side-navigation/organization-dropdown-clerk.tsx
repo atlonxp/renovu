@@ -1,4 +1,4 @@
-import { useAuth, useClerk, useOrganization, useOrganizationList } from '@clerk/clerk-react';
+import { useAuth, useClerk, useOrganization, useOrganizationList } from '@/utils/self-hosted';
 import { FeatureFlagsKeysEnum } from '@novu/shared';
 
 type OrganizationMembershipLike = {

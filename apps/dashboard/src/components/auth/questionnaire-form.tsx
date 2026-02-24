@@ -1,4 +1,4 @@
-import { useOrganization, useUser } from '@clerk/clerk-react';
+import { useOrganization, useUser } from '@/utils/self-hosted';
 import {
   CompanySizeEnum,
   JobTitleEnum,

@@ -15,8 +15,7 @@ import { SELF_HOSTED_UPGRADE_REDIRECT_URL } from '../../config';
 import { openInNewTab } from '../url';
 import { UserAvatar } from './icons';
 import { useUser } from './index';
-
-const JWT_STORAGE_KEY = 'self-hosted-jwt'; // As defined in components.tsx
+import { clearAuth } from './jwt-manager';
 
 export function UserButton() {
   const { user } = useUser() as {
@@ -32,12 +31,7 @@ export function UserButton() {
   const userName = `${user.firstName} ${user.lastName}`;
 
   const handleLogout = () => {
-    localStorage.removeItem(JWT_STORAGE_KEY);
-
-    if (typeof window !== 'undefined') {
-      (window as any).Clerk = { ...((window as any).Clerk || {}), loggedIn: false };
-    }
-
+    clearAuth();
     queryClient.clear();
     navigate('/auth/sign-in');
   };

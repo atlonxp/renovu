@@ -1,5 +1,5 @@
 import { RegionSelector, useRegion } from '@/context/region';
-import { OrganizationList as OrganizationListForm, useOrganization } from '@clerk/clerk-react';
+import { OrganizationList as OrganizationListForm, useOrganization } from '@/utils/self-hosted';
 import { useEffect, useRef, useState } from 'react';
 import { useTelemetry } from '../../hooks/use-telemetry';
 import { clerkSignupAppearance } from '../../utils/clerk-appearance';

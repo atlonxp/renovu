@@ -1,4 +1,4 @@
-import { useOrganization } from '@clerk/clerk-react';
+import { useOrganization } from '@/utils/self-hosted';
 import { ChannelTypeEnum } from '@novu/shared';
 import * as Sentry from '@sentry/react';
 import { useMutation } from '@tanstack/react-query';

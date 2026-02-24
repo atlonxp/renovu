@@ -105,6 +105,9 @@ nx-cloud.env
 
 .pnpm-store/
 
+# Docker data volumes
+data/
+
 # NX Build System
 .nx/cache
 .nx/workspace-data

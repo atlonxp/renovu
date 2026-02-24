@@ -95,7 +95,6 @@ export default defineConfig(({ mode }) => {
       alias: {
         ...(isCommunitySelHosted
           ? {
-              '@clerk/clerk-react': path.resolve(__dirname, './src/utils/self-hosted/index.tsx'),
               '@/context/region': path.resolve(__dirname, './src/context/region/index.self-hosted.ts'),
               '@/components/side-navigation/organization-dropdown-clerk': path.resolve(
                 __dirname,

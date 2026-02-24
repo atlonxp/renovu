@@ -17,6 +17,15 @@ import { OrganizationContextProvider, useOrganization } from './organization.res
 import { UserButton } from './user-button';
 import { UserContextProvider, useUser } from './user.resource';
 
+export type {
+  Appearance,
+  CheckAuthorizationWithCustomPermissions,
+  OrganizationResource,
+  SignInTheme,
+  SignUpTheme,
+  UserResource,
+} from './types';
+
 export {
   AuthContextProvider, OrganizationContextProvider, OrganizationList,
   OrganizationProfile, OrganizationSwitcher, RedirectToSignIn,
@@ -25,7 +34,7 @@ export {
   SignUp, UserButton, UserProfile
 };
 
-  export { useAuth, useOrganization, useUser };
+export { useAuth, useOrganization, useUser };
 
 export const useClerk = () => {
   return {
@@ -74,7 +83,6 @@ export function ClerkProvider({ children }: any) {
 }
 
 (window as any).Clerk = {
-  loggedIn: isJwtValid(getJwtToken()),
   session: {
     getToken: () => getJwtToken(),
   },

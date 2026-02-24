@@ -1,12 +1,11 @@
 /** biome-ignore-all lint/correctness/useUniqueElementIds: expected */
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../../components/primitives/button';
 import { Input } from '../../components/primitives/input';
 import { API_HOSTNAME } from '../../config';
 import { useEnvironment } from '../../context/environment/hooks';
-
-const JWT_STORAGE_KEY = 'self-hosted-jwt';
+import { clearAuth, getAuthSnapshot, setAuthToken, subscribe } from './jwt-manager';
 
 // Helper to get auth headers with environment ID
 function useAuthHeaders() {
@@ -461,23 +460,26 @@ export function SignIn() {
             body: JSON.stringify({ name: `${payload.firstName || 'My'}'s Organization` }),
           });
 
-          if (orgResponse.ok) {
-            // Re-login to get token with organizationId
-            const reloginResponse = await fetch(`${API_HOSTNAME}/v1/auth/login`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ email, password }),
-            });
-
-            if (reloginResponse.ok) {
-              const reloginData = await reloginResponse.json();
-              token = reloginData.data.token;
-            }
+          if (!orgResponse.ok) {
+            throw new Error('Failed to create organization. Please try again.');
           }
+
+          // Re-login to get token with organizationId
+          const reloginResponse = await fetch(`${API_HOSTNAME}/v1/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password }),
+          });
+
+          if (!reloginResponse.ok) {
+            throw new Error('Failed to refresh session. Please sign in again.');
+          }
+
+          const reloginData = await reloginResponse.json();
+          token = reloginData.data.token;
         }
 
-        localStorage.setItem(JWT_STORAGE_KEY, token);
-        (window as any).Clerk = { ...((window as any).Clerk || {}), loggedIn: true };
+        setAuthToken(token);
         navigate('/');
       } else {
         throw new Error('No token received');
@@ -635,8 +637,7 @@ export function SignUp() {
       }
 
       if (data.data.token) {
-        localStorage.setItem(JWT_STORAGE_KEY, data.data.token);
-        (window as any).Clerk = { ...((window as any).Clerk || {}), loggedIn: true };
+        setAuthToken(data.data.token);
         navigate('/');
       } else {
         throw new Error('No token received after sign up');
@@ -756,24 +757,29 @@ export function SignUp() {
   );
 }
 
-export function RedirectToSignIn({ children }: { children: any }) {
+export function RedirectToSignIn() {
   const navigate = useNavigate();
+  const isLoggedIn = useSyncExternalStore(subscribe, getAuthSnapshot);
 
   useEffect(() => {
-    if (!(window as any).Clerk.loggedIn) {
+    if (!isLoggedIn) {
       navigate('/auth/sign-in');
     }
-  }, [navigate]);
+  }, [navigate, isLoggedIn]);
 
-  return <>{children}</>;
+  return null;
 }
 
 export function SignedIn({ children }: { children: any }) {
+  const isLoggedIn = useSyncExternalStore(subscribe, getAuthSnapshot);
+  if (!isLoggedIn) return null;
+
   return <>{children}</>;
 }
 
 export function SignedOut({ children }: { children: any }) {
-  if ((window as any).Clerk.loggedIn) return null;
+  const isLoggedIn = useSyncExternalStore(subscribe, getAuthSnapshot);
+  if (isLoggedIn) return null;
 
   return <>{children}</>;
 }

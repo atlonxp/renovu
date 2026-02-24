@@ -1,163 +1,320 @@
 # =============================================================================
-# ReNovu - Production Overrides
+# ReNovu - Standalone Production Compose (Coolify-compatible)
 # =============================================================================
-# Use with: docker compose -f docker-compose.yml -f docker-compose.production.yml up -d
+# Standalone file for Coolify deployment — NOT an overlay.
+# Usage: docker compose -f docker-compose.production.yml up -d
 #
-# Adds:
-# - Traefik labels for HTTPS routing
-# - Production-ready settings
-# - Resource limits
+# Coolify handles Traefik routing and domain configuration externally.
+# No Traefik labels are included in this file.
 #
-# Required Environment Variables:
-#   NOVU_API_DOMAIN        - API domain (e.g., novu-api.example.com)
-#   NOVU_WS_DOMAIN         - WebSocket domain (e.g., novu-ws.example.com)
-#   NOVU_DASHBOARD_DOMAIN  - Dashboard domain (e.g., novu.example.com)
-#   NOVU_CORS_ORIGINS      - Comma-separated CORS origins (e.g., https://www.example.com,https://staging.example.com)
+# Required Environment Variables (set in Coolify):
+#   JWT_SECRET             - JWT signing secret
+#   STORE_ENCRYPTION_KEY   - 32-char encryption key
+#   NOVU_SECRET_KEY        - Novu secret key
+#   REDIS_PASSWORD         - Redis password
+#   API_EXTERNAL_URL       - Browser-accessible API URL (e.g., https://novu-api.arokago.com)
+#   WS_EXTERNAL_URL        - Browser-accessible WS URL (e.g., https://novu-ws.arokago.com)
+#   DASHBOARD_EXTERNAL_URL - Browser-accessible dashboard URL (e.g., https://novu.arokago.com)
 #
 # Optional Environment Variables:
-#   API_INTERNAL_PORT      - Internal API port (default: 3001)
-#   WS_INTERNAL_PORT       - Internal WS port (default: 3002)
-#   DASHBOARD_INTERNAL_PORT - Internal dashboard port (default: 4000)
-#   TRAEFIK_NETWORK        - Traefik network name (default: traefik-network)
-#   TRAEFIK_CERTRESOLVER   - Traefik cert resolver (default: letsencrypt)
+#   MONGO_PASSWORD         - MongoDB password (default: novu-dev-password)
+#   IMAGE_TAG              - GHCR image tag (default: latest)
+#   RENOVU_DATA_DIR        - Base data directory (default: /home/arokago/renovu)
+#   PM2_INSTANCES          - PM2 cluster instances per service (default: max = CPU cores)
 # =============================================================================
+
+name: renovu
 
 services:
   # ---------------------------------------------------------------------------
-  # Redis - Production Settings
+  # Infrastructure - Redis (own instance, isolated from ArokaGO)
   # ---------------------------------------------------------------------------
   redis:
+    image: redis:7-alpine
+    container_name: renovu-redis
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required} --appendonly yes
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    volumes:
+      - ${RENOVU_DATA_DIR:-./data/renovu}/redis:/data
+    networks:
+      - renovu-network
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     deploy:
       resources:
         limits:
           memory: ${REDIS_MEMORY_LIMIT:-512M}
         reservations:
           memory: ${REDIS_MEMORY_RESERVATION:-256M}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
 
   # ---------------------------------------------------------------------------
-  # MongoDB - Production Settings
+  # Infrastructure - MongoDB (own instance, isolated from ArokaGO)
   # ---------------------------------------------------------------------------
   mongodb:
+    image: mongo:8.0
+    container_name: renovu-mongodb
+    restart: unless-stopped
+    environment:
+      PUID: 1000
+      PGID: 1000
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-novu}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-novu-dev-password}
+    volumes:
+      - ${RENOVU_DATA_DIR:-./data/renovu}/mongodb:/data/db
+    networks:
+      - renovu-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--username", "${MONGO_USER:-novu}", "--password", "${MONGO_PASSWORD:-novu-dev-password}", "--eval", "db.adminCommand('ping').ok"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     deploy:
       resources:
         limits:
           memory: ${MONGO_MEMORY_LIMIT:-2G}
         reservations:
           memory: ${MONGO_MEMORY_RESERVATION:-1G}
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
 
   # ---------------------------------------------------------------------------
-  # API - Production with Traefik
+  # API Server (pre-built from GHCR)
   # ---------------------------------------------------------------------------
   api:
     image: ghcr.io/atlonxp/renovu-api:${IMAGE_TAG:-latest}
-    labels:
-      - "traefik.enable=true"
-      # HTTP to HTTPS redirect
-      - "traefik.http.middlewares.renovu-api-https.redirectscheme.scheme=https"
-      - "traefik.http.routers.renovu-api-http.rule=Host(`${NOVU_API_DOMAIN}`)"
-      - "traefik.http.routers.renovu-api-http.entrypoints=http"
-      - "traefik.http.routers.renovu-api-http.middlewares=renovu-api-https"
-      # HTTPS router
-      - "traefik.http.routers.renovu-api.rule=Host(`${NOVU_API_DOMAIN}`)"
-      - "traefik.http.routers.renovu-api.entrypoints=https"
-      - "traefik.http.routers.renovu-api.tls=true"
-      - "traefik.http.routers.renovu-api.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}"
-      - "traefik.http.services.renovu-api.loadbalancer.server.port=${API_INTERNAL_PORT:-3001}"
-      # CORS headers
-      - "traefik.http.middlewares.renovu-api-cors.headers.accessControlAllowOriginList=${NOVU_CORS_ORIGINS}"
-      - "traefik.http.middlewares.renovu-api-cors.headers.accessControlAllowMethods=GET,POST,PUT,DELETE,OPTIONS"
-      - "traefik.http.middlewares.renovu-api-cors.headers.accessControlAllowHeaders=Content-Type,Authorization"
-      - "traefik.http.routers.renovu-api.middlewares=renovu-api-cors"
+    platform: ${DOCKER_PLATFORM:-linux/amd64}
+    container_name: renovu-api
+    command: ["pm2-runtime", "start", "dist/main.js", "-i", "${PM2_INSTANCES:-max}"]
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-3001}:3001"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      NEW_RELIC_ENABLED: "false"
+      # IMPORTANT: API_ROOT_URL must be external URL (browser-accessible)
+      API_ROOT_URL: ${API_EXTERNAL_URL:?API_EXTERNAL_URL is required}
+      FRONT_BASE_URL: ${DASHBOARD_EXTERNAL_URL:?DASHBOARD_EXTERNAL_URL is required}
+      # MongoDB (own instance)
+      MONGO_URL: mongodb://${MONGO_USER:-novu}:${MONGO_PASSWORD:-novu-dev-password}@mongodb:27017/novu-db?authSource=admin
+      MONGO_MIN_POOL_SIZE: 5
+      MONGO_MAX_POOL_SIZE: 10
+      MONGO_AUTO_CREATE_INDEXES: "true"
+      # Redis (own instance)
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_DB_INDEX: 2
+      REDIS_CACHE_SERVICE_HOST: redis
+      REDIS_CACHE_SERVICE_PORT: 6379
+      REDIS_CACHE_PASSWORD: ${REDIS_PASSWORD}
+      # Security
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      STORE_ENCRYPTION_KEY: ${STORE_ENCRYPTION_KEY:?STORE_ENCRYPTION_KEY is required}
+      NOVU_SECRET_KEY: ${NOVU_SECRET_KEY:?NOVU_SECRET_KEY is required}
+      SUBSCRIBER_WIDGET_JWT_EXPIRATION_TIME: 15d
+      # Self-Hosted Mode
+      IS_SELF_HOSTED: "true"
+      IS_API_IDEMPOTENCY_ENABLED: "false"
+      IS_API_RATE_LIMITING_ENABLED: "false"
+      IS_NEW_MESSAGES_API_RESPONSE_ENABLED: "true"
+      IS_V2_ENABLED: "true"
+    networks:
+      - renovu-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3001/v1/health-check || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 240s
     deploy:
       resources:
         limits:
           memory: ${API_MEMORY_LIMIT:-1G}
         reservations:
           memory: ${API_MEMORY_RESERVATION:-512M}
-    environment:
-      NODE_ENV: production
-      API_ROOT_URL: https://${NOVU_API_DOMAIN}
-      FRONT_BASE_URL: https://${NOVU_DASHBOARD_DOMAIN}
-    ports: []  # Disable direct port exposure in production
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
 
   # ---------------------------------------------------------------------------
-  # Worker - Production Settings
+  # Worker (pre-built from GHCR)
   # ---------------------------------------------------------------------------
   worker:
     image: ghcr.io/atlonxp/renovu-worker:${IMAGE_TAG:-latest}
+    platform: ${DOCKER_PLATFORM:-linux/amd64}
+    container_name: renovu-worker
+    command: ["pm2-runtime", "start", "dist/main.js", "-i", "${PM2_INSTANCES:-max}"]
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3004
+      NEW_RELIC_ENABLED: "false"
+      API_ROOT_URL: http://api:3001
+      # MongoDB (own instance)
+      MONGO_URL: mongodb://${MONGO_USER:-novu}:${MONGO_PASSWORD:-novu-dev-password}@mongodb:27017/novu-db?authSource=admin
+      MONGO_MAX_POOL_SIZE: 10
+      # Redis (own instance)
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_DB_INDEX: 2
+      REDIS_CACHE_SERVICE_HOST: redis
+      REDIS_CACHE_SERVICE_PORT: 6379
+      REDIS_CACHE_PASSWORD: ${REDIS_PASSWORD}
+      # Security
+      STORE_ENCRYPTION_KEY: ${STORE_ENCRYPTION_KEY}
+      SUBSCRIBER_WIDGET_JWT_EXPIRATION_TIME: 15d
+      # Self-Hosted Mode
+      IS_SELF_HOSTED: "true"
+      BROADCAST_QUEUE_CHUNK_SIZE: 100
+      MULTICAST_QUEUE_CHUNK_SIZE: 100
+      IS_EMAIL_INLINE_CSS_DISABLED: "false"
+      IS_USE_MERGED_DIGEST_ID_ENABLED: "false"
+    networks:
+      - renovu-network
+    healthcheck:
+      test: ["CMD-SHELL", "pm2 pid main | grep -q '[0-9]' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 240s
     deploy:
       resources:
         limits:
           memory: ${WORKER_MEMORY_LIMIT:-1G}
         reservations:
           memory: ${WORKER_MEMORY_RESERVATION:-512M}
-    environment:
-      NODE_ENV: production
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
 
   # ---------------------------------------------------------------------------
-  # WebSocket - Production with Traefik
+  # WebSocket Server (pre-built from GHCR)
   # ---------------------------------------------------------------------------
   ws:
     image: ghcr.io/atlonxp/renovu-ws:${IMAGE_TAG:-latest}
-    labels:
-      - "traefik.enable=true"
-      # HTTP to HTTPS redirect
-      - "traefik.http.middlewares.renovu-ws-https.redirectscheme.scheme=https"
-      - "traefik.http.routers.renovu-ws-http.rule=Host(`${NOVU_WS_DOMAIN}`)"
-      - "traefik.http.routers.renovu-ws-http.entrypoints=http"
-      - "traefik.http.routers.renovu-ws-http.middlewares=renovu-ws-https"
-      # HTTPS router
-      - "traefik.http.routers.renovu-ws.rule=Host(`${NOVU_WS_DOMAIN}`)"
-      - "traefik.http.routers.renovu-ws.entrypoints=https"
-      - "traefik.http.routers.renovu-ws.tls=true"
-      - "traefik.http.routers.renovu-ws.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}"
-      - "traefik.http.services.renovu-ws.loadbalancer.server.port=${WS_INTERNAL_PORT:-3002}"
-      # WebSocket headers
-      - "traefik.http.middlewares.renovu-ws-headers.headers.customRequestHeaders.X-Forwarded-Proto=https"
-      - "traefik.http.routers.renovu-ws.middlewares=renovu-ws-headers"
+    platform: ${DOCKER_PLATFORM:-linux/amd64}
+    container_name: renovu-ws
+    command: ["pm2-runtime", "start", "dist/main.js", "-i", "${PM2_INSTANCES:-max}"]
+    restart: unless-stopped
+    ports:
+      - "${WS_PORT:-3002}:3002"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3002
+      NEW_RELIC_ENABLED: "false"
+      # MongoDB (own instance)
+      MONGO_URL: mongodb://${MONGO_USER:-novu}:${MONGO_PASSWORD:-novu-dev-password}@mongodb:27017/novu-db?authSource=admin
+      MONGO_MIN_POOL_SIZE: 5
+      MONGO_MAX_POOL_SIZE: 10
+      # Redis (own instance)
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      # Security
+      JWT_SECRET: ${JWT_SECRET}
+      # Self-Hosted Mode
+      IS_SELF_HOSTED: "true"
+    networks:
+      - renovu-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3002/v1/health-check || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 240s
     deploy:
       resources:
         limits:
           memory: ${WS_MEMORY_LIMIT:-512M}
         reservations:
           memory: ${WS_MEMORY_RESERVATION:-256M}
-    environment:
-      NODE_ENV: production
-    ports: []  # Disable direct port exposure in production
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
 
   # ---------------------------------------------------------------------------
-  # Dashboard - Production with Traefik
+  # Dashboard (pre-built from GHCR)
   # ---------------------------------------------------------------------------
   dashboard:
     image: ghcr.io/atlonxp/renovu-dashboard:${IMAGE_TAG:-latest}
-    labels:
-      - "traefik.enable=true"
-      # HTTP to HTTPS redirect
-      - "traefik.http.middlewares.renovu-dashboard-https.redirectscheme.scheme=https"
-      - "traefik.http.routers.renovu-dashboard-http.rule=Host(`${NOVU_DASHBOARD_DOMAIN}`)"
-      - "traefik.http.routers.renovu-dashboard-http.entrypoints=http"
-      - "traefik.http.routers.renovu-dashboard-http.middlewares=renovu-dashboard-https"
-      # HTTPS router
-      - "traefik.http.routers.renovu-dashboard.rule=Host(`${NOVU_DASHBOARD_DOMAIN}`)"
-      - "traefik.http.routers.renovu-dashboard.entrypoints=https"
-      - "traefik.http.routers.renovu-dashboard.tls=true"
-      - "traefik.http.routers.renovu-dashboard.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}"
-      - "traefik.http.services.renovu-dashboard.loadbalancer.server.port=${DASHBOARD_INTERNAL_PORT:-4000}"
+    platform: ${DOCKER_PLATFORM:-linux/amd64}
+    container_name: renovu-dashboard
+    restart: unless-stopped
+    ports:
+      - "${DASHBOARD_PORT:-4000}:4000"
+    depends_on:
+      api:
+        condition: service_healthy
+      worker:
+        condition: service_started
+    environment:
+      # IMPORTANT: These must be external URLs (browser-accessible)
+      VITE_API_HOSTNAME: ${API_EXTERNAL_URL}
+      VITE_SELF_HOSTED: "true"
+      VITE_WEBSOCKET_HOSTNAME: ${WS_EXTERNAL_URL}
+      VITE_LEGACY_DASHBOARD_URL: ""
+      VITE_CLERK_PUBLISHABLE_KEY: ""
+      VITE_IS_EE: "false"
+    networks:
+      - renovu-network
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"const http = require('http'); const req = http.get({hostname: 'localhost', port: 4000, path: '/', timeout: 5000}, (res) => { process.exit(res.statusCode === 200 ? 0 : 1); }); req.on('error', () => process.exit(1)); req.on('timeout', () => { req.destroy(); process.exit(1); });\""]
+      interval: 20s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     deploy:
       resources:
         limits:
           memory: ${DASHBOARD_MEMORY_LIMIT:-512M}
         reservations:
           memory: ${DASHBOARD_MEMORY_RESERVATION:-256M}
-    environment:
-      VITE_API_HOSTNAME: https://${NOVU_API_DOMAIN}
-      VITE_WEBSOCKET_HOSTNAME: https://${NOVU_WS_DOMAIN}
-    ports: []  # Disable direct port exposure in production
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
 
 # =============================================================================
-# Networks - Use Traefik network in production
+# Networks
 # =============================================================================
 networks:
   renovu-network:
-    external: true
-    name: ${TRAEFIK_NETWORK:-traefik-network}
+    driver: bridge

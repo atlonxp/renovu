@@ -1,6 +1,6 @@
 /** biome-ignore-all lint/correctness/useUniqueElementIds: expected */
-import { OrganizationProfile } from '@clerk/clerk-react';
-import type { Appearance } from '@clerk/types';
+import { OrganizationProfile } from '@/utils/self-hosted';
+import type { Appearance } from '@/utils/self-hosted';
 import { PermissionsEnum } from '@novu/shared';
 import { RiInformation2Line } from 'react-icons/ri';
 import { Tooltip, TooltipContent, TooltipPortal, TooltipTrigger } from '@/components/primitives/tooltip';

@@ -163,6 +163,9 @@ pnpm typecheck      # Run TypeScript checks
 - **MongoDB & Redis** required for local development (available via Docker Compose)
 - **Environment files** are set up automatically by setup scripts
 - **Dashboard is primary UI**
+- **NEVER delete, wipe, or remove data without asking first** — always confirm with the user before any destructive action on data files, databases, volumes, or any stored state.
+- **ALWAYS back up before any destructive action** — before moving, deleting, or modifying data, create a backup copy first.
+- **Database data = user's work product** — MongoDB data, PostgreSQL data, Redis data, and any persistent volumes contain valuable work (workflows, configurations, content). Treat them as irreplaceable, not disposable "dev data."
 
 ## Development Guidance
 

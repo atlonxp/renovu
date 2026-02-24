@@ -1,4 +1,4 @@
-import { useUser } from '@clerk/clerk-react';
+import { useUser } from '@/utils/self-hosted';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'motion/react';
 import { RiCloseLine } from 'react-icons/ri';
