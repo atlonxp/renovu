@@ -164,8 +164,8 @@ export function InboxUsecasePage() {
 
   useEffect(() => {
     if (environments?.length) {
-      user?.reload();
-      organization?.reload();
+      user?.reload?.();
+      organization?.reload?.();
       setEnvLoaded(true);
     }
   }, [environments, user, organization]);

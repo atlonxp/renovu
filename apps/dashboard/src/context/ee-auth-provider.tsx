@@ -15,20 +15,18 @@ export const EEAuthProvider = (props: EEAuthProviderProps) => {
   if (IS_SELF_HOSTED && !IS_ENTERPRISE) {
     // For community self-hosted, use the self-hosted ClerkProvider
     // (which is aliased via Vite at build time to ./src/utils/self-hosted/index.tsx)
-    // @ts-expect-error - Self-hosted ClerkProvider has simpler props
     return <_ClerkProvider>{children}</_ClerkProvider>;
   }
 
   if (IS_SELF_HOSTED) {
     // ReNovu: Use the aliased ClerkProvider (points to self-hosted version via vite.config.ts)
-    // @ts-expect-error - Self-hosted ClerkProvider wrapper has different props via vite alias
     return <_ClerkProvider>{children}</_ClerkProvider>;
   }
 
   return (
     <_ClerkProvider
-      routerPush={(to) => navigate(to)}
-      routerReplace={(to) => navigate(to, { replace: true })}
+      routerPush={(to: string) => navigate(to)}
+      routerReplace={(to: string) => navigate(to, { replace: true })}
       publishableKey={CLERK_PUBLISHABLE_KEY}
       signInUrl={ROUTES.SIGN_IN}
       signUpUrl={ROUTES.SIGN_UP}

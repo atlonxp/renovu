@@ -7,7 +7,25 @@ import { createContextHook } from '../context';
 import { withJwtValidation } from './api-interceptor';
 import { getJwtToken } from './jwt-manager';
 
-export const OrganizationContext = React.createContext({});
+interface OrganizationContextValue {
+  organization?: {
+    name: string;
+    createdAt: Date;
+    updatedAt: Date;
+    externalOrgId: string;
+    publicMetadata: Record<string, any>;
+    _id: string;
+    id: string;
+    imageUrl: string;
+    reload?: (...args: any[]) => Promise<void>;
+    [key: string]: any;
+  };
+  isLoaded: boolean;
+}
+
+export const OrganizationContext = React.createContext<OrganizationContextValue>({
+  isLoaded: false,
+});
 
 // Function to fetch the current organization
 const getCurrentOrganization = withJwtValidation(async () => {
@@ -34,6 +52,8 @@ export function OrganizationContextProvider({ children }: any) {
             externalOrgId: organization._id,
           },
           _id: organization._id,
+          id: organization._id,
+          imageUrl: '',
         }
       : undefined,
     isLoaded: hasToken ? !isLoading : true,

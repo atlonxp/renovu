@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { RiExternalLinkLine, RiLogoutBoxRLine, RiSettings4Line, RiSignpostFill } from 'react-icons/ri';
 import { useNavigate } from 'react-router-dom';
 import { Avatar, AvatarImage } from '@/components/primitives/avatar';
@@ -17,7 +17,7 @@ import { UserAvatar } from './icons';
 import { useUser } from './index';
 import { clearAuth } from './jwt-manager';
 
-export function UserButton() {
+function UserButtonInner(_props?: { children?: React.ReactNode; userProfileUrl?: string; appearance?: any; key?: string; [key: string]: any }) {
   const { user } = useUser() as {
     user: { firstName?: string; lastName?: string; emailAddresses?: { emailAddress: string }[] } | undefined;
   };
@@ -91,3 +91,17 @@ export function UserButton() {
     </div>
   );
 }
+
+// Static sub-components for Clerk API compatibility
+UserButtonInner.MenuItems = function MenuItems({ children }: { children?: React.ReactNode }) {
+  return null;
+};
+
+UserButtonInner.Action = function Action(_props: { label?: string; labelIcon?: React.ReactNode; onClick?: () => void; [key: string]: any }) {
+  return null;
+};
+
+export const UserButton = UserButtonInner as typeof UserButtonInner & {
+  MenuItems: typeof UserButtonInner.MenuItems;
+  Action: typeof UserButtonInner.Action;
+};

@@ -13,8 +13,8 @@ export const ClerkProvider = (props: ClerkProviderProps) => {
 
   return (
     <_ClerkProvider
-      routerPush={(to) => navigate(to)}
-      routerReplace={(to) => navigate(to, { replace: true })}
+      routerPush={(to: string) => navigate(to)}
+      routerReplace={(to: string) => navigate(to, { replace: true })}
       publishableKey={CLERK_PUBLISHABLE_KEY}
       signInUrl={ROUTES.SIGN_IN}
       signUpUrl={ROUTES.SIGN_UP}

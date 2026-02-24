@@ -66,7 +66,7 @@ export function UsecaseSelectPage() {
           useCases: selectedUseCases,
         },
       });
-      await organization?.reload();
+      await organization?.reload?.();
     },
     onSuccess: () => {
       track(TelemetryEvent.USE_CASE_SELECTED, {

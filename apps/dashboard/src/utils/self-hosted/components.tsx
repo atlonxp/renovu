@@ -19,11 +19,11 @@ function useAuthHeaders() {
   };
 }
 
-export function OrganizationList() {
+export function OrganizationList(_props?: { appearance?: any; hidePersonal?: boolean; skipInvitationScreen?: boolean; afterSelectOrganizationUrl?: string; afterCreateOrganizationUrl?: string; [key: string]: any }) {
   return <></>;
 }
 
-export function OrganizationProfile({ children }: { children?: React.ReactNode }) {
+export function OrganizationProfile({ children, ...rest }: { children?: React.ReactNode; appearance?: any; [key: string]: any }) {
   const [orgName, setOrgName] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isUpdating, setIsUpdating] = useState(false);
@@ -137,7 +137,7 @@ OrganizationProfile.Page = function Page({ label }: { label: string }) {
   return null;
 };
 
-export function UserProfile({ children }: { children?: React.ReactNode }) {
+export function UserProfile({ children, ...rest }: { children?: React.ReactNode; appearance?: any; [key: string]: any }) {
   const [user, setUser] = useState<{ firstName?: string; lastName?: string; email?: string } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isEditingName, setIsEditingName] = useState(false);
@@ -416,7 +416,7 @@ UserProfile.Page = function Page({ label }: { label: string }) {
   return null;
 };
 
-export function SignIn() {
+export function SignIn(_props?: { path?: string; signUpUrl?: string; appearance?: any; [key: string]: any }) {
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -546,7 +546,7 @@ export function SignIn() {
   );
 }
 
-export function SignUp() {
+export function SignUp(_props?: { path?: string; signInUrl?: string; appearance?: any; forceRedirectUrl?: string; [key: string]: any }) {
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
