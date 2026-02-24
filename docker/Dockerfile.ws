@@ -41,8 +41,8 @@ RUN apk add --no-cache g++ make py3-pip
 # Copy pnpm and pm2 from builder to avoid slow npm install under QEMU arm64 emulation
 COPY --from=builder /usr/local/lib/node_modules /usr/local/lib/node_modules
 COPY --from=builder /usr/local/bin/pnpm /usr/local/bin/pnpm
-COPY --from=builder /usr/local/bin/pm2 /usr/local/bin/pm2
-COPY --from=builder /usr/local/bin/pm2-runtime /usr/local/bin/pm2-runtime
+RUN ln -sf /usr/local/lib/node_modules/pm2/bin/pm2 /usr/local/bin/pm2 && \
+    ln -sf /usr/local/lib/node_modules/pm2/bin/pm2-runtime /usr/local/bin/pm2-runtime
 
 USER 1000
 WORKDIR /usr/src/app
