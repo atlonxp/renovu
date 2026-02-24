@@ -4,9 +4,11 @@ import { Button } from '@/components/primitives/button';
 import { showErrorToast, showSuccessToast } from '@/components/primitives/sonner-helpers';
 import { useImportWorkflows, type ImportWorkflowsResult } from '@/hooks/use-import-workflows';
 import { useEnvironment } from '@/context/environment/hooks';
+import { useAuth } from '@/context/auth/hooks';
 
 export function WorkflowImportForm() {
   const { currentEnvironment } = useEnvironment();
+  const { currentOrganization } = useAuth();
   const importMutation = useImportWorkflows();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -26,6 +28,7 @@ export function WorkflowImportForm() {
       const result = await importMutation.mutateAsync({
         file: selectedFile,
         environmentId: currentEnvironment?._id,
+        organizationId: currentOrganization?._id,
         strategy,
       });
 

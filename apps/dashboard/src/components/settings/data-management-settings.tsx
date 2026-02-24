@@ -182,10 +182,8 @@ export function DataManagementSettings() {
                   ))}
                 </div>
               )}
-              {restoreResult.autoBackup && (
-                <div className="text-sm text-foreground-600 mt-2">
-                  Auto-backup created: <code className="text-xs">{restoreResult.autoBackup.filename}</code>
-                </div>
+              {restoreResult.duration != null && (
+                <div className="text-sm text-foreground-400 mt-2">Duration: {restoreResult.duration}ms</div>
               )}
             </div>
           )}

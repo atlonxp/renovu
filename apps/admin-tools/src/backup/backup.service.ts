@@ -6,8 +6,54 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
 import { randomBytes } from 'crypto';
+import { ObjectId } from 'mongodb';
 import { CreateBackupResponseDto, BackupListItemDto } from './dto';
 import { RestorePreviewDto, RestoreResultDto, RestoreResponseDto } from './dto';
+
+/**
+ * Regex matching a 24-character lowercase hex string (MongoDB ObjectId format).
+ */
+const OBJECT_ID_RE = /^[0-9a-f]{24}$/;
+
+/**
+ * Fields known to store ObjectId references in Novu/ReNovu collections.
+ * Both the `_id` field and any field ending with `Id` are candidates.
+ */
+function isObjectIdField(key: string): boolean {
+  return key === '_id' || key.endsWith('Id') || key === '_templateId';
+}
+
+/**
+ * Recursively walks a document and converts string values that look like ObjectIds
+ * back into proper BSON ObjectId instances for known fields.
+ * This fixes documents exported via JSON.stringify() which loses BSON type info.
+ */
+function rehydrateBsonTypes(doc: any): any {
+  if (doc === null || doc === undefined) return doc;
+  if (Array.isArray(doc)) return doc.map(rehydrateBsonTypes);
+  if (typeof doc !== 'object') return doc;
+
+  for (const key of Object.keys(doc)) {
+    const val = doc[key];
+    if (typeof val === 'string' && isObjectIdField(key) && OBJECT_ID_RE.test(val)) {
+      doc[key] = new ObjectId(val);
+    } else if (Array.isArray(val)) {
+      doc[key] = val.map((item) => {
+        if (typeof item === 'string' && isObjectIdField(key) && OBJECT_ID_RE.test(item)) {
+          return new ObjectId(item);
+        }
+        if (typeof item === 'object' && item !== null) {
+          return rehydrateBsonTypes(item);
+        }
+        return item;
+      });
+    } else if (typeof val === 'object' && val !== null && !(val instanceof ObjectId) && !(val instanceof Date)) {
+      rehydrateBsonTypes(val);
+    }
+  }
+
+  return doc;
+}
 
 /**
  * Collection registry for full environment backup.
@@ -547,10 +593,10 @@ export class BackupService implements OnModuleInit {
     // Drop existing documents
     await collection.deleteMany({});
 
-    // Bulk insert in batches
+    // Bulk insert in batches, rehydrating BSON types
     let inserted = 0;
     for (let i = 0; i < docs.length; i += INSERT_BATCH_SIZE) {
-      const batch = docs.slice(i, i + INSERT_BATCH_SIZE);
+      const batch = docs.slice(i, i + INSERT_BATCH_SIZE).map(rehydrateBsonTypes);
       await collection.insertMany(batch, { ordered: false });
       inserted += batch.length;
     }
@@ -577,7 +623,7 @@ export class BackupService implements OnModuleInit {
     for await (const line of rl) {
       if (!line.trim()) continue;
       try {
-        batch.push(JSON.parse(line));
+        batch.push(rehydrateBsonTypes(JSON.parse(line)));
         if (batch.length >= INSERT_BATCH_SIZE) {
           await collection.insertMany(batch, { ordered: false });
           inserted += batch.length;

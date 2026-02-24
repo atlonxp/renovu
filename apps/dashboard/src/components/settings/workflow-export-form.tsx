@@ -15,6 +15,7 @@ export function WorkflowExportForm() {
     setIsExporting(true);
     try {
       const data = await exportMutation.mutateAsync({
+        workflowIds: ['all'],
         environmentId: currentEnvironment._id,
       });
 

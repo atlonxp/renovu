@@ -24,6 +24,39 @@ export interface ImportWorkflowsResult {
   };
 }
 
+function transformImportResponse(raw: any, strategy: string): ImportWorkflowsResult {
+  const imported = raw.imported ?? {};
+  const skipped = raw.skipped ?? {};
+  const errors = raw.errors ?? [];
+
+  const workflowsCreated = imported.workflows ?? 0;
+  const workflowsSkipped = skipped.workflows ?? 0;
+
+  return {
+    message:
+      workflowsCreated > 0
+        ? `Imported ${workflowsCreated} workflow(s) successfully`
+        : `All ${workflowsSkipped} workflow(s) skipped (already exist)`,
+    strategy,
+    results: {
+      workflows: {
+        created: workflowsCreated,
+        updated: strategy === 'overwrite' ? workflowsCreated : 0,
+        skipped: workflowsSkipped,
+        errors: errors.length,
+      },
+      notificationGroups: {
+        created: imported.notificationGroups ?? 0,
+        existing: skipped.notificationGroups ?? 0,
+      },
+      layouts: {
+        created: imported.layouts ?? 0,
+        existing: skipped.layouts ?? 0,
+      },
+    },
+  };
+}
+
 export function useImportWorkflows() {
   return useMutation({
     mutationFn: async ({
@@ -55,7 +88,9 @@ export function useImportWorkflows() {
         throw new AdminToolsApiError(errorData.message || 'Import failed', response.status, errorData);
       }
 
-      return response.json() as Promise<ImportWorkflowsResult>;
+      const raw = await response.json();
+
+      return transformImportResponse(raw, strategy);
     },
   });
 }

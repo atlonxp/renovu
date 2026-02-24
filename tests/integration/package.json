@@ -1,0 +1,17 @@
+{
+  "name": "renovu-integration-tests",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Playwright integration tests for ReNovu self-hosted dashboard",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:debug": "playwright test --debug",
+    "test:list": "playwright test --list",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0",
+    "typescript": "^5.3.0"
+  }
+}
