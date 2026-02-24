@@ -51,14 +51,15 @@ jobs:
     strategy:
       matrix:
         service:
-          - name: api
-            dockerfile: docker/Dockerfile.api
-          - name: worker
-            dockerfile: docker/Dockerfile.worker
+          # TEMP: Only rebuild ws (others already in GHCR). Revert after CI completes.
+          # - name: api
+          #   dockerfile: docker/Dockerfile.api
+          # - name: worker
+          #   dockerfile: docker/Dockerfile.worker
           - name: ws
             dockerfile: docker/Dockerfile.ws
-          - name: dashboard
-            dockerfile: docker/Dockerfile.dashboard
+          # - name: dashboard
+          #   dockerfile: docker/Dockerfile.dashboard
 
     steps:
       - name: Checkout repository
