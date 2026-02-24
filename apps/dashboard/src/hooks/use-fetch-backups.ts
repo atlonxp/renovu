@@ -5,13 +5,13 @@ import { QueryKeys } from '@/utils/query-keys';
 export interface BackupInfo {
   filename: string;
   size: number;
-  createdAt: string;
-  path: string;
+  timestamp: string;
+  collections: Record<string, number>;
 }
 
 export interface BackupsResponse {
   backups: BackupInfo[];
-  backupDir: string;
+  total: number;
 }
 
 export function useFetchBackups() {

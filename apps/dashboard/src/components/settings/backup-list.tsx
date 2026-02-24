@@ -123,7 +123,7 @@ export function BackupList({ backups, isLoading }: { backups: BackupInfo[]; isLo
           {backups.map((backup) => (
             <TableRow key={backup.filename}>
               <TableCell className="font-mono text-xs">{backup.filename}</TableCell>
-              <TableCell className="text-sm">{formatDate(backup.createdAt)}</TableCell>
+              <TableCell className="text-sm">{formatDate(backup.timestamp)}</TableCell>
               <TableCell className="text-sm">{formatBytes(backup.size)}</TableCell>
               <TableCell className="text-right">
                 <div className="flex items-center justify-end gap-2">

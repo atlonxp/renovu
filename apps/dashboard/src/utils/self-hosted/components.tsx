@@ -5,7 +5,7 @@ import { Button } from '../../components/primitives/button';
 import { Input } from '../../components/primitives/input';
 import { API_HOSTNAME } from '../../config';
 import { useEnvironment } from '../../context/environment/hooks';
-import { clearAuth, getAuthSnapshot, setAuthToken, subscribe } from './jwt-manager';
+import { JWT_STORAGE_KEY, clearAuth, getAuthSnapshot, setAuthToken, subscribe } from './jwt-manager';
 
 // Helper to get auth headers with environment ID
 function useAuthHeaders() {
