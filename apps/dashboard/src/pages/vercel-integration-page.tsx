@@ -38,7 +38,7 @@ export const VercelIntegrationPage = () => {
   );
   const organizations = useMemo(
     () =>
-      userMemberships.data?.map((membership) => ({
+      userMemberships.data?.map((membership: any) => ({
         value: membership.organization.publicMetadata.externalOrgId as string,
         label: membership.organization.name,
       })) ?? [],
