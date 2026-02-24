@@ -13,6 +13,7 @@
 #   8. Integrations (list providers, check active)
 #   9. Topics (create, add subscribers, trigger)
 #  10. Edge Cases (invalid payloads, missing resources)
+#  11. Self-Hosted Auth (register, login, org creation, JWT, 401)
 #
 # Usage:
 #   ./test-renovu-e2e.sh                  # Run all suites
@@ -87,6 +88,7 @@ AVAILABLE_SUITES=(
   "integrations"
   "topics"
   "edge-cases"
+  "auth"
 )
 
 if $LIST_SUITES; then
@@ -329,6 +331,27 @@ except: pass
     --quiet --eval "
 const result = db.notificationgroups.deleteMany({name: /^${TEST_PREFIX}/});
 print('Deleted ' + result.deletedCount + ' test notification groups');
+" 2>/dev/null
+
+  # Delete test auth users (suite 11)
+  docker exec "$MONGO_CONTAINER" mongosh \
+    -u "$MONGO_USER" -p "$MONGO_PASSWORD" \
+    --authenticationDatabase admin "$MONGO_DB" \
+    --quiet --eval "
+const emails = ['${TEST_PREFIX}-auth@test.com', '${TEST_PREFIX}-noorg@test.com'];
+const users = db.users.find({email: {\$in: emails}}).toArray();
+const userIds = users.map(u => u._id);
+if (userIds.length > 0) {
+  const members = db.members.find({_userId: {\$in: userIds}}).toArray();
+  const orgIds = [...new Set(members.map(m => m._organizationId))];
+  db.members.deleteMany({_userId: {\$in: userIds}});
+  db.environments.deleteMany({_organizationId: {\$in: orgIds}});
+  db.organizations.deleteMany({_id: {\$in: orgIds}});
+  db.users.deleteMany({_id: {\$in: userIds}});
+  print('Deleted ' + userIds.length + ' test auth users and their orgs');
+} else {
+  print('No test auth users to clean');
+}
 " 2>/dev/null
 
   echo "  Cleanup done."
@@ -1160,6 +1183,135 @@ LONG_LOCALE_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
 echo "    HTTP status: $LONG_LOCALE_STATUS"
 check "Long locale doesn't crash API (returns 2xx or 4xx)" '[ "$LONG_LOCALE_STATUS" -ge 200 ] && [ "$LONG_LOCALE_STATUS" -lt 500 ]'
 api_delete "/v1/subscribers/${TEST_PREFIX}-sub-longlocale" > /dev/null 2>&1
+
+fi
+
+# ==========================================================================
+# SUITE 11: Self-Hosted Auth
+# ==========================================================================
+if should_run "auth"; then
+echo ""
+echo "==========================================================================="
+echo "  SUITE 11: Self-Hosted Auth (register, login, org creation, JWT, 401)"
+echo "==========================================================================="
+
+AUTH_EMAIL_WITH_ORG="${TEST_PREFIX}-auth@test.com"
+AUTH_EMAIL_NO_ORG="${TEST_PREFIX}-noorg@test.com"
+AUTH_PASSWORD='Test1234!'
+
+# Pre-clean any leftover auth test users from previous runs
+docker exec "$MONGO_CONTAINER" mongosh \
+  -u "$MONGO_USER" -p "$MONGO_PASSWORD" \
+  --authenticationDatabase admin "$MONGO_DB" \
+  --quiet --eval "
+const emails = ['${TEST_PREFIX}-auth@test.com', '${TEST_PREFIX}-noorg@test.com'];
+const users = db.users.find({email: {\$in: emails}}).toArray();
+const userIds = users.map(u => u._id);
+if (userIds.length > 0) {
+  const members = db.members.find({_userId: {\$in: userIds}}).toArray();
+  const orgIds = [...new Set(members.map(m => m._organizationId))];
+  db.members.deleteMany({_userId: {\$in: userIds}});
+  db.environments.deleteMany({_organizationId: {\$in: orgIds}});
+  db.organizations.deleteMany({_id: {\$in: orgIds}});
+  db.users.deleteMany({_id: {\$in: userIds}});
+  print('Pre-cleaned ' + userIds.length + ' leftover auth test users');
+}
+" 2>/dev/null
+
+echo "11.1 Register new user WITH organization"
+REG_RESULT=$(curl -sf -X POST -H "Content-Type: application/json" \
+  -d "{\"email\": \"$AUTH_EMAIL_WITH_ORG\", \"password\": \"$AUTH_PASSWORD\", \"firstName\": \"Auth\", \"lastName\": \"Tester\", \"organizationName\": \"${TEST_PREFIX}-AuthOrg\"}" \
+  "$API_URL/v1/auth/register" 2>/dev/null)
+REG_TOKEN=$(echo "$REG_RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('data',{}).get('token',''))" 2>/dev/null)
+REG_ORG=$(echo "$REG_TOKEN" | python3 -c "
+import sys, json, base64
+token = sys.stdin.read().strip()
+if token:
+    payload = json.loads(base64.b64decode(token.split('.')[1] + '=='))
+    print(payload.get('organizationId', ''))
+else:
+    print('')
+" 2>/dev/null)
+echo "    Token length: ${#REG_TOKEN}, OrgId: ${REG_ORG:-none}"
+check "Register with org returns token" '[ -n "$REG_TOKEN" ] && [ ${#REG_TOKEN} -gt 50 ]'
+check "Register with org has organizationId in JWT" '[ -n "$REG_ORG" ]'
+
+echo "11.2 Login with registered user"
+LOGIN_RESULT=$(curl -sf -X POST -H "Content-Type: application/json" \
+  -d "{\"email\": \"$AUTH_EMAIL_WITH_ORG\", \"password\": \"$AUTH_PASSWORD\"}" \
+  "$API_URL/v1/auth/login" 2>/dev/null)
+LOGIN_TOKEN=$(echo "$LOGIN_RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('data',{}).get('token',''))" 2>/dev/null)
+echo "    Login token length: ${#LOGIN_TOKEN}"
+check "Login returns valid token" '[ -n "$LOGIN_TOKEN" ] && [ ${#LOGIN_TOKEN} -gt 50 ]'
+
+echo "11.3 JWT token contains required fields"
+JWT_FIELDS=$(echo "$LOGIN_TOKEN" | python3 -c "
+import sys, json, base64
+token = sys.stdin.read().strip()
+payload = json.loads(base64.b64decode(token.split('.')[1] + '=='))
+fields = []
+for f in ['_id', 'email', 'organizationId', 'iat', 'exp']:
+    if payload.get(f):
+        fields.append(f)
+print(','.join(fields))
+" 2>/dev/null)
+echo "    JWT fields present: $JWT_FIELDS"
+check "JWT has _id" 'echo "$JWT_FIELDS" | grep -q "_id"'
+check "JWT has email" 'echo "$JWT_FIELDS" | grep -q "email"'
+check "JWT has organizationId" 'echo "$JWT_FIELDS" | grep -q "organizationId"'
+
+echo "11.4 Register user WITHOUT organization"
+REG_NO_ORG=$(curl -sf -X POST -H "Content-Type: application/json" \
+  -d "{\"email\": \"$AUTH_EMAIL_NO_ORG\", \"password\": \"$AUTH_PASSWORD\", \"firstName\": \"No\", \"lastName\": \"Org\"}" \
+  "$API_URL/v1/auth/register" 2>/dev/null)
+NO_ORG_TOKEN=$(echo "$REG_NO_ORG" | python3 -c "import sys,json; print(json.load(sys.stdin).get('data',{}).get('token',''))" 2>/dev/null)
+NO_ORG_ORGID=$(echo "$NO_ORG_TOKEN" | python3 -c "
+import sys, json, base64
+token = sys.stdin.read().strip()
+if token:
+    payload = json.loads(base64.b64decode(token.split('.')[1] + '=='))
+    orgId = payload.get('organizationId', '')
+    print(orgId if orgId else 'NONE')
+else:
+    print('NONE')
+" 2>/dev/null)
+echo "    Token length: ${#NO_ORG_TOKEN}, OrgId: $NO_ORG_ORGID"
+check "Register without org returns token" '[ -n "$NO_ORG_TOKEN" ] && [ ${#NO_ORG_TOKEN} -gt 50 ]'
+check "Register without org has no organizationId" '[ "$NO_ORG_ORGID" = "NONE" ]'
+
+echo "11.5 Create organization for orgless user (POST /v1/organizations)"
+CREATE_ORG_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+  -H "Authorization: Bearer $NO_ORG_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"name\": \"${TEST_PREFIX}-NewOrg\"}" \
+  "$API_URL/v1/organizations" 2>/dev/null)
+echo "    Create org HTTP status: $CREATE_ORG_STATUS"
+check "POST /v1/organizations returns 201" '[ "$CREATE_ORG_STATUS" = "201" ]'
+
+echo "11.6 Re-login after org creation returns updated token"
+RELOGIN_RESULT=$(curl -sf -X POST -H "Content-Type: application/json" \
+  -d "{\"email\": \"$AUTH_EMAIL_NO_ORG\", \"password\": \"$AUTH_PASSWORD\"}" \
+  "$API_URL/v1/auth/login" 2>/dev/null)
+RELOGIN_TOKEN=$(echo "$RELOGIN_RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin).get('data',{}).get('token',''))" 2>/dev/null)
+RELOGIN_ORGID=$(echo "$RELOGIN_TOKEN" | python3 -c "
+import sys, json, base64
+token = sys.stdin.read().strip()
+if token:
+    payload = json.loads(base64.b64decode(token.split('.')[1] + '=='))
+    orgId = payload.get('organizationId', '')
+    print(orgId if orgId else 'NONE')
+else:
+    print('NONE')
+" 2>/dev/null)
+echo "    Re-login OrgId: $RELOGIN_ORGID"
+check "Re-login token now has organizationId" '[ "$RELOGIN_ORGID" != "NONE" ] && [ -n "$RELOGIN_ORGID" ]'
+
+echo "11.7 Invalid JWT returns 401"
+INVALID_JWT_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJfaWQiOiJmYWtlIiwiZXhwIjo5OTk5OTk5OTk5fQ.invalid" \
+  "$API_URL/v1/organizations/me" 2>/dev/null)
+echo "    Invalid JWT HTTP status: $INVALID_JWT_STATUS"
+check "Invalid JWT returns 401" '[ "$INVALID_JWT_STATUS" = "401" ]'
 
 fi
 
