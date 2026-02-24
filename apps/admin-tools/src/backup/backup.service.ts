@@ -1,0 +1,598 @@
+import { Injectable, Logger, OnModuleInit, ConflictException } from '@nestjs/common';
+import { DalService } from '@novu/dal';
+import * as archiver from 'archiver';
+import * as tar from 'tar';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as readline from 'readline';
+import { randomBytes } from 'crypto';
+import { CreateBackupResponseDto, BackupListItemDto } from './dto';
+import { RestorePreviewDto, RestoreResultDto, RestoreResponseDto } from './dto';
+
+/**
+ * Collection registry for full environment backup.
+ *
+ * Mongoose lowercases + pluralizes model names to derive the MongoDB collection name.
+ * One exception: ControlValues uses model name 'controls' => collection 'controls'.
+ *
+ * High-volume collections use cursor-based NDJSON streaming (one JSON doc per line)
+ * to avoid loading millions of documents into memory at once.
+ */
+
+interface CollectionEntry {
+  /** Actual MongoDB collection name */
+  name: string;
+  /** If true, use cursor + NDJSON instead of find().toArray() + JSON */
+  highVolume: boolean;
+}
+
+const COLLECTION_REGISTRY: CollectionEntry[] = [
+  // ── Regular collections (find → JSON) ──
+  { name: 'users', highVolume: false },
+  { name: 'organizations', highVolume: false },
+  { name: 'environments', highVolume: false },
+  { name: 'members', highVolume: false },
+  { name: 'notificationtemplates', highVolume: false },
+  { name: 'messagetemplates', highVolume: false },
+  { name: 'notificationgroups', highVolume: false },
+  { name: 'layouts', highVolume: false },
+  { name: 'integrations', highVolume: false },
+  { name: 'subscribers', highVolume: false },
+  { name: 'topics', highVolume: false },
+  { name: 'tenants', highVolume: false },
+  { name: 'workflowoverrides', highVolume: false },
+  { name: 'preferences', highVolume: false },
+  { name: 'controls', highVolume: false },
+  { name: 'feeds', highVolume: false },
+  { name: 'changes', highVolume: false },
+  { name: 'contexts', highVolume: false },
+  { name: 'channelconnections', highVolume: false },
+  { name: 'channelendpoints', highVolume: false },
+  { name: 'localizations', highVolume: false },
+  { name: 'localizationgroups', highVolume: false },
+
+  // ── High-volume collections (cursor → NDJSON) ──
+  { name: 'jobs', highVolume: true },
+  { name: 'notifications', highVolume: true },
+  { name: 'messages', highVolume: true },
+  { name: 'executiondetails', highVolume: true },
+];
+
+/**
+ * Dependency-ordered list for restore.
+ * Core identity collections first, then dependent ones.
+ * High-volume collections last since they reference everything else.
+ */
+const RESTORE_ORDER: string[] = [
+  'users',
+  'organizations',
+  'environments',
+  'members',
+  'notificationgroups',
+  'feeds',
+  'layouts',
+  'messagetemplates',
+  'notificationtemplates',
+  'integrations',
+  'subscribers',
+  'topics',
+  'tenants',
+  'workflowoverrides',
+  'preferences',
+  'controls',
+  'changes',
+  'contexts',
+  'channelconnections',
+  'channelendpoints',
+  'localizations',
+  'localizationgroups',
+  // High-volume last
+  'jobs',
+  'notifications',
+  'messages',
+  'executiondetails',
+];
+
+const CURSOR_BATCH_SIZE = 5000;
+const INSERT_BATCH_SIZE = 5000;
+
+@Injectable()
+export class BackupService implements OnModuleInit {
+  private readonly logger = new Logger(BackupService.name);
+  private backupDir: string;
+  private operationInProgress = false;
+
+  constructor(private readonly dalService: DalService) {}
+
+  private async acquireLock(): Promise<void> {
+    if (this.operationInProgress) {
+      throw new ConflictException('Another backup/restore operation is already in progress');
+    }
+    this.operationInProgress = true;
+  }
+
+  private releaseLock(): void {
+    this.operationInProgress = false;
+  }
+
+  onModuleInit() {
+    this.backupDir = process.env.BACKUP_DIR || '/tmp/admin-tools-backups';
+    fs.mkdirSync(this.backupDir, { recursive: true });
+    this.logger.log(`Backup directory: ${this.backupDir}`);
+  }
+
+  // ──────────────────────────────────────────────────
+  //  CREATE BACKUP
+  // ──────────────────────────────────────────────────
+
+  async createBackup(): Promise<CreateBackupResponseDto> {
+    await this.acquireLock();
+    try {
+      const startTime = Date.now();
+      // Format: backup-YYYYMMDD-HHmmss
+      const now = new Date();
+      const formattedTimestamp = [
+        now.getUTCFullYear(),
+        String(now.getUTCMonth() + 1).padStart(2, '0'),
+        String(now.getUTCDate()).padStart(2, '0'),
+      ].join('')
+        + '-'
+        + [
+          String(now.getUTCHours()).padStart(2, '0'),
+          String(now.getUTCMinutes()).padStart(2, '0'),
+          String(now.getUTCSeconds()).padStart(2, '0'),
+        ].join('');
+
+      const backupName = `backup-${formattedTimestamp}`;
+      const tempDir = path.join(this.backupDir, `${backupName}-tmp`);
+      const tarPath = path.join(this.backupDir, `${backupName}.tar.gz`);
+      const sidecarPath = path.join(this.backupDir, `${backupName}.manifest.json`);
+
+      fs.mkdirSync(tempDir, { recursive: true });
+
+      const db = this.dalService.connection.db;
+      const counts: Record<string, number> = {};
+
+      this.logger.log(`Starting backup: ${backupName}`);
+
+      // Export each collection
+      for (const entry of COLLECTION_REGISTRY) {
+        try {
+          const collection = db.collection(entry.name);
+
+          if (entry.highVolume) {
+            // Cursor-based NDJSON export
+            const count = await this.exportCollectionNdjson(collection, entry.name, tempDir);
+            counts[entry.name] = count;
+          } else {
+            // Regular JSON export
+            const count = await this.exportCollectionJson(collection, entry.name, tempDir);
+            counts[entry.name] = count;
+          }
+
+          this.logger.debug(`Exported ${entry.name}: ${counts[entry.name]} docs`);
+        } catch (error) {
+          this.logger.warn(`Failed to export collection ${entry.name}: ${error.message}`);
+          counts[entry.name] = 0;
+        }
+      }
+
+      // Write manifest.json inside the archive
+      const manifest = {
+        timestamp: now.toISOString(),
+        version: '1.0.0',
+        backupName,
+        collections: counts,
+        totalDocuments: Object.values(counts).reduce((sum, c) => sum + c, 0),
+      };
+
+      fs.writeFileSync(path.join(tempDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
+
+      // Create tar.gz archive
+      await this.createTarGz(tempDir, tarPath);
+
+      // Write sidecar manifest for fast listing
+      const stat = fs.statSync(tarPath);
+      const sidecar = {
+        filename: `${backupName}.tar.gz`,
+        size: stat.size,
+        timestamp: now.toISOString(),
+        collections: counts,
+      };
+      fs.writeFileSync(sidecarPath, JSON.stringify(sidecar, null, 2));
+
+      // Clean up temp dir
+      fs.rmSync(tempDir, { recursive: true, force: true });
+
+      const duration = Date.now() - startTime;
+      this.logger.log(`Backup completed: ${backupName}.tar.gz (${stat.size} bytes, ${duration}ms)`);
+
+      return {
+        filename: `${backupName}.tar.gz`,
+        size: stat.size,
+        timestamp: now.toISOString(),
+        collections: counts,
+        duration,
+      };
+    } finally {
+      this.releaseLock();
+    }
+  }
+
+  // ──────────────────────────────────────────────────
+  //  LIST BACKUPS
+  // ──────────────────────────────────────────────────
+
+  async listBackups(): Promise<BackupListItemDto[]> {
+    const files = fs.readdirSync(this.backupDir);
+    const backups: BackupListItemDto[] = [];
+
+    for (const file of files) {
+      if (!file.endsWith('.tar.gz')) continue;
+
+      const baseName = file.replace('.tar.gz', '');
+      const sidecarPath = path.join(this.backupDir, `${baseName}.manifest.json`);
+
+      if (fs.existsSync(sidecarPath)) {
+        // Use sidecar for fast listing
+        try {
+          const sidecar = JSON.parse(fs.readFileSync(sidecarPath, 'utf-8'));
+          backups.push({
+            filename: sidecar.filename,
+            size: sidecar.size,
+            timestamp: sidecar.timestamp,
+            collections: sidecar.collections,
+          });
+        } catch {
+          // Fall back to stat-only info
+          const stat = fs.statSync(path.join(this.backupDir, file));
+          backups.push({
+            filename: file,
+            size: stat.size,
+            timestamp: stat.mtime.toISOString(),
+            collections: {},
+          });
+        }
+      } else {
+        // No sidecar, use file stat
+        const stat = fs.statSync(path.join(this.backupDir, file));
+        backups.push({
+          filename: file,
+          size: stat.size,
+          timestamp: stat.mtime.toISOString(),
+          collections: {},
+        });
+      }
+    }
+
+    // Sort newest first
+    backups.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+    return backups;
+  }
+
+  // ──────────────────────────────────────────────────
+  //  GET BACKUP FILE PATH (for download)
+  // ──────────────────────────────────────────────────
+
+  getBackupFilePath(filename: string): string | null {
+    // Sanitize filename to prevent directory traversal
+    const sanitized = path.basename(filename);
+    const filePath = path.join(this.backupDir, sanitized);
+
+    if (!fs.existsSync(filePath)) {
+      return null;
+    }
+
+    return filePath;
+  }
+
+  // ──────────────────────────────────────────────────
+  //  DELETE BACKUP
+  // ──────────────────────────────────────────────────
+
+  deleteBackup(filename: string): boolean {
+    const sanitized = path.basename(filename);
+    const filePath = path.join(this.backupDir, sanitized);
+
+    if (!fs.existsSync(filePath)) {
+      return false;
+    }
+
+    fs.unlinkSync(filePath);
+
+    // Also remove the sidecar manifest if present
+    const baseName = sanitized.replace('.tar.gz', '');
+    const sidecarPath = path.join(this.backupDir, `${baseName}.manifest.json`);
+    if (fs.existsSync(sidecarPath)) {
+      fs.unlinkSync(sidecarPath);
+    }
+
+    return true;
+  }
+
+  // ──────────────────────────────────────────────────
+  //  RESTORE BACKUP
+  // ──────────────────────────────────────────────────
+
+  async restoreBackup(filePath: string, dryRun: boolean): Promise<RestoreResponseDto> {
+    await this.acquireLock();
+    const startTime = Date.now();
+    const ts = Date.now();
+    const suffix = randomBytes(4).toString('hex');
+    const extractDir = path.join(this.backupDir, `restore-${ts}-${suffix}-tmp`);
+
+    try {
+      fs.mkdirSync(extractDir, { recursive: true });
+
+      // Extract tar.gz directly from the uploaded file on disk
+      await tar.extract({
+        file: filePath,
+        cwd: extractDir,
+      });
+
+      // Find the manifest - it might be in a subdirectory after extraction
+      const manifestPath = this.findManifest(extractDir);
+      if (!manifestPath) {
+        throw new Error('Invalid backup: manifest.json not found in archive');
+      }
+
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+      const dataDir = path.dirname(manifestPath);
+
+      if (dryRun) {
+        const preview: RestorePreviewDto = {
+          dryRun: true,
+          manifest: {
+            timestamp: manifest.timestamp,
+            version: manifest.version,
+            collections: manifest.collections,
+          },
+        };
+        return preview;
+      }
+
+      // Create automatic pre-restore backup
+      this.logger.log('Creating automatic pre-restore backup...');
+      try {
+        this.releaseLock(); // Temporarily release lock so createBackup can acquire it
+        await this.createBackup();
+        await this.acquireLock(); // Re-acquire lock for the restore operation
+        this.logger.log('Pre-restore backup created successfully');
+      } catch (error) {
+        // Re-acquire lock if createBackup failed after releasing
+        if (!this.operationInProgress) {
+          this.operationInProgress = true;
+        }
+        this.logger.warn(`Pre-restore backup failed: ${error.message}. Proceeding with restore.`);
+      }
+
+      // Perform actual restore
+      const db = this.dalService.connection.db;
+      const restored: Record<string, number> = {};
+
+      for (const collectionName of RESTORE_ORDER) {
+        if (!manifest.collections[collectionName] && manifest.collections[collectionName] !== 0) {
+          continue; // Collection not in backup
+        }
+
+        const entry = COLLECTION_REGISTRY.find((e) => e.name === collectionName);
+        if (!entry) continue;
+
+        try {
+          const collection = db.collection(collectionName);
+
+          if (entry.highVolume) {
+            const ndjsonPath = path.join(dataDir, `${collectionName}.ndjson`);
+            if (fs.existsSync(ndjsonPath)) {
+              const count = await this.restoreCollectionNdjson(collection, ndjsonPath);
+              restored[collectionName] = count;
+            } else {
+              restored[collectionName] = 0;
+            }
+          } else {
+            const jsonPath = path.join(dataDir, `${collectionName}.json`);
+            if (fs.existsSync(jsonPath)) {
+              const count = await this.restoreCollectionJson(collection, jsonPath);
+              restored[collectionName] = count;
+            } else {
+              restored[collectionName] = 0;
+            }
+          }
+
+          this.logger.debug(`Restored ${collectionName}: ${restored[collectionName]} docs`);
+        } catch (error) {
+          this.logger.error(`Failed to restore collection ${collectionName}: ${error.message}`);
+          restored[collectionName] = -1; // Mark as failed
+        }
+      }
+
+      const duration = Date.now() - startTime;
+      this.logger.log(`Restore completed in ${duration}ms`);
+
+      const result: RestoreResultDto = {
+        dryRun: false,
+        restored,
+        duration,
+        timestamp: new Date().toISOString(),
+      };
+      return result;
+    } finally {
+      // Clean up temp files
+      if (fs.existsSync(extractDir)) {
+        fs.rmSync(extractDir, { recursive: true, force: true });
+      }
+      // Clean up the uploaded file from disk storage
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+      this.releaseLock();
+    }
+  }
+
+  // ──────────────────────────────────────────────────
+  //  PRIVATE HELPERS
+  // ──────────────────────────────────────────────────
+
+  /**
+   * Export a regular collection as a JSON array file.
+   */
+  private async exportCollectionJson(
+    collection: any,
+    name: string,
+    tempDir: string,
+  ): Promise<number> {
+    const docs = await collection.find({}).toArray();
+    const filePath = path.join(tempDir, `${name}.json`);
+    fs.writeFileSync(filePath, JSON.stringify(docs, null, 0));
+    return docs.length;
+  }
+
+  /**
+   * Export a high-volume collection as NDJSON using cursor streaming.
+   * Each line is a single JSON document, which avoids loading
+   * the entire collection into memory.
+   */
+  private async exportCollectionNdjson(
+    collection: any,
+    name: string,
+    tempDir: string,
+  ): Promise<number> {
+    const filePath = path.join(tempDir, `${name}.ndjson`);
+    const writeStream = fs.createWriteStream(filePath);
+    const cursor = collection.find({}).batchSize(CURSOR_BATCH_SIZE);
+
+    let count = 0;
+
+    for await (const doc of cursor) {
+      const line = JSON.stringify(doc) + '\n';
+      const canContinue = writeStream.write(line);
+      if (!canContinue) {
+        await new Promise<void>((resolve) => writeStream.once('drain', resolve));
+      }
+      count++;
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      writeStream.end(() => resolve());
+      writeStream.on('error', reject);
+    });
+
+    return count;
+  }
+
+  /**
+   * Create a tar.gz archive from a directory.
+   */
+  private async createTarGz(sourceDir: string, destPath: string): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const output = fs.createWriteStream(destPath);
+      const archive = archiver('tar', { gzip: true });
+
+      output.on('close', () => resolve());
+      archive.on('error', (err) => reject(err));
+
+      archive.pipe(output);
+
+      // Add all files in the temp directory
+      const files = fs.readdirSync(sourceDir);
+      for (const file of files) {
+        const filePath = path.join(sourceDir, file);
+        archive.file(filePath, { name: file });
+      }
+
+      archive.finalize();
+    });
+  }
+
+  /**
+   * Find manifest.json in the extracted directory tree.
+   * It may be at the root or one level deep.
+   */
+  private findManifest(extractDir: string): string | null {
+    // Check root level
+    const rootManifest = path.join(extractDir, 'manifest.json');
+    if (fs.existsSync(rootManifest)) {
+      return rootManifest;
+    }
+
+    // Check one level deep (in case tar creates a subdirectory)
+    const entries = fs.readdirSync(extractDir);
+    for (const entry of entries) {
+      const subDir = path.join(extractDir, entry);
+      if (fs.statSync(subDir).isDirectory()) {
+        const subManifest = path.join(subDir, 'manifest.json');
+        if (fs.existsSync(subManifest)) {
+          return subManifest;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Restore a regular collection from a JSON file.
+   * Drops existing documents, then bulk-inserts from the file.
+   */
+  private async restoreCollectionJson(collection: any, jsonPath: string): Promise<number> {
+    const raw = fs.readFileSync(jsonPath, 'utf-8');
+    const docs: any[] = JSON.parse(raw);
+
+    if (docs.length === 0) {
+      await collection.deleteMany({});
+      return 0;
+    }
+
+    // Drop existing documents
+    await collection.deleteMany({});
+
+    // Bulk insert in batches
+    let inserted = 0;
+    for (let i = 0; i < docs.length; i += INSERT_BATCH_SIZE) {
+      const batch = docs.slice(i, i + INSERT_BATCH_SIZE);
+      await collection.insertMany(batch, { ordered: false });
+      inserted += batch.length;
+    }
+
+    return inserted;
+  }
+
+  /**
+   * Restore a high-volume collection from an NDJSON file.
+   * Uses readline streaming to avoid loading the entire file into memory.
+   * Batches inserts for efficiency.
+   */
+  private async restoreCollectionNdjson(collection: any, ndjsonPath: string): Promise<number> {
+    await collection.deleteMany({});
+
+    const rl = readline.createInterface({
+      input: fs.createReadStream(ndjsonPath),
+      crlfDelay: Infinity,
+    });
+
+    let inserted = 0;
+    let batch: any[] = [];
+
+    for await (const line of rl) {
+      if (!line.trim()) continue;
+      try {
+        batch.push(JSON.parse(line));
+        if (batch.length >= INSERT_BATCH_SIZE) {
+          await collection.insertMany(batch, { ordered: false });
+          inserted += batch.length;
+          batch = [];
+        }
+      } catch {
+        // skip malformed lines
+      }
+    }
+
+    if (batch.length > 0) {
+      await collection.insertMany(batch, { ordered: false });
+      inserted += batch.length;
+    }
+
+    return inserted;
+  }
+}
