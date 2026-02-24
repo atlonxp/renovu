@@ -9,7 +9,7 @@
 #
 # Default Access:
 #   Dashboard: http://localhost:${DASHBOARD_PORT:-4000}
-#   API:       http://localhost:${API_PORT:-3001}
+#   API:       http://localhost:${API_PORT:-3000}
 #   WebSocket: http://localhost:${WS_PORT:-3002}
 #
 # Environment Variables (override in .env file):
@@ -107,9 +107,9 @@ services:
     environment:
       # Core Configuration
       NODE_ENV: ${NODE_ENV:-local}
-      PORT: ${API_INTERNAL_PORT:-3001}
+      PORT: ${API_INTERNAL_PORT:-3000}
       # IMPORTANT: API_ROOT_URL must be external (browser-accessible) URL
-      API_ROOT_URL: ${API_EXTERNAL_URL:-http://localhost:${API_PORT:-3001}}
+      API_ROOT_URL: ${API_EXTERNAL_URL:-http://localhost:${API_PORT:-3000}}
       FRONT_BASE_URL: ${DASHBOARD_EXTERNAL_URL:-http://localhost:${DASHBOARD_PORT:-4000}}
 
       # Database
@@ -151,14 +151,14 @@ services:
       SENTRY_DSN: ${SENTRY_DSN:-}
       NEW_RELIC_ENABLED: ${NEW_RELIC_ENABLED:-false}
     ports:
-      - "${API_PORT:-3001}:${API_INTERNAL_PORT:-3001}"
+      - "${API_PORT:-3000}:${API_INTERNAL_PORT:-3000}"
     networks:
       - renovu-network
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          "wget --no-verbose --tries=1 --spider http://localhost:${API_INTERNAL_PORT:-3001}/v1/health-check || exit 1",
+          "wget --no-verbose --tries=1 --spider http://localhost:${API_INTERNAL_PORT:-3000}/v1/health-check || exit 1",
         ]
       interval: 20s
       timeout: 10s
@@ -190,7 +190,7 @@ services:
       NODE_ENV: ${NODE_ENV:-local}
       PORT: ${WORKER_INTERNAL_PORT:-3004}
       # Worker uses internal URL to communicate with API (server-to-server)
-      API_ROOT_URL: ${API_INTERNAL_URL:-http://api:${API_INTERNAL_PORT:-3001}}
+      API_ROOT_URL: ${API_INTERNAL_URL:-http://api:${API_INTERNAL_PORT:-3000}}
 
       # Database
       MONGO_URL: mongodb://${MONGO_USER:-renovu}:${MONGO_PASSWORD:-renovu-dev-password}@${MONGO_HOST:-mongodb}:${MONGO_INTERNAL_PORT:-27017}/renovu-db?authSource=admin
@@ -317,7 +317,7 @@ services:
         condition: service_started
     environment:
       # IMPORTANT: These must be external URLs (browser-accessible)
-      VITE_API_HOSTNAME: ${API_EXTERNAL_URL:-http://localhost:${API_PORT:-3001}}
+      VITE_API_HOSTNAME: ${API_EXTERNAL_URL:-http://localhost:${API_PORT:-3000}}
       VITE_SELF_HOSTED: "true"
       VITE_WEBSOCKET_HOSTNAME: ${WS_EXTERNAL_URL:-http://localhost:${WS_PORT:-3002}}
       VITE_LEGACY_DASHBOARD_URL: ""

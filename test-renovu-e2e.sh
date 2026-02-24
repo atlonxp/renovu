@@ -23,7 +23,7 @@
 #   ./test-renovu-e2e.sh --skip-cleanup   # Keep test data after run
 #
 # Environment overrides:
-#   API_URL           (default: http://localhost:3001)
+#   API_URL           (default: http://localhost:3000)
 #   WS_URL            (default: http://localhost:3002)
 #   DASHBOARD_URL     (default: http://localhost:4000)
 #   API_CONTAINER     (default: renovu-api)
@@ -38,7 +38,7 @@ set -uo pipefail
 # ---------------------------------------------------------------------------
 # Configuration (override via env vars)
 # ---------------------------------------------------------------------------
-API_URL="${API_URL:-http://localhost:3001}"
+API_URL="${API_URL:-http://localhost:3000}"
 WS_URL="${WS_URL:-http://localhost:3002}"
 DASHBOARD_URL="${DASHBOARD_URL:-http://localhost:3000}"
 API_CONTAINER="${API_CONTAINER:-renovu-api}"

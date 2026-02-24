@@ -123,7 +123,7 @@ export default defineConfig(({ mode }) => {
       },
     },
     server: {
-      port: 4201,
+      port: 4000,
       headers: {
         'Document-Policy': 'js-profiling',
       },
