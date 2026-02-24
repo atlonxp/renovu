@@ -14,6 +14,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { Card } from '@/components/primitives/card';
 import { InlineToast } from '@/components/primitives/inline-toast';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/primitives/tabs';
+import { DataManagementSettings } from '@/components/settings/data-management-settings';
 import { OrganizationSettings } from '@/components/settings/organization-settings';
 import { CLERK_PUBLISHABLE_KEY, EE_AUTH_PROVIDER, IS_SELF_HOSTED } from '@/config';
 import { useFeatureFlag } from '@/hooks/use-feature-flag';
@@ -139,6 +140,12 @@ export function SettingsPage() {
         }
 
         break;
+      case 'data-management':
+        if (IS_SELF_HOSTED) {
+          navigate(ROUTES.SETTINGS_DATA_MANAGEMENT);
+        }
+
+        break;
     }
   };
 
@@ -161,10 +168,16 @@ export function SettingsPage() {
               Billing
             </TabsTrigger>
           )}
+
+          {IS_SELF_HOSTED && (
+            <TabsTrigger variant="regular" value="data-management" size="xl">
+              Data Management
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <div
-          className={`mx-auto mt-1 px-1.5 ${currentTab === 'billing' && canShowBilling ? 'max-w-[1400px]' : 'max-w-[700px]'}`}
+          className={`mx-auto mt-1 px-1.5 ${currentTab === 'billing' && canShowBilling ? 'max-w-[1400px]' : currentTab === 'data-management' ? 'max-w-[900px]' : 'max-w-[700px]'}`}
         >
           <TabsContent value="account" className="rounded-lg">
             <motion.div {...FADE_ANIMATION}>
@@ -248,6 +261,18 @@ export function SettingsPage() {
                 <Card className="border-none shadow-none">
                   <div className="pb-6 pt-4 flex flex-col">
                     <Plan />
+                  </div>
+                </Card>
+              </motion.div>
+            </TabsContent>
+          )}
+
+          {IS_SELF_HOSTED && (
+            <TabsContent value="data-management" className="rounded-lg">
+              <motion.div {...FADE_ANIMATION}>
+                <Card className="border-none shadow-none">
+                  <div className="pb-6 pt-4 flex flex-col">
+                    <DataManagementSettings />
                   </div>
                 </Card>
               </motion.div>

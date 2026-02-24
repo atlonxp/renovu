@@ -19,6 +19,7 @@ export const ROUTES = {
   SETTINGS_ORGANIZATION: '/settings/organization',
   SETTINGS_TEAM: '/settings/team',
   SETTINGS_BILLING: '/settings/billing',
+  SETTINGS_DATA_MANAGEMENT: '/settings/data-management',
   WORKFLOWS: '/env/:environmentSlug/workflows',
   TRANSLATION_SETTINGS: '/env/:environmentSlug/translations/settings',
   EDIT_WORKFLOW: '/env/:environmentSlug/workflows/:workflowSlug',
