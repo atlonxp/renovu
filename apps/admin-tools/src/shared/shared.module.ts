@@ -16,7 +16,9 @@ import {
   TopicRepository,
   TopicSubscribersRepository,
   OrganizationRepository,
+  CommunityOrganizationRepository,
   MemberRepository,
+  CommunityMemberRepository,
   TenantRepository,
   WorkflowOverrideRepository,
 } from '@novu/dal';
@@ -37,9 +39,22 @@ const DAL_MODELS = [
   TopicRepository,
   TopicSubscribersRepository,
   OrganizationRepository,
+  CommunityOrganizationRepository,
   MemberRepository,
+  CommunityMemberRepository,
   TenantRepository,
   WorkflowOverrideRepository,
+];
+
+const INJECTION_TOKEN_PROVIDERS = [
+  {
+    provide: 'ORGANIZATION_REPOSITORY',
+    useClass: CommunityOrganizationRepository,
+  },
+  {
+    provide: 'MEMBER_REPOSITORY',
+    useClass: CommunityMemberRepository,
+  },
 ];
 
 const dalService = {
@@ -61,7 +76,7 @@ const dalService = {
       },
     }),
   ],
-  providers: [dalService, DalServiceHealthIndicator, ...DAL_MODELS],
-  exports: [dalService, DalServiceHealthIndicator, ...DAL_MODELS, JwtModule],
+  providers: [dalService, DalServiceHealthIndicator, ...DAL_MODELS, ...INJECTION_TOKEN_PROVIDERS],
+  exports: [dalService, DalServiceHealthIndicator, ...DAL_MODELS, ...INJECTION_TOKEN_PROVIDERS, JwtModule],
 })
 export class SharedModule {}

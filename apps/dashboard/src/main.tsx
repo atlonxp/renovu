@@ -581,6 +581,11 @@ const router = createBrowserRouter([
             element: IS_SELF_HOSTED ? <Navigate to={ROUTES.ROOT} /> : <SettingsPage />,
           },
           {
+            // ReNovu: Data Management settings for self-hosted deployments
+            path: ROUTES.SETTINGS_DATA_MANAGEMENT,
+            element: IS_SELF_HOSTED ? <SettingsPage /> : <Navigate to={ROUTES.ROOT} />,
+          },
+          {
             path: ROUTES.LOCAL_STUDIO_AUTH,
             element: <RedirectToLegacyStudioAuth />,
           },

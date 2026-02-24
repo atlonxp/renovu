@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleInit, ConflictException } from '@nestjs/common';
 import { DalService } from '@novu/dal';
-import * as archiver from 'archiver';
+import archiver from 'archiver';
 import * as tar from 'tar';
 import * as fs from 'fs';
 import * as path from 'path';
