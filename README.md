@@ -1,7 +1,3 @@
-[//]: # (<p align="center">)
-[//]: # (  <img src="https://raw.githubusercontent.com/novuhq/novu/next/apps/dashboard/public/images/novu-logo-light-bg.svg" width="200" alt="ReNovu Logo">)
-[//]: # (</p>)
-
 <h1 align="center">ReNovu</h1>
 
 <p align="center">
@@ -15,8 +11,9 @@
 <p align="center">
   <a href="#quick-start">Quick Start</a> •
   <a href="#whats-unlocked">What's Unlocked</a> •
+  <a href="#admin-tools">Admin Tools</a> •
   <a href="#ai-translation">AI Translation</a> •
-  <a href="#providers">Providers</a> •
+  <a href="#production-deployment">Production</a> •
   <a href="#testing">Testing</a> •
   <a href="#changelog">Changelog</a>
 </p>
@@ -38,11 +35,13 @@ Novu is an excellent open-source notification infrastructure, but many features 
 | Feature | Novu Free | Novu Enterprise | ReNovu |
 |---------|:---------:|:---------------:|:------:|
 | Unlimited workflows | Limited | Yes | **Yes** |
-| Custom layouts | Limited | Yes | **Yes** |
+| Custom layouts | 1 max | Unlimited | **Unlimited** |
 | Remove branding | No | Yes | **Yes** |
 | Multi-org support | No | Yes | **Yes** |
-| Priority support | No | Yes | Community |
 | AI Translation | No | $250+/mo | **Yes** |
+| Backup & Restore | No | No | **Yes** |
+| Workflow Export/Import | No | No | **Yes** |
+| Priority support | No | Yes | Community |
 
 ## Quick Start
 
@@ -59,15 +58,44 @@ docker compose build
 docker compose up -d
 ```
 
-**That's it.** Open [http://localhost:3000](http://localhost:3000) and start sending notifications.
+Open [http://localhost:4000](http://localhost:4000) and create your first account.
 
 ## Access Points
 
 | Service | URL | Description |
 |---------|-----|-------------|
-| Dashboard | [localhost:3000](http://localhost:3000) | Web admin interface |
-| API | [localhost:3001](http://localhost:3001) | REST API & OpenAPI docs |
+| Dashboard | [localhost:4000](http://localhost:4000) | Web admin interface |
+| API | [localhost:3000](http://localhost:3000) | REST API & OpenAPI docs |
 | WebSocket | [localhost:3002](http://localhost:3002) | Real-time updates |
+| Admin Tools | [localhost:3005](http://localhost:3005) | Backup/restore & export/import API |
+
+## Architecture
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│  Dashboard   │────▶│   API       │────▶│   Worker    │
+│  :4000       │     │   :3000     │     │  (background)│
+└─────────────┘     └──────┬──────┘     └─────────────┘
+                           │
+┌─────────────┐     ┌──────┴──────┐     ┌─────────────┐
+│ Admin Tools  │────▶│  MongoDB    │◀────│  WebSocket  │
+│  :3005       │     │  :27017     │     │  :3002      │
+└─────────────┘     └─────────────┘     └─────────────┘
+                    ┌─────────────┐
+                    │   Redis     │
+                    │   :6379     │
+                    └─────────────┘
+```
+
+**Services:**
+
+- **Dashboard** — React SPA (Vite) for managing workflows, layouts, and subscribers
+- **API** — NestJS REST API handling auth, workflows, and notification orchestration
+- **Worker** — Background job processor for sending notifications across channels
+- **WebSocket** — Real-time notification delivery to connected clients
+- **Admin Tools** — NestJS service for backup/restore and workflow export/import
+- **MongoDB** — Primary data store
+- **Redis** — Queue broker, caching, and pub/sub
 
 ## What's Unlocked
 
@@ -77,6 +105,10 @@ All organizations automatically receive **UNLIMITED** tier:
 - Unlimited team members
 - Unlimited API calls
 - All premium features enabled
+
+### Email Layouts
+- No plan-based limits — create unlimited layouts
+- "Need more layouts? Contact Sales" paywall removed for self-hosted
 
 ### Branding Freedom
 - "Powered by Novu" banners removed
@@ -88,10 +120,51 @@ All organizations automatically receive **UNLIMITED** tier:
 - JWT-based authentication
 - Auto-organization creation on first login
 
-### AI Translation
-- Full translation management (enterprise-gated in upstream Novu at $250+/mo)
-- OpenAI GPT-4o integration for high-quality translations
-- See [AI Translation](#ai-translation) section below
+## Admin Tools
+
+Admin Tools (`apps/admin-tools/`) is a NestJS microservice providing data management capabilities via the Dashboard's **Settings > Data Management** tab.
+
+### Backup & Restore
+
+- **Create Backup** — Full MongoDB dump as a `.tar.gz` archive (25 collections)
+- **List/Download/Delete** — Manage backup files (scoped per organization)
+- **Restore** — Upload a backup file to restore the database
+  - Auto-creates a pre-restore backup before overwriting
+  - Supports dry-run mode for previewing what would be restored
+- High-volume collections (jobs, notifications, messages) use cursor-based NDJSON streaming
+- Batch inserts (5000 docs/batch) for efficient restore
+
+### Workflow Export & Import
+
+Export workflows from one environment and import into another — enables migration between local, staging, and production.
+
+**Export** captures the full dependency graph:
+- Workflows with steps and variants
+- Message templates
+- Layouts (v1 and v2) with content (control values)
+- Notification groups and feeds
+
+**Import** with full ID remapping:
+- All internal references (`_templateId`, `_layoutId`, `_workflowId`, etc.) remapped to new IDs
+- Conflict strategies: `skip` existing or `overwrite` existing
+- Layout control values (v2 email content) properly transferred
+- Environment and organization IDs reassigned to the target
+
+### Authentication
+
+Admin Tools supports two auth methods:
+- **JWT** — Same token from Dashboard login (automatic)
+- **API Key** — Set `ADMIN_API_KEY` env var for headless/CI usage
+
+### CLI Scripts
+
+```bash
+# Inside the admin-tools container
+node dist/cli/backup.js          # Create backup
+node dist/cli/restore.js <file>  # Restore from file
+node dist/cli/export.js          # Export workflows
+node dist/cli/import.js <file>   # Import workflows
+```
 
 ## AI Translation
 
@@ -125,53 +198,48 @@ ReNovu includes a fully working AI-powered translation system that replaces Novu
 | POST | `/v1/translations/auto-translate` | Trigger translation |
 | GET | `/v1/translations/status/:jobId` | Check async job status |
 
-### Subscriber Locale
+## Production Deployment
 
-Novu stores a `locale` field on each subscriber record. This can be set at creation time or updated later:
+### Pre-built Images (Recommended)
+
+All images are published to GHCR with multi-arch support (amd64 + arm64):
+
+```
+ghcr.io/atlonxp/renovu-api:latest
+ghcr.io/atlonxp/renovu-worker:latest
+ghcr.io/atlonxp/renovu-ws:latest
+ghcr.io/atlonxp/renovu-dashboard:latest
+ghcr.io/atlonxp/renovu-admin-tools:latest
+```
 
 ```bash
-# Create subscriber with locale
-curl -X POST http://localhost:3001/v1/subscribers \
-  -H "Authorization: ApiKey YOUR_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"subscriberId": "user-123", "locale": "ja", "firstName": "Taro"}'
-
-# Update subscriber locale
-curl -X PUT http://localhost:3001/v1/subscribers/user-123 \
-  -H "Authorization: ApiKey YOUR_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"locale": "th"}'
+# Start with production compose (uses GHCR images)
+docker compose -f docker-compose.production.yml up -d
 ```
 
-> **Note:** Passing `locale` inline in the trigger `to` field **mutates the subscriber record permanently** — it is not ephemeral.
+### Required Environment Variables
 
-## Architecture
+| Variable | Description |
+|----------|-------------|
+| `JWT_SECRET` | JWT signing secret |
+| `STORE_ENCRYPTION_KEY` | 32-character encryption key |
+| `NOVU_SECRET_KEY` | Novu secret key |
+| `REDIS_PASSWORD` | Redis password |
+| `API_EXTERNAL_URL` | Browser-accessible API URL (e.g., `https://novu-api.example.com`) |
+| `WS_EXTERNAL_URL` | Browser-accessible WebSocket URL |
+| `DASHBOARD_EXTERNAL_URL` | Browser-accessible dashboard URL |
+| `ADMIN_TOOLS_EXTERNAL_URL` | Browser-accessible admin tools URL |
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        ReNovu Stack                         │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   │
-│  │Dashboard │  │   API    │  │  Worker  │  │    WS    │   │
-│  │  :3000   │  │  :3001   │  │  :3004   │  │  :3002   │   │
-│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘   │
-│       │             │             │             │          │
-│       └─────────────┴──────┬──────┴─────────────┘          │
-│                            │                                │
-│              ┌─────────────┴─────────────┐                 │
-│              │                           │                  │
-│         ┌────┴────┐               ┌──────┴──────┐          │
-│         │ MongoDB │               │    Redis    │          │
-│         │  :27017 │               │    :6379    │          │
-│         └─────────┘               └─────────────┘          │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
-```
+### Coolify Deployment
 
-## Configuration
+The `docker-compose.production.yml` is designed for [Coolify](https://coolify.io):
 
-Edit `.env` for your environment:
+1. Create a new service in Coolify using Docker Compose
+2. Point to this repo's `docker-compose.production.yml`
+3. Set the required environment variables in Coolify's UI
+4. Coolify handles Traefik routing and TLS automatically
+
+### Configuration
 
 ```bash
 # Security (CHANGE IN PRODUCTION!)
@@ -180,17 +248,20 @@ STORE_ENCRYPTION_KEY=32-character-encryption-key!!
 NOVU_SECRET_KEY=your-novu-secret-key
 
 # Database
-MONGO_USER=renovu
+MONGO_USER=novu
 MONGO_PASSWORD=secure-password
+REDIS_PASSWORD=secure-redis-password
 
-# URLs (update for production)
-API_ROOT_URL=http://localhost:3001
-FRONT_BASE_URL=http://localhost:3000
+# External URLs (for production with reverse proxy)
+API_EXTERNAL_URL=https://novu-api.example.com
+WS_EXTERNAL_URL=https://novu-ws.example.com
+DASHBOARD_EXTERNAL_URL=https://novu.example.com
+ADMIN_TOOLS_EXTERNAL_URL=https://novu-admin.example.com
 
-# Ports
-DASHBOARD_PORT=3000
-API_PORT=3001
-WS_PORT=3002
+# Optional
+PM2_INSTANCES=max          # PM2 cluster mode (default: max = CPU cores)
+IMAGE_TAG=latest           # GHCR image tag
+ADMIN_API_KEY=your-key     # API key for headless admin-tools access
 ```
 
 ## Providers
@@ -253,25 +324,19 @@ ReNovu supports 50+ notification providers out of the box:
 
 ## Testing
 
-ReNovu includes comprehensive E2E test suites:
+### API E2E Tests
 
 ```bash
-# Run full test suite (all 10 suites, 64 tests)
+# Run full test suite (10 suites, 64 tests)
 ./test-renovu-e2e.sh
 
 # Run specific suite
 ./test-renovu-e2e.sh --suite health
 ./test-renovu-e2e.sh --suite subscribers
-./test-renovu-e2e.sh --suite locale
-
-# List available suites
-./test-renovu-e2e.sh --list
 
 # Translation-specific tests
 ./test-translation-e2e.sh
 ```
-
-### Test Suites
 
 | Suite | Tests | Coverage |
 |-------|-------|----------|
@@ -286,29 +351,41 @@ ReNovu includes comprehensive E2E test suites:
 | topics | 6 | CRUD, trigger-to-topic |
 | edge-cases | 8 | Error handling, auth validation |
 
-## Development
+### Playwright UI Tests
 
 ```bash
-# Install dependencies
-pnpm install
+cd tests/integration
+npm install && npx playwright install chromium
 
-# Start dev servers
-pnpm start:api:dev      # API on :3001
-pnpm start:dashboard    # Dashboard on :3000
-pnpm start:worker       # Background worker
-pnpm start:ws           # WebSocket server
+# Run all UI tests
+npx playwright test
+
+# Headed mode (watch it run)
+npx playwright test --headed
+
+# Single test file
+npx playwright test tests/01-create-workflows.e2e.ts
 ```
 
-### Build from Source
+## Building Images
 
 ```bash
-# Build all images
+# Build all images locally
 docker compose build
 
-# Build specific service
-docker compose build api
-docker compose build dashboard
+# Build and push multi-arch to GHCR
+docker buildx build --builder multiarch \
+  --platform linux/amd64,linux/arm64 \
+  -t ghcr.io/atlonxp/renovu-api:latest \
+  -f docker/Dockerfile.api --push .
 ```
+
+Available Dockerfiles in `docker/`:
+- `Dockerfile.api` — API server
+- `Dockerfile.worker` — Background worker
+- `Dockerfile.ws` — WebSocket server
+- `Dockerfile.dashboard` — Dashboard SPA
+- `Dockerfile.admin-tools` — Admin tools service
 
 ## Project Structure
 
@@ -316,13 +393,14 @@ docker compose build dashboard
 renovu/
 ├── apps/
 │   ├── api/              # NestJS REST API
-│   ├── dashboard/        # React admin dashboard
+│   ├── dashboard/        # React admin dashboard (Vite)
 │   ├── worker/           # Background job processor
 │   ├── ws/               # WebSocket server
+│   ├── admin-tools/      # Backup/restore + export/import service
 │   ├── inbound-mail/     # Inbound email processor
 │   └── webhook/          # Webhook delivery service
 ├── libs/
-│   ├── dal/              # Data access layer
+│   ├── dal/              # Data access layer (MongoDB repositories)
 │   └── application-generic/
 ├── packages/
 │   ├── shared/           # Shared types & constants
@@ -331,114 +409,118 @@ renovu/
 │   ├── js/               # JavaScript SDK
 │   ├── react/            # React components (Inbox)
 │   └── providers/        # Channel provider implementations
-├── docker/               # Dockerfiles
-├── test-renovu-e2e.sh    # Comprehensive E2E tests
-├── test-translation-e2e.sh # Translation E2E tests
-└── docker-compose.yml
+├── docker/
+│   ├── Dockerfile.api
+│   ├── Dockerfile.worker
+│   ├── Dockerfile.ws
+│   ├── Dockerfile.dashboard
+│   └── Dockerfile.admin-tools
+├── tests/
+│   └── integration/      # Playwright UI E2E tests
+├── docker-compose.yml              # Local development
+├── docker-compose.production.yml   # Production (GHCR images)
+├── test-renovu-e2e.sh              # API E2E tests
+└── test-translation-e2e.sh         # Translation E2E tests
 ```
 
-## Changelog
+## Syncing with Upstream
 
-### ReNovu Status
-
-ReNovu is currently synced with **Novu v3.14.0** (upstream `next` branch as of 2026-02-24).
-
-#### ReNovu v1.0.0 — 2026-02-24
-
-**Self-Hosted Enterprise Unlock**
-- Unlock all enterprise tier restrictions for self-hosted deployments
-- UNLIMITED tier auto-assigned to all organizations
-- Self-hosted JWT auth (no Clerk dependency)
-- Auto-organization creation on first login
-- Environments page enabled for self-hosted mode
-- Settings page enabled for self-hosted mode
-
-**AI Translation System** (replaces `@novu/ee-translation`)
-- `packages/translation/` — full translation package with OpenAI GPT integration
-- Variable protection: Handlebars `{{variables}}` tokenized before translation
-- HTML structural validation on translated content
-- Organization-level encrypted settings (AES-256)
-- Locale alias mapping (e.g., `zh-hans` → `zh_CN`)
-- Async Bull queue processing for batch translations
-- Dashboard UI: settings panel, translate button, preview hook
-- Translation bridge in worker for self-hosted notification delivery
-- 6 REST API endpoints for translation management
-
-**Infrastructure**
-- Docker Compose self-hosted deployment configuration
-- Nx circular dependency fix for local Docker builds
-- CI trigger changed from `next` to `release` branch
-- `ee-auth` stub package for self-hosted builds
-
-**Testing**
-- `test-renovu-e2e.sh` — 10 suites, 64 tests covering health, subscribers, workflows, triggers, in-app, locale, preferences, integrations, topics, edge cases
-- `test-translation-e2e.sh` — 6 phases covering translation settings, auto-translate, variable preservation, locale delivery
-
----
-
-### Upstream Novu Changelog
-
-Changes merged from [novuhq/novu](https://github.com/novuhq/novu) `next` branch:
-
-#### Novu v3.14.0 — 2026-02-12
-- Email step resolver init & publish commands (NV-7094)
-- Monthly usage digest email (NV-6933)
-- CF step resolver dispatch worker (NV-7103)
-- Cache workflow preferences in LRU store (worker performance)
-
-#### Novu v3.13.0 — 2026-01-28
-- Preference optimization flows (API + worker refactor)
-- Enhanced sanitization logic for control values
-- Default queue concurrency and batch flush interval updates
-- Remove Intercom references
-- WebSocket contextKeys made non-optional (NV-7091)
-- User-agent header removal from JS/React SDKs (NV-7073)
-
-#### Novu v3.12.0 — 2026-01-07
-- Get started link URL update (dashboard)
-- SocketWorker event handling simplification
-- Traces schema date type for expire-at
-
-#### Recent Upstream Fixes (synced 2026-02-24)
-- Integration store provider crash fix (NV-7120)
-- Workflow sync environment check
-- Action required card alignment (NV-7122)
-- Environment ID organization check
-- Payload parsing fix
-- MailerSend upgrade + message ID response fix
-- Email layout name saving issue (NV-7084)
-- Conditional preference fetches for global (performance)
-- VariableInput readonly/disabled forwarding
-- Nx build without cloud access
-- Mongo duplicate error handling
-- Allow null controlValues and restore behavior (NV-7112)
-- Workflow step control management with override
-
----
-
-### Sync Status
-
-| | Version | Branch | Last Synced |
-|---|---------|--------|-------------|
-| **ReNovu** | v1.0.0 | `next` | — |
-| **Upstream Novu** | v3.14.0 | `next` | 2026-02-24 |
-
-To sync with upstream:
 ```bash
+# Add upstream remote (one-time)
+git remote add upstream https://github.com/novuhq/novu.git
+
+# Fetch and merge
 git fetch upstream
 git merge upstream/next
 # Resolve conflicts (keep ReNovu customizations)
 git push origin next
 ```
 
-## Contributing
+## Changelog
 
-ReNovu is community-driven. We welcome contributions for:
+### ReNovu v1.1.0 — 2026-02-25
 
-- Reverse-engineering additional enterprise features
-- Adding new notification providers
-- Improving documentation
-- Bug fixes and optimizations
+**Admin Tools — Data Management** (`apps/admin-tools/`)
+- New NestJS microservice for data management operations
+- Full MongoDB backup/restore: 25 collections, cursor-based NDJSON streaming for high-volume collections, batch inserts (5,000 docs/batch)
+- Org-scoped backup storage — backups isolated per organization (multi-tenant safe), legacy flat backups auto-migrated on startup
+- Workflow export/import with complete dependency graph: workflows → steps → message templates → layouts → control values
+- Full ID remapping during import — all internal references (`_templateId`, `_layoutId`, `_workflowId`, etc.) remapped to target environment
+- Layout control values (v2 email content) included in export/import
+- Import conflict strategies: `skip` existing or `overwrite`
+- Pre-restore safety backup created automatically before any restore
+- Dry-run mode for previewing restore operations
+- CLI scripts (`dist/cli/backup.js`, `restore.js`, `export.js`, `import.js`) for headless/CI usage
+- Dual auth: JWT (from Dashboard) + API key (`ADMIN_API_KEY` env var) for automation
+
+**Dashboard — Data Management UI**
+- New **Settings > Data Management** tab with backup/restore and workflow export/import
+- Backup: create, list, download, delete — with file size and date display
+- Restore: upload `.tar.gz`, dry-run toggle, confirmation dialog
+- Export: select all or individual workflows, download as JSON
+- Import: upload JSON, select conflict strategy (skip/overwrite), progress feedback
+
+**Dashboard — Self-Hosted Fixes**
+- Email layouts paywall removed — "Need more layouts? Contact Sales" replaced with `IS_SELF_HOSTED` check
+- Comprehensive `VITE_SELF_HOSTED` type fixes across 20+ components
+- Vercel integration page stubbed out (not applicable for self-hosted)
+- Settings and Environments pages enabled for self-hosted mode
+- Settings page crash fix (null membership handling)
+- Backup date display format fix
+
+**Infrastructure**
+- Multi-arch Docker images (linux/amd64 + linux/arm64) published to GHCR
+- Production compose (`docker-compose.production.yml`) designed for Coolify with Traefik labels
+- Staging compose (`docker-compose.staging.yml`) with environment-specific configuration
+- PM2 cluster mode (`PM2_INSTANCES=max`) for API, Worker, and WebSocket services
+- MongoDB persistent volume with configurable `MONGO_DATA_PATH`
+- ARM64 Docker build fixes: QEMU timeout workaround for WebSocket service, PM2 binary symlinks
+
+**Testing**
+- Playwright integration test suite: 3 test files, 15 tests covering account creation, workflows, backup/restore, export/import
+- Sequential test execution with shared state across test files
+
+### ReNovu v1.0.0 — 2026-02-24
+
+**Self-Hosted Enterprise Unlock**
+- All enterprise tier restrictions removed for self-hosted deployments
+- `UNLIMITED` tier auto-assigned to all new organizations — unlimited workflows, team members, API calls
+- Removed `@clerk/clerk-react` dependency — replaced with self-hosted JWT authentication
+- Auto-organization creation on first user signup
+- `ee-auth` stub package created to satisfy build dependencies without Clerk
+- Self-hosted mode blank page after login fixed
+- React 18/19 type conflicts resolved in notifications package
+
+**AI Translation System** (replaces `@novu/ee-translation`)
+- New `packages/translation/` package — drop-in replacement for Novu's enterprise translation
+- OpenAI GPT integration with model selection (gpt-4o-mini, gpt-4o, gpt-4-turbo)
+- Handlebars variable protection — `{{subscriber.firstName}}` and other variables tokenized before translation, preventing corruption
+- HTML structural validation on translated content
+- Organization-level encrypted settings (AES-256) stored in MongoDB
+- Locale alias mapping for non-standard codes (e.g., `zh-hans` → `zh_CN`)
+- Async Bull queue processing for batch translations
+- Translation bridge in Worker for notification delivery with locale support
+- Dashboard UI: settings panel with API key management, translate button on workflows, preview hook
+- API endpoints: settings CRUD, connection test, auto-translate trigger, async job status
+
+**Docker & CI/CD**
+- 5 production Dockerfiles: `Dockerfile.api`, `Dockerfile.worker`, `Dockerfile.ws`, `Dockerfile.dashboard`, `Dockerfile.admin-tools`
+- GitHub Actions workflow for automated GHCR image publishing
+- Programmable Docker Compose files with environment variable overrides for all service images
+- Coolify deployment support with GHCR image directives
+- Nx circular dependency fix for local Docker builds
+
+**Testing**
+- `test-renovu-e2e.sh` — 10 API E2E suites, 64 tests (health, subscribers, workflows, triggers, in-app, locale, preferences, integrations, topics, edge-cases)
+- `test-translation-e2e.sh` — 6 translation-specific test phases
+- Self-hosted auth E2E suite: 7 tests, 11 assertions
+
+### Sync Status
+
+| | Version | Branch | Last Synced |
+|---|---------|--------|-------------|
+| **ReNovu** | v1.1.0 | `staging` | — |
+| **Upstream Novu** | v3.14.0 | `next` | 2026-02-24 |
 
 ## Disclaimer
 

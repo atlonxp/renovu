@@ -108,15 +108,33 @@ export class ExportService {
       }
     }
 
-    // ── 5. Fetch layouts ──
+    // ── 5. Fetch layouts (referenced by message templates + v2 BRIDGE layouts) ──
     const layoutCollection = db.collection('layouts');
     let layouts: any[] = [];
 
     if (layoutIds.size > 0) {
       const layoutObjectIds = Array.from(layoutIds).map((id) => new ObjectId(id));
       layouts = await layoutCollection.find({ _id: { $in: layoutObjectIds } }).toArray();
-      this.logger.debug(`Fetched ${layouts.length} layouts`);
+      this.logger.debug(`Fetched ${layouts.length} layouts referenced by message templates`);
     }
+
+    // Also capture v2 layouts (type=BRIDGE) that may not be referenced by _layoutId
+    const v2Layouts = await layoutCollection
+      .find({
+        _environmentId: new ObjectId(environmentId),
+        type: 'BRIDGE',
+        origin: 'novu-cloud',
+        deleted: { $ne: true },
+      })
+      .toArray();
+
+    const existingLayoutIds = new Set(layouts.map((l) => l._id.toString()));
+    for (const v2Layout of v2Layouts) {
+      if (!existingLayoutIds.has(v2Layout._id.toString())) {
+        layouts.push(v2Layout);
+      }
+    }
+    this.logger.debug(`Total layouts to export: ${layouts.length} (including ${v2Layouts.length} v2 layouts)`);
 
     // ── 6. Fetch feeds ──
     const feedCollection = db.collection('feeds');
@@ -145,7 +163,17 @@ export class ExportService {
     if (workflowObjectIds.length > 0) {
       const wfObjectIds = workflowObjectIds.map((id) => new ObjectId(id));
       controlValues = await controlCollection.find({ _workflowId: { $in: wfObjectIds } }).toArray();
-      this.logger.debug(`Fetched ${controlValues.length} control values`);
+      this.logger.debug(`Fetched ${controlValues.length} workflow control values`);
+    }
+
+    // ── 8b. Fetch control values for the exported layouts (v2 layout content) ──
+    if (layouts.length > 0) {
+      const layoutObjIds = layouts.map((l) => l._id);
+      const layoutControlValues = await controlCollection
+        .find({ _layoutId: { $in: layoutObjIds }, level: 'layout' })
+        .toArray();
+      controlValues.push(...layoutControlValues);
+      this.logger.debug(`Fetched ${layoutControlValues.length} layout control values`);
     }
 
     // ── 9. Strip env-specific fields and map _id → _exportId ──

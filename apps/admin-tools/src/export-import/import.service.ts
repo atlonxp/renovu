@@ -331,7 +331,7 @@ export class ImportService {
       }
     }
 
-    // ── 6. Import control values (remap _workflowId, _stepId) ──
+    // ── 6. Import control values (remap _workflowId, _stepId, _layoutId) ──
     this.logger.log(`Importing ${pkg.controlValues.length} control values...`);
     const controlCollection = db.collection('controls');
 
@@ -341,39 +341,62 @@ export class ImportService {
         newDoc._environmentId = envObjectId;
         newDoc._organizationId = orgObjectId;
 
-        // Remap _workflowId
-        if (cv._workflowId && idMap[cv._workflowId]) {
-          newDoc._workflowId = idMap[cv._workflowId];
-        } else if (cv._workflowId) {
-          this.logger.debug(`Workflow ${cv._workflowId} not found in remap table for control value`);
-          // Skip this control value since it can't be linked
-          skipped.controlValues++;
-          continue;
-        }
+        const isLayoutControl = cv.level === 'layout';
 
-        // Remap _stepId
-        if (cv._stepId && idMap[cv._stepId]) {
-          newDoc._stepId = idMap[cv._stepId];
-        }
-        // Note: _stepId might reference a step _id within a workflow,
-        // which is remapped via the step processing. If not in the map,
-        // keep the original value as it may be a step identifier string.
-
-        // For overwrite strategy, check if control already exists for this workflow+step
-        if (strategy === 'overwrite' && newDoc._workflowId) {
-          const query: any = {
-            _workflowId: newDoc._workflowId,
-            _environmentId: envObjectId,
-          };
-          if (newDoc._stepId) {
-            query._stepId = newDoc._stepId;
+        if (isLayoutControl) {
+          // Remap _layoutId for layout control values
+          if (cv._layoutId && idMap[cv._layoutId]) {
+            newDoc._layoutId = idMap[cv._layoutId];
+          } else if (cv._layoutId) {
+            this.logger.debug(`Layout ${cv._layoutId} not found in remap table for layout control value`);
+            skipped.controlValues++;
+            continue;
           }
 
-          const existing = await controlCollection.findOne(query);
-          if (existing) {
-            await controlCollection.updateOne({ _id: existing._id }, { $set: newDoc });
-            imported.controlValues++;
+          // For overwrite strategy, check if layout control already exists
+          if (strategy === 'overwrite' && newDoc._layoutId) {
+            const existing = await controlCollection.findOne({
+              _layoutId: newDoc._layoutId,
+              _environmentId: envObjectId,
+              level: 'layout',
+            });
+            if (existing) {
+              await controlCollection.updateOne({ _id: existing._id }, { $set: newDoc });
+              imported.controlValues++;
+              continue;
+            }
+          }
+        } else {
+          // Remap _workflowId for workflow/step control values
+          if (cv._workflowId && idMap[cv._workflowId]) {
+            newDoc._workflowId = idMap[cv._workflowId];
+          } else if (cv._workflowId) {
+            this.logger.debug(`Workflow ${cv._workflowId} not found in remap table for control value`);
+            skipped.controlValues++;
             continue;
+          }
+
+          // Remap _stepId
+          if (cv._stepId && idMap[cv._stepId]) {
+            newDoc._stepId = idMap[cv._stepId];
+          }
+
+          // For overwrite strategy, check if control already exists for this workflow+step
+          if (strategy === 'overwrite' && newDoc._workflowId) {
+            const query: any = {
+              _workflowId: newDoc._workflowId,
+              _environmentId: envObjectId,
+            };
+            if (newDoc._stepId) {
+              query._stepId = newDoc._stepId;
+            }
+
+            const existing = await controlCollection.findOne(query);
+            if (existing) {
+              await controlCollection.updateOne({ _id: existing._id }, { $set: newDoc });
+              imported.controlValues++;
+              continue;
+            }
           }
         }
 

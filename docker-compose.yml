@@ -63,7 +63,7 @@ services:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-renovu}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-renovu-dev-password}
     volumes:
-      - mongodb-data:/data/db
+      - ./data/renovu/mongodb:/data/db
     networks:
       - renovu-network
     healthcheck:
@@ -405,8 +405,6 @@ networks:
 # =============================================================================
 volumes:
   redis-data:
-    driver: local
-  mongodb-data:
     driver: local
   admin-tools-backups:
     driver: local

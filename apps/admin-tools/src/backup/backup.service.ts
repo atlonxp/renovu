@@ -165,15 +165,60 @@ export class BackupService implements OnModuleInit {
     this.backupDir = process.env.BACKUP_DIR || '/tmp/admin-tools-backups';
     fs.mkdirSync(this.backupDir, { recursive: true });
     this.logger.log(`Backup directory: ${this.backupDir}`);
+    this.migrateUnorganizedBackups();
+  }
+
+  /**
+   * Return the org-scoped backup directory, creating it if needed.
+   */
+  private getOrgBackupDir(orgId: string): string {
+    const sanitized = path.basename(orgId);
+    const orgDir = path.join(this.backupDir, sanitized);
+    fs.mkdirSync(orgDir, { recursive: true });
+    return orgDir;
+  }
+
+  /**
+   * One-time migration: move any backups from the root backupDir into a 'global' subdirectory.
+   * This handles backups created before org-scoping was added.
+   */
+  private migrateUnorganizedBackups(): void {
+    try {
+      const files = fs.readdirSync(this.backupDir);
+      const backupFiles = files.filter(
+        (f) => f.endsWith('.tar.gz') || f.endsWith('.manifest.json'),
+      );
+
+      if (backupFiles.length === 0) return;
+
+      const globalDir = this.getOrgBackupDir('global');
+      let migrated = 0;
+
+      for (const file of backupFiles) {
+        const src = path.join(this.backupDir, file);
+        const dest = path.join(globalDir, file);
+        if (!fs.existsSync(dest)) {
+          fs.renameSync(src, dest);
+          migrated++;
+        }
+      }
+
+      if (migrated > 0) {
+        this.logger.log(`Migrated ${migrated} legacy backup files to global/ subdirectory`);
+      }
+    } catch (error) {
+      this.logger.warn(`Failed to migrate legacy backups: ${error.message}`);
+    }
   }
 
   // ──────────────────────────────────────────────────
   //  CREATE BACKUP
   // ──────────────────────────────────────────────────
 
-  async createBackup(): Promise<CreateBackupResponseDto> {
+  async createBackup(orgId = 'global'): Promise<CreateBackupResponseDto> {
     await this.acquireLock();
     try {
+      const orgDir = this.getOrgBackupDir(orgId);
       const startTime = Date.now();
       // Format: backup-YYYYMMDD-HHmmss
       const now = new Date();
@@ -190,9 +235,9 @@ export class BackupService implements OnModuleInit {
         ].join('');
 
       const backupName = `backup-${formattedTimestamp}`;
-      const tempDir = path.join(this.backupDir, `${backupName}-tmp`);
-      const tarPath = path.join(this.backupDir, `${backupName}.tar.gz`);
-      const sidecarPath = path.join(this.backupDir, `${backupName}.manifest.json`);
+      const tempDir = path.join(orgDir, `${backupName}-tmp`);
+      const tarPath = path.join(orgDir, `${backupName}.tar.gz`);
+      const sidecarPath = path.join(orgDir, `${backupName}.manifest.json`);
 
       fs.mkdirSync(tempDir, { recursive: true });
 
@@ -269,15 +314,16 @@ export class BackupService implements OnModuleInit {
   //  LIST BACKUPS
   // ──────────────────────────────────────────────────
 
-  async listBackups(): Promise<BackupListItemDto[]> {
-    const files = fs.readdirSync(this.backupDir);
+  async listBackups(orgId = 'global'): Promise<BackupListItemDto[]> {
+    const orgDir = this.getOrgBackupDir(orgId);
+    const files = fs.readdirSync(orgDir);
     const backups: BackupListItemDto[] = [];
 
     for (const file of files) {
       if (!file.endsWith('.tar.gz')) continue;
 
       const baseName = file.replace('.tar.gz', '');
-      const sidecarPath = path.join(this.backupDir, `${baseName}.manifest.json`);
+      const sidecarPath = path.join(orgDir, `${baseName}.manifest.json`);
 
       if (fs.existsSync(sidecarPath)) {
         // Use sidecar for fast listing
@@ -291,7 +337,7 @@ export class BackupService implements OnModuleInit {
           });
         } catch {
           // Fall back to stat-only info
-          const stat = fs.statSync(path.join(this.backupDir, file));
+          const stat = fs.statSync(path.join(orgDir, file));
           backups.push({
             filename: file,
             size: stat.size,
@@ -301,7 +347,7 @@ export class BackupService implements OnModuleInit {
         }
       } else {
         // No sidecar, use file stat
-        const stat = fs.statSync(path.join(this.backupDir, file));
+        const stat = fs.statSync(path.join(orgDir, file));
         backups.push({
           filename: file,
           size: stat.size,
@@ -321,10 +367,11 @@ export class BackupService implements OnModuleInit {
   //  GET BACKUP FILE PATH (for download)
   // ──────────────────────────────────────────────────
 
-  getBackupFilePath(filename: string): string | null {
+  getBackupFilePath(filename: string, orgId = 'global'): string | null {
+    const orgDir = this.getOrgBackupDir(orgId);
     // Sanitize filename to prevent directory traversal
     const sanitized = path.basename(filename);
-    const filePath = path.join(this.backupDir, sanitized);
+    const filePath = path.join(orgDir, sanitized);
 
     if (!fs.existsSync(filePath)) {
       return null;
@@ -337,9 +384,10 @@ export class BackupService implements OnModuleInit {
   //  DELETE BACKUP
   // ──────────────────────────────────────────────────
 
-  deleteBackup(filename: string): boolean {
+  deleteBackup(filename: string, orgId = 'global'): boolean {
+    const orgDir = this.getOrgBackupDir(orgId);
     const sanitized = path.basename(filename);
-    const filePath = path.join(this.backupDir, sanitized);
+    const filePath = path.join(orgDir, sanitized);
 
     if (!fs.existsSync(filePath)) {
       return false;
@@ -349,7 +397,7 @@ export class BackupService implements OnModuleInit {
 
     // Also remove the sidecar manifest if present
     const baseName = sanitized.replace('.tar.gz', '');
-    const sidecarPath = path.join(this.backupDir, `${baseName}.manifest.json`);
+    const sidecarPath = path.join(orgDir, `${baseName}.manifest.json`);
     if (fs.existsSync(sidecarPath)) {
       fs.unlinkSync(sidecarPath);
     }
@@ -361,7 +409,7 @@ export class BackupService implements OnModuleInit {
   //  RESTORE BACKUP
   // ──────────────────────────────────────────────────
 
-  async restoreBackup(filePath: string, dryRun: boolean): Promise<RestoreResponseDto> {
+  async restoreBackup(filePath: string, dryRun: boolean, orgId = 'global'): Promise<RestoreResponseDto> {
     await this.acquireLock();
     const startTime = Date.now();
     const ts = Date.now();
@@ -402,7 +450,7 @@ export class BackupService implements OnModuleInit {
       this.logger.log('Creating automatic pre-restore backup...');
       try {
         this.releaseLock(); // Temporarily release lock so createBackup can acquire it
-        await this.createBackup();
+        await this.createBackup(orgId);
         await this.acquireLock(); // Re-acquire lock for the restore operation
         this.logger.log('Pre-restore backup created successfully');
       } catch (error) {

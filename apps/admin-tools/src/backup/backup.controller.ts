@@ -5,6 +5,7 @@ import {
   Delete,
   Param,
   Query,
+  Req,
   Res,
   UseGuards,
   UseInterceptors,
@@ -15,12 +16,22 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import * as fs from 'fs';
 import { AdminAuthGuard } from '../auth/admin-auth.guard';
 import { BackupService } from './backup.service';
 
 const MAX_UPLOAD_SIZE = 50 * 1024 * 1024; // 50 MB
+
+/**
+ * Extract the organization ID from the authenticated request.
+ * JWT users have organizationId in the token payload.
+ * API key users get a fallback 'global' scope.
+ */
+function getOrgId(req: Request): string {
+  const user = (req as any).user;
+  return user?.organizationId || 'global';
+}
 
 @Controller('api')
 @UseGuards(AdminAuthGuard)
@@ -31,13 +42,14 @@ export class BackupController {
 
   /**
    * POST /api/backup
-   * Create a full environment backup.
+   * Create a full environment backup scoped to the caller's organization.
    */
   @Post('backup')
-  async createBackup() {
-    this.logger.log('Creating full environment backup...');
+  async createBackup(@Req() req: Request) {
+    const orgId = getOrgId(req);
+    this.logger.log(`Creating backup for org ${orgId}...`);
     try {
-      const result = await this.backupService.createBackup();
+      const result = await this.backupService.createBackup(orgId);
       return result;
     } catch (error) {
       this.logger.error(`Backup failed: ${error.message}`, error.stack);
@@ -50,21 +62,23 @@ export class BackupController {
 
   /**
    * GET /api/backups
-   * List all available backups.
+   * List backups belonging to the caller's organization.
    */
   @Get('backups')
-  async listBackups() {
-    const backups = await this.backupService.listBackups();
+  async listBackups(@Req() req: Request) {
+    const orgId = getOrgId(req);
+    const backups = await this.backupService.listBackups(orgId);
     return { backups, total: backups.length };
   }
 
   /**
    * GET /api/backups/:filename/download
-   * Download a backup tar.gz file.
+   * Download a backup tar.gz file (org-scoped).
    */
   @Get('backups/:filename/download')
-  async downloadBackup(@Param('filename') filename: string, @Res() res: Response) {
-    const filePath = this.backupService.getBackupFilePath(filename);
+  async downloadBackup(@Param('filename') filename: string, @Req() req: Request, @Res() res: Response) {
+    const orgId = getOrgId(req);
+    const filePath = this.backupService.getBackupFilePath(filename, orgId);
 
     if (!filePath) {
       throw new HttpException(
@@ -131,6 +145,7 @@ export class BackupController {
   async restoreBackup(
     @UploadedFile() file: Express.Multer.File,
     @Query('dryRun') dryRun: string,
+    @Req() req: Request,
   ) {
     if (!file) {
       throw new HttpException(
@@ -139,14 +154,15 @@ export class BackupController {
       );
     }
 
+    const orgId = getOrgId(req);
     const isDryRun = dryRun === 'true';
 
     this.logger.log(
-      `Restore request: ${file.originalname} (${file.size} bytes), dryRun=${isDryRun}`,
+      `Restore request (org ${orgId}): ${file.originalname} (${file.size} bytes), dryRun=${isDryRun}`,
     );
 
     try {
-      const result = await this.backupService.restoreBackup(file.path, isDryRun);
+      const result = await this.backupService.restoreBackup(file.path, isDryRun, orgId);
       return result;
     } catch (error) {
       this.logger.error(`Restore failed: ${error.message}`, error.stack);
@@ -163,11 +179,12 @@ export class BackupController {
 
   /**
    * DELETE /api/backups/:filename
-   * Delete a specific backup file.
+   * Delete a specific backup file (org-scoped).
    */
   @Delete('backups/:filename')
-  async deleteBackup(@Param('filename') filename: string) {
-    const deleted = this.backupService.deleteBackup(filename);
+  async deleteBackup(@Param('filename') filename: string, @Req() req: Request) {
+    const orgId = getOrgId(req);
+    const deleted = this.backupService.deleteBackup(filename, orgId);
 
     if (!deleted) {
       throw new HttpException(
