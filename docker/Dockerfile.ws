@@ -23,7 +23,6 @@ COPY tsconfig.json .
 COPY apps/ws ./apps/ws
 COPY libs ./libs
 COPY packages ./packages
-COPY enterprise ./enterprise
 
 # Install dependencies
 RUN --mount=type=cache,id=pnpm-store-ws,target=/root/.pnpm-store \

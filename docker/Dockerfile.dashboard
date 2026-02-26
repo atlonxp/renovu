@@ -27,9 +27,6 @@ COPY apps/dashboard ./apps/dashboard
 COPY libs ./libs
 COPY packages ./packages
 
-# Create enterprise directory if it doesn't exist (for compatibility)
-RUN mkdir -p enterprise
-
 # Install dependencies
 RUN --mount=type=cache,id=pnpm-store-dashboard,target=/root/.pnpm-store \
     pnpm install --frozen-lockfile --unsafe-perm

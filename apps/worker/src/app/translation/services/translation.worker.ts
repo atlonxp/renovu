@@ -55,11 +55,11 @@ export class TranslationWorker extends TranslationWorkerService {
 
     this.initWorker(this.getWorkerProcessor(), this.getWorkerOptions());
 
-    this.worker.on('failed', async (job: Job<ITranslationDataDto, void, string>, error: Error): Promise<void> => {
+    this.bullMqWorker.on('failed', async (job: Job<ITranslationDataDto, void, string>, error: Error): Promise<void> => {
       await this.jobHasFailed(job, error);
     });
 
-    this.worker.on('completed', async (job: Job<ITranslationDataDto, void, string>): Promise<void> => {
+    this.bullMqWorker.on('completed', async (job: Job<ITranslationDataDto, void, string>): Promise<void> => {
       await this.jobHasCompleted(job);
     });
   }
