@@ -218,6 +218,7 @@ services:
 
       # Self-Hosted Mode
       IS_SELF_HOSTED: "true"
+      IS_V2_ENABLED: ${IS_V2_ENABLED:-true}
 
       # Worker Settings
       BROADCAST_QUEUE_CHUNK_SIZE: ${BROADCAST_QUEUE_CHUNK_SIZE:-100}
