@@ -12,6 +12,7 @@ import { ApiTranslationModule } from './app/translation/translation.module';
 import { SentryModule } from '@sentry/nestjs/setup';
 import packageJson from '../package.json';
 import { ActivityModule } from './app/activity/activity.module';
+import { AiModule } from './app/ai/ai.module';
 import { AnalyticsModule } from './app/analytics/analytics.module';
 import { AuthModule } from './app/auth/auth.module';
 import { BlueprintModule } from './app/blueprint/blueprint.module';
@@ -48,6 +49,7 @@ import { AnalyticsLogsInterceptor } from './app/shared/framework/analytics-logs.
 import { IdempotencyInterceptor } from './app/shared/framework/idempotency.interceptor';
 import { ProductFeatureInterceptor } from './app/shared/interceptors/product-feature.interceptor';
 import { SharedModule } from './app/shared/shared.module';
+import { StepResolversModule } from './app/step-resolvers/step-resolvers.module';
 import { StorageModule } from './app/storage/storage.module';
 import { SubscribersV1Module } from './app/subscribers/subscribersV1.module';
 import { SubscribersModule } from './app/subscribers-v2/subscribers.module';
@@ -92,6 +94,7 @@ const enterpriseQuotaThrottlerInterceptor =
     : [];
 
 const baseModules: Array<Type | DynamicModule | Promise<DynamicModule> | ForwardReference> = [
+  AiModule,
   AuthModule,
   InboundParseModule,
   SharedModule,
@@ -136,6 +139,7 @@ const baseModules: Array<Type | DynamicModule | Promise<DynamicModule> | Forward
   ChannelEndpointsModule,
   TranslationModule.forRoot({ includeControllers: false }),
   ApiTranslationModule,
+  StepResolversModule,
 ];
 
 const enterpriseModules = enterpriseImports();

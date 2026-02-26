@@ -23,7 +23,7 @@ function generateStepHandlersMap(steps: DiscoveredStep[]): string {
   const entries = steps
     .map(
       (s, i) =>
-        `  [${JSON.stringify(s.stepId)}, { handler: stepHandler${i}, stepId: stepId${i}, workflowId: workflowId${i} }]`
+        `  [${JSON.stringify(`${s.workflowId}/${s.stepId}`)}, { handler: stepHandler${i}, stepId: stepId${i}, workflowId: workflowId${i} }]`
     )
     .join(',\n');
 
@@ -52,7 +52,10 @@ function generateFetchHandler(): string {
       ${generateRequestHandler()}
     } catch (error) {
       console.error('Error executing step handler:', error);
-      return jsonResponse({ error: 'Step execution failed', message: 'Internal server error' }, 500);
+      return jsonResponse({
+        error: 'STEP_HANDLER_ERROR',
+        message: error instanceof Error ? error.message : String(error),
+      }, 500);
     }
   },
 };`;
@@ -64,26 +67,28 @@ function generateRequestHandler(): string {
       }
 
       const url = new URL(request.url);
-      const stepName = url.searchParams.get('step') || request.headers.get('X-Step-Name');
-      
-      if (!stepName) {
+      const workflowId = url.searchParams.get('workflowId');
+      const stepId = url.searchParams.get('stepId');
+
+      if (!workflowId || !stepId) {
         return jsonResponse(
-          { error: 'Missing step name', message: 'Provide step name via ?step=<name> query param or X-Step-Name header' },
+          { error: 'Missing routing params', message: 'Provide workflowId and stepId as query params' },
           400
         );
       }
 
-      const step = stepHandlers.get(stepName);
+      const stepKey = \`\${workflowId}/\${stepId}\`;
+      const step = stepHandlers.get(stepKey);
       if (!step) {
         return jsonResponse(
-          { error: 'Step not found', stepName, available: Array.from(stepHandlers.keys()) },
+          { error: 'Step not found', workflowId, stepId, available: Array.from(stepHandlers.keys()) },
           404
         );
       }
 
       ${generateBodyValidation()}
 
-      const result = await step.handler({ payload, subscriber, context, steps: stepOutputs });
+      const result = await step.handler({ payload, subscriber, context, steps: stepOutputs, controls });
 
       return jsonResponse(
         { stepId: step.stepId, workflowId: step.workflowId, subject: result.subject, body: result.body },
@@ -110,10 +115,11 @@ function generateBodyValidation(): string {
       const subscriber = body.subscriber ?? {};
       const context = body.context ?? {};
       const stepOutputs = body.steps ?? {};
+      const controls = body.controls ?? {};
 
-      if (!isObject(payload) || !isObject(subscriber) || !isObject(context) || !isObject(stepOutputs)) {
+      if (!isObject(payload) || !isObject(subscriber) || !isObject(context) || !isObject(stepOutputs) || !isObject(controls)) {
         return jsonResponse(
-          { error: 'Invalid request body', message: 'payload, subscriber, context, and steps must be JSON objects' },
+          { error: 'Invalid request body', message: 'payload, subscriber, context, steps, and controls must be JSON objects' },
           400
         );
       }`;

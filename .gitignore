@@ -115,3 +115,6 @@ data/
 # EE Symlinked folders - we need these for the EE build
 # @TODO - find a way to remove the symlinks without breaking the build
 !enterprise/packages/**/src
+
+# Ignore Cursor Plans folder
+.cursor/plans

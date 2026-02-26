@@ -43,6 +43,8 @@ export function StepPreviewFactory() {
     isPreviewPending: isInitialLoad || isTranslationLoading,
   };
 
+  const isStepResolver = typeof controlValues?.stepResolverHash === 'string';
+
   const mobilePreviewDescription =
     'This preview shows how your message will appear on mobile. Actual rendering may vary by device.';
 
@@ -53,6 +55,7 @@ export function StepPreviewFactory() {
           {...commonProps}
           isCustomHtmlEditor={controlValues?.editorType === 'html'}
           resourceOrigin={step.origin ?? ResourceOriginEnum.NOVU_CLOUD}
+          isStepResolver={isStepResolver}
         />
       );
 

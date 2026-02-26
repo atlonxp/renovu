@@ -4,6 +4,8 @@ export { SubscriberProcessWorkerService } from './subscriber-process-worker.serv
 export { TranslationWorkerService } from './translation-worker.service';
 export { WebSocketsWorkerService } from './web-sockets-worker.service';
 export {
+  SqsCompletedHandler,
+  SqsFailedHandler,
   WorkerBaseService,
   WorkerOptions,
   WorkerProcessor,

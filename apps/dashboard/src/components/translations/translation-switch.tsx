@@ -1,9 +1,9 @@
+import { ApiServiceLevelEnum, FeatureNameEnum, getFeatureForTierAsBoolean, PermissionsEnum } from '@novu/shared';
 import { Switch } from '@/components/primitives/switch';
 import { UpgradeCTATooltip } from '@/components/upgrade-cta-tooltip';
 import { IS_ENTERPRISE, IS_SELF_HOSTED } from '@/config';
 import { useFetchSubscription } from '@/hooks/use-fetch-subscription';
 import { useTranslationSettings } from '@/hooks/use-translation-settings';
-import { ApiServiceLevelEnum, FeatureNameEnum, getFeatureForTierAsBoolean, PermissionsEnum } from '@novu/shared';
 import { PermissionSwitch } from '../primitives/permission-switch';
 
 type TranslationSwitchProps = {
@@ -32,8 +32,9 @@ export function TranslationSwitch({ id, value, onChange, isReadOnly }: Translati
   // Cloud can use translations if they have the feature access
   const canUseTranslationFeature = IS_SELF_HOSTED ? hasOpenAIKeyConfigured : hasCloudFeatureAccess;
 
-  const disabled = !canUseTranslationFeature || isLoading || isReadOnly;
-  const checked = disabled ? false : value;
+  const isFeatureUnavailable = !canUseTranslationFeature || isLoading;
+  const disabled = isFeatureUnavailable || isReadOnly;
+  const checked = isFeatureUnavailable ? false : value;
 
   return (
     <div className="flex items-center">

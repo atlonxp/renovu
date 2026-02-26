@@ -84,7 +84,7 @@ export const TranslationListUpgradeCta = () => {
         >
           Upgrade now
         </Button>
-        <Link to={'https://docs.novu.co/platform/workflow/translations'} target="_blank">
+        <Link to={'https://docs.novu.co/platform/workflow/advanced-features/translations'} target="_blank">
           <LinkButton size="sm" leadingIcon={RiBookMarkedLine}>
             How does this help?
           </LinkButton>
