@@ -460,6 +460,31 @@ git push origin next
 
 ## Changelog
 
+### ReNovu v1.3.0 — 2026-02-27
+
+**Upstream Sync — Novu v3.14.0 (30 commits)**
+- Merged 30 upstream commits from `novuhq/novu:next` with all ReNovu customizations preserved
+- SQS as an alternative queue backend (alongside BullMQ/Redis)
+- AI workflow generation from user prompts
+- React Email step editor (partial)
+- Cloudflare step resolver deployment & resolution
+- Worker digest lifecycle and channel skip fixes
+- Mongoose DAL consolidation (single instance)
+- Dashboard translation toggle fix for production environments
+- Debug log level adjustments, request log transaction IDs
+
+**Enterprise Package Cleanup**
+- Removed `enterprise/packages/*` from `pnpm-workspace.yaml` — not needed for self-hosted
+- Removed `@novu/ee-billing`, `@novu/ee-shared-services`, `@novu/ee-translation`, `@novu/ee-api` from app dependencies
+- All enterprise imports use optional chaining (`require('...')?.X`) — gracefully absent at runtime
+- `@novu/ee-auth` remains as our self-hosted stub in `packages/ee-auth`
+- Smaller Docker images (no enterprise directory copied)
+
+**Build Fixes**
+- Fixed `TranslationWorker` — `this.worker` → `this.bullMqWorker` (upstream base class API change)
+- Fixed strict null TypeScript error in `publish-translation-group.usecase.ts`
+- Regenerated `pnpm-lock.yaml` for updated workspace layout
+
 ### ReNovu v1.2.0 — 2026-02-27
 
 **Coolify Deployment**
@@ -558,8 +583,8 @@ git push origin next
 
 | | Version | Branch | Last Synced |
 |---|---------|--------|-------------|
-| **ReNovu** | v1.2.0 | `next` → `release` | — |
-| **Upstream Novu** | v3.14.0 | `next` | 2026-02-24 |
+| **ReNovu** | v1.3.0 | `next` → `release` | — |
+| **Upstream Novu** | v3.14.0 | `next` | 2026-02-27 |
 
 ## Disclaimer
 
