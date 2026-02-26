@@ -131,7 +131,7 @@ export class PublishTranslationGroup {
 				dalResourceType,
 				resourceId,
 				resourceName || sourceGroup.resourceName,
-				targetResourceInternalId,
+				(targetResourceInternalId || resourceInternalId) as string,
 				targetEnvironmentId,
 				user.organizationId,
 				session,
