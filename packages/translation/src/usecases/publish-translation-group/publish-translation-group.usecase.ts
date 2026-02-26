@@ -101,13 +101,6 @@ export class PublishTranslationGroup {
 		// Convert to DAL enum
 		const dalResourceType = this.convertToDalResourceType(resourceType);
 
-		// Validate target internal ID
-		if (!targetResourceInternalId) {
-			throw new Error(
-				"targetResourceInternalId is required for publishing translations",
-			);
-		}
-
 		// Step 1: Find source LocalizationGroup
 		let sourceGroup: LocalizationGroupEntity | null = null;
 

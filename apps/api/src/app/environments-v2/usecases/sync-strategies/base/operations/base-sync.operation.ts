@@ -181,7 +181,7 @@ export abstract class BaseSyncOperation<T> {
           error.stack
         );
         this.logger.error(this.getSyncFailedMessage(this.getResourceName(decision.resource), error.message));
-        throw error;
+        // Continue syncing remaining resources instead of aborting the entire batch
       }
     }
   }
