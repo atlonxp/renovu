@@ -200,9 +200,9 @@ ReNovu includes a fully working AI-powered translation system that replaces Novu
 
 ## Production Deployment
 
-### Pre-built Images (Recommended)
+### Pre-built Images
 
-All images are published to GHCR with multi-arch support (amd64 + arm64):
+All images are published to GHCR (linux/amd64 + linux/arm64):
 
 ```
 ghcr.io/atlonxp/renovu-api:latest
@@ -212,9 +212,23 @@ ghcr.io/atlonxp/renovu-dashboard:latest
 ghcr.io/atlonxp/renovu-admin-tools:latest
 ```
 
+### Compose Files
+
+| File | Purpose |
+|------|---------|
+| `docker-compose.yml` | Local development (builds from source) |
+| `docker-compose.production.yml` | Standalone production (GHCR images, host port bindings) |
+| `docker-compose.coolify.yml` | Coolify deployment (GHCR images, no ports/networks — Coolify manages Traefik) |
+
 ```bash
-# Start with production compose (uses GHCR images)
+# Local development
+docker compose up -d
+
+# Standalone production
 docker compose -f docker-compose.production.yml up -d
+
+# Coolify (set in Coolify UI, not run manually)
+# docker compose -f docker-compose.coolify.yml up -d
 ```
 
 ### Required Environment Variables
@@ -232,12 +246,15 @@ docker compose -f docker-compose.production.yml up -d
 
 ### Coolify Deployment
 
-The `docker-compose.production.yml` is designed for [Coolify](https://coolify.io):
+Use `docker-compose.coolify.yml` for [Coolify](https://coolify.io) deployments:
 
 1. Create a new service in Coolify using Docker Compose
-2. Point to this repo's `docker-compose.production.yml`
+2. Point to this repo's `docker-compose.coolify.yml` on the `release` branch
 3. Set the required environment variables in Coolify's UI
-4. Coolify handles Traefik routing and TLS automatically
+4. Set `RENOVU_DATA_DIR` for persistent storage (e.g., `/home/arokago/renovu`)
+5. Coolify handles Traefik routing, TLS, and networking automatically
+
+> **Important:** `docker-compose.coolify.yml` has no custom networks or host port bindings. Coolify creates a shared network for all services. Adding a second network causes Traefik to randomly pick the wrong one, resulting in 504 errors.
 
 ### Configuration
 
@@ -257,6 +274,9 @@ API_EXTERNAL_URL=https://novu-api.example.com
 WS_EXTERNAL_URL=https://novu-ws.example.com
 DASHBOARD_EXTERNAL_URL=https://novu.example.com
 ADMIN_TOOLS_EXTERNAL_URL=https://novu-admin.example.com
+
+# Data directory (for persistent volumes in production)
+RENOVU_DATA_DIR=/home/user/renovu
 
 # Optional
 PM2_INSTANCES=max          # PM2 cluster mode (default: max = CPU cores)
@@ -417,8 +437,10 @@ renovu/
 │   └── Dockerfile.admin-tools
 ├── tests/
 │   └── integration/      # Playwright UI E2E tests
-├── docker-compose.yml              # Local development
-├── docker-compose.production.yml   # Production (GHCR images)
+├── docker-compose.yml              # Local development (builds from source)
+├── docker-compose.production.yml   # Standalone production (GHCR images)
+├── docker-compose.coolify.yml      # Coolify deployment (no ports/networks)
+├── .env.example                    # Environment variable reference
 ├── test-renovu-e2e.sh              # API E2E tests
 └── test-translation-e2e.sh         # Translation E2E tests
 ```
@@ -437,6 +459,23 @@ git push origin next
 ```
 
 ## Changelog
+
+### ReNovu v1.2.0 — 2026-02-27
+
+**Coolify Deployment**
+- New `docker-compose.coolify.yml` — purpose-built for Coolify with Traefik. No custom networks (avoids 504 errors from Traefik network misrouting), no host port bindings, no container names. Coolify manages all routing and TLS.
+- Separate from `docker-compose.production.yml` (standalone with host ports) to avoid Coolify-specific gotchas leaking into general production usage
+
+**Worker Crash Loop Fix**
+- Fixed worker infinite crash loop caused by MongoDB connection pool misconfiguration — `MONGO_MAX_POOL_SIZE: 10` was set but `MONGO_MIN_POOL_SIZE` was missing, causing the DAL default of `minPoolSize: 10` to conflict (min >= max). Worker never started successfully since initial deployment.
+- Added `MONGO_MIN_POOL_SIZE: 5` to worker across all compose files
+- Added `IS_V2_ENABLED: "true"` to worker for consistency with API
+
+**Infrastructure Fixes**
+- Added `platform: linux/amd64` to all services in production compose for Coolify compatibility
+- Increased `start_period` to 240s for PM2 cluster startup (API, Worker, WS, Admin Tools)
+- Used default MongoDB password to avoid URI special character encoding issues
+- Fixed volume path parsing for Coolify bind mounts
 
 ### ReNovu v1.1.0 — 2026-02-25
 
@@ -519,7 +558,7 @@ git push origin next
 
 | | Version | Branch | Last Synced |
 |---|---------|--------|-------------|
-| **ReNovu** | v1.1.0 | `staging` | — |
+| **ReNovu** | v1.2.0 | `next` → `release` | — |
 | **Upstream Novu** | v3.14.0 | `next` | 2026-02-24 |
 
 ## Disclaimer
