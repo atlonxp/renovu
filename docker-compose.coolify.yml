@@ -1,8 +1,12 @@
 # =============================================================================
 # ReNovu - Coolify Deployment
 # =============================================================================
-# For Coolify with Traefik — no host port bindings.
-# Coolify handles domain routing, TLS, and Traefik labels automatically.
+# For Coolify with Traefik — no host port bindings, no custom networks.
+# Coolify handles domain routing, TLS, Traefik labels, and networking.
+#
+# IMPORTANT: Do NOT define custom networks here. Coolify creates a shared
+# network for all services in the stack. Adding a second network causes
+# Traefik to randomly pick the wrong network, resulting in 504 errors.
 #
 # Set SERVICE_FQDN_* in Coolify UI to assign domains to each service.
 #
@@ -32,8 +36,6 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
     volumes:
       - ${RENOVU_DATA_DIR}/redis:/data
-    networks:
-      - renovu-network
     healthcheck:
       test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping | grep -q PONG"]
       interval: 10s
@@ -64,8 +66,6 @@ services:
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
     volumes:
       - ${RENOVU_DATA_DIR}/mongodb:/data/db
-    networks:
-      - renovu-network
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--username", "${MONGO_USER}", "--password", "${MONGO_PASSWORD}", "--eval", "db.adminCommand('ping').ok"]
       interval: 20s
@@ -123,8 +123,6 @@ services:
       IS_API_RATE_LIMITING_ENABLED: "false"
       IS_NEW_MESSAGES_API_RESPONSE_ENABLED: "true"
       IS_V2_ENABLED: "true"
-    networks:
-      - renovu-network
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/v1/health-check || exit 1"]
       interval: 30s
@@ -177,8 +175,6 @@ services:
       MULTICAST_QUEUE_CHUNK_SIZE: 100
       IS_EMAIL_INLINE_CSS_DISABLED: "false"
       IS_USE_MERGED_DIGEST_ID_ENABLED: "false"
-    networks:
-      - renovu-network
     healthcheck:
       test: ["CMD-SHELL", "pm2 pid main | grep -q '[0-9]' || exit 1"]
       interval: 30s
@@ -222,8 +218,6 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
       IS_SELF_HOSTED: "true"
-    networks:
-      - renovu-network
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3002/v1/health-check || exit 1"]
       interval: 30s
@@ -262,8 +256,6 @@ services:
       VITE_LEGACY_DASHBOARD_URL: ""
       VITE_CLERK_PUBLISHABLE_KEY: ""
       VITE_IS_EE: "false"
-    networks:
-      - renovu-network
     healthcheck:
       test: ["CMD-SHELL", "node -e \"const http = require('http'); const req = http.get({hostname: 'localhost', port: 4000, path: '/', timeout: 5000}, (res) => { process.exit(res.statusCode === 200 ? 0 : 1); }); req.on('error', () => process.exit(1)); req.on('timeout', () => { req.destroy(); process.exit(1); });\""]
       interval: 20s
@@ -302,8 +294,6 @@ services:
       BACKUP_DIR: /tmp/admin-tools-backups
     volumes:
       - ${RENOVU_DATA_DIR}/admin-tools-backups:/tmp/admin-tools-backups
-    networks:
-      - renovu-network
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3005/v1/health-check || exit 1"]
       interval: 30s
@@ -321,7 +311,3 @@ services:
       options:
         max-size: "50m"
         max-file: "5"
-
-networks:
-  renovu-network:
-    driver: bridge

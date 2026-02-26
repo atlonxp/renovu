@@ -64,6 +64,6 @@ WORKDIR /usr/src/app/apps/api
 
 ENV NEW_RELIC_NO_CONFIG_FILE=true
 
-EXPOSE 3001
+EXPOSE 3000
 
 CMD ["pm2-runtime", "start", "dist/main.js", "-i", "max"]
