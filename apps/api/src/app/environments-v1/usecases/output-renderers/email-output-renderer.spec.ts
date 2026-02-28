@@ -1,6 +1,6 @@
 import { ModuleRef } from '@nestjs/core';
 import { CreateExecutionDetails, DetailEnum, FeatureFlagsService, PinoLogger } from '@novu/application-generic';
-import { ControlValuesRepository, JobEntity, JobRepository, LayoutRepository } from '@novu/dal';
+import { ControlValuesRepository, JobEntity, JobRepository } from '@novu/dal';
 import { JSONContent as MailyJSONContent } from '@novu/maily-render';
 import {
   ControlValuesLevelEnum,
@@ -84,7 +84,6 @@ describe('EmailOutputRendererUsecase', () => {
   let getLayoutUseCase: sinon.SinonStubbedInstance<GetLayoutUseCase>;
   let jobRepositoryMock: sinon.SinonStubbedInstance<JobRepository>;
   let createExecutionDetailsMock: sinon.SinonStubbedInstance<CreateExecutionDetails>;
-  let layoutRepositoryMock: sinon.SinonStubbedInstance<LayoutRepository>;
   let emailOutputRendererUsecase: EmailOutputRendererUsecase;
   let translateStub: sinon.SinonStub;
 
@@ -102,8 +101,6 @@ describe('EmailOutputRendererUsecase', () => {
     getLayoutUseCase = sinon.createStubInstance(GetLayoutUseCase);
     jobRepositoryMock = sinon.createStubInstance(JobRepository);
     createExecutionDetailsMock = sinon.createStubInstance(CreateExecutionDetails);
-    layoutRepositoryMock = sinon.createStubInstance(LayoutRepository);
-    layoutRepositoryMock.findDefault.resolves(null);
 
     emailOutputRendererUsecase = new EmailOutputRendererUsecase(
       getOrganizationSettingsMock as any,
@@ -112,8 +109,7 @@ describe('EmailOutputRendererUsecase', () => {
       controlValuesRepositoryMock as any,
       getLayoutUseCase as any,
       jobRepositoryMock as any,
-      createExecutionDetailsMock as any,
-      layoutRepositoryMock as any
+      createExecutionDetailsMock as any
     );
   });
 

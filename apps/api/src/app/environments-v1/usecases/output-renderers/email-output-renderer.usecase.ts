@@ -15,7 +15,6 @@ import {
   ControlValuesRepository,
   JobEntity,
   JobRepository,
-  LayoutRepository,
   LocalizationResourceEnum,
   NotificationTemplateEntity,
   OrganizationEntity,
@@ -90,8 +89,7 @@ export class EmailOutputRendererUsecase extends BaseTranslationRendererUsecase {
     private controlValuesRepository: ControlValuesRepository,
     private getLayoutUseCase: GetLayoutUseCase,
     private jobRepository: JobRepository,
-    private createExecutionDetails: CreateExecutionDetails,
-    private layoutRepository: LayoutRepository
+    private createExecutionDetails: CreateExecutionDetails
   ) {
     super(moduleRef, logger);
     /**
@@ -307,9 +305,17 @@ export class EmailOutputRendererUsecase extends BaseTranslationRendererUsecase {
     // Fall back to the environment's default layout when no layout is explicitly set.
     // Per the email control DTO contract: null = no layout, undefined = use default layout.
     if (overriddenStepLayoutId === undefined) {
-      const defaultLayout = await this.layoutRepository.findDefault(environmentId, organizationId);
-      if (defaultLayout) {
-        overriddenStepLayoutId = defaultLayout.identifier;
+      try {
+        const defaultLayout = await this.getLayoutUseCase.execute(
+          GetLayoutCommand.create({
+            environmentId,
+            organizationId,
+            skipAdditionalFields: true,
+          })
+        );
+        overriddenStepLayoutId = defaultLayout.layoutId;
+      } catch {
+        // No default V2 layout exists — continue without layout
       }
     }
 
