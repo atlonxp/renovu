@@ -27,23 +27,30 @@ export const LayoutSelect = () => {
       .map((layout) => ({
         label: layout.isDefault ? `${layout.name} (Default)` : layout.name,
         value: layout.layoutId,
+        isDefault: layout.isDefault,
       }));
   }, [data]);
 
-  // Intentionally not auto-selecting default layout here
+  // When layoutId is undefined (not null), the backend falls back to the default layout.
+  // Reflect this in the UI by showing the default layout as the effective selection.
+  const defaultLayoutId = layoutsSortedByDefault.find((l) => l.isDefault)?.value;
 
   return (
     <FormField
       control={control}
       name="layoutId"
       render={({ field }) => {
+        // null = explicitly "no layout", undefined = use default layout
+        const effectiveValue =
+          field.value === null ? 'no_layout' : field.value === undefined ? (defaultLayoutId ?? 'no_layout') : field.value;
+
         return (
           <FormItem className="w-full">
             <FormControl>
               <Tooltip>
                 <TooltipTrigger disabled={layoutsSortedByDefault?.length === 0}>
                   <Select
-                    value={field.value ?? 'no_layout'}
+                    value={effectiveValue}
                     onValueChange={(value) => {
                       const newValue = value === 'no_layout' ? null : value;
                       field.onChange(newValue);
