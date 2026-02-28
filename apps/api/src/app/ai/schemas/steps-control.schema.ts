@@ -86,26 +86,35 @@ const aiJsonLogicComparisonSchema = z.union([
     .describe('Check if value exists in array'),
 ]);
 
-const aiJsonLogicConditionSchema = z.lazy(() =>
-  z.union([
+/**
+ * Unrolled recursive condition schema (3 levels deep) to satisfy
+ * OpenAI structured output requirements — z.lazy() produces schemas
+ * without a 'type' key on recursive items which OpenAI rejects.
+ */
+function buildConditionLevel(innerSchema: z.ZodType) {
+  return z.union([
     z
       .object({
-        and: z.array(aiJsonLogicConditionSchema).min(1).describe('Array of conditions that must ALL be true'),
+        and: z.array(innerSchema).min(1).describe('Array of conditions that must ALL be true'),
       })
       .describe('Logical AND - all conditions must be true'),
     z
       .object({
-        or: z.array(aiJsonLogicConditionSchema).min(1).describe('Array of conditions where at least ONE must be true'),
+        or: z.array(innerSchema).min(1).describe('Array of conditions where at least ONE must be true'),
       })
       .describe('Logical OR - at least one condition must be true'),
     z
       .object({
-        '!': z.array(aiJsonLogicConditionSchema).length(1).describe('Single condition to negate'),
+        '!': z.array(innerSchema).length(1).describe('Single condition to negate'),
       })
       .describe('Logical NOT - negates the condition'),
     aiJsonLogicComparisonSchema,
-  ])
-) as z.ZodType<JsonLogicCondition>;
+  ]);
+}
+
+const aiJsonLogicConditionLevel0 = aiJsonLogicComparisonSchema;
+const aiJsonLogicConditionLevel1 = buildConditionLevel(aiJsonLogicConditionLevel0);
+const aiJsonLogicConditionSchema: z.ZodType<JsonLogicCondition> = buildConditionLevel(aiJsonLogicConditionLevel1);
 
 export const aiSkipConditionSchema = z
   .union([aiJsonLogicConditionSchema, aiJsonLogicVarSchema])
@@ -282,7 +291,7 @@ export const aiEmailControlSchema = z.discriminatedUnion('editorType', [
 
 export const stepInputSchema = z.object({
   stepId: z.string().describe('Unique step identifier (lowercase, kebab-case, e.g., "welcome-email")'),
-  name: z.string().min(1).max(100).describe('Human readable step name, never in kebab-case'),
+  name: z.string().min(1).max(100).describe('Standardized step name based on type: "In-App Step" for in_app, "Email Step" for email, "SMS Step" for sms, "Push Step" for push, "Chat Step" for chat, "Delay Step" for delay, "Digest Step" for digest, "Throttle Step" for throttle'),
   intent: z.string().describe('Brief description of what this step should accomplish'),
   stepType: z
     .enum([
@@ -301,6 +310,18 @@ export const stepInputSchema = z.object({
 
 export const editStepInputSchema = z.object({
   stepId: z.string().describe('Unique step identifier of the step to edit'),
+  type: z
+    .enum([
+      StepTypeEnum.IN_APP,
+      StepTypeEnum.EMAIL,
+      StepTypeEnum.PUSH,
+      StepTypeEnum.CHAT,
+      StepTypeEnum.SMS,
+      StepTypeEnum.DELAY,
+      StepTypeEnum.DIGEST,
+      StepTypeEnum.THROTTLE,
+    ])
+    .describe('Type of the step to edit'),
   intent: z.string().describe('Description of the change the user wants to make'),
 });
 
@@ -309,58 +330,84 @@ export const removeStepInputSchema = z.object({
   reason: z.string().describe('Brief reason for removing the step'),
 });
 
+export const moveStepInputSchema = z.object({
+  stepId: z.string().describe('Unique step identifier of the step to move'),
+  toIndex: z.number().int().min(0).describe('Target 0-based index position in the workflow steps array'),
+});
+
+export const addStepInBetweenInputSchema = stepInputSchema.extend({
+  afterStepId: z
+    .string()
+    .describe(
+      'Step ID of the step after which to insert the new step. The new step will be placed immediately after this step.'
+    ),
+});
+
+export const updateStepConditionsInputSchema = z.object({
+  stepId: z.string().describe('Unique step identifier of the step to update'),
+  intent: z
+    .string()
+    .describe(
+      'Description of the condition to apply (e.g., "only send when subscriber is offline", "skip if In-App was already read", "remove condition")'
+    ),
+});
+
+export const updateStepConditionsOutputSchema = z.object({
+  skip: aiSkipConditionSchema,
+});
+
 export const emailStepOutputSchema = z.object({
   stepId: z.string().describe('Unique step identifier (lowercase, kebab-case, e.g., "welcome-email")'),
-  name: z.string().min(1).max(100).describe('Human readable step name, never in kebab-case'),
+  name: z.string().min(1).max(100).describe('Must be exactly "Email Step"'),
   type: z.literal(StepTypeEnum.EMAIL),
   controlValues: aiEmailControlSchema,
 });
 
 export const inAppStepOutputSchema = z.object({
   stepId: z.string().describe('Unique step identifier (lowercase, kebab-case, e.g., "welcome-in-app")'),
-  name: z.string().min(1).max(100).describe('Human readable step name, never in kebab-case'),
+  name: z.string().min(1).max(100).describe('Must be exactly "In-App Step"'),
   type: z.literal(StepTypeEnum.IN_APP),
   controlValues: aiInAppControlSchema,
 });
 
 export const smsStepOutputSchema = z.object({
   stepId: z.string().describe('Unique step identifier (lowercase, kebab-case, e.g., "welcome-sms")'),
-  name: z.string().min(1).max(100).describe('Human readable step name, never in kebab-case'),
+  name: z.string().min(1).max(100).describe('Must be exactly "SMS Step"'),
   type: z.literal(StepTypeEnum.SMS),
   controlValues: aiSmsControlSchema,
 });
 
 export const pushStepOutputSchema = z.object({
   stepId: z.string().describe('Unique step identifier (lowercase, kebab-case, e.g., "welcome-push")'),
-  name: z.string().min(1).max(100).describe('Human readable step name, never in kebab-case'),
+  name: z.string().min(1).max(100).describe('Must be exactly "Push Step"'),
   type: z.literal(StepTypeEnum.PUSH),
   controlValues: aiPushControlSchema,
 });
 
 export const chatStepOutputSchema = z.object({
   stepId: z.string().describe('Unique step identifier (lowercase, kebab-case, e.g., "welcome-chat")'),
-  name: z.string().min(1).max(100).describe('Human readable step name, never in kebab-case'),
+  name: z.string().min(1).max(100).describe('Must be exactly "Chat Step"'),
   type: z.literal(StepTypeEnum.CHAT),
   controlValues: aiChatControlSchema,
 });
 
 export const digestStepOutputSchema = z.object({
   stepId: z.string().describe('Unique step identifier (lowercase, kebab-case, e.g., "welcome-digest")'),
-  name: z.string().min(1).max(100).describe('Human readable step name, never in kebab-case'),
+  name: z.string().min(1).max(100).describe('Must be exactly "Digest Step"'),
   type: z.literal(StepTypeEnum.DIGEST),
   controlValues: aiDigestControlSchema,
 });
 
 export const delayStepOutputSchema = z.object({
   stepId: z.string().describe('Unique step identifier (lowercase, kebab-case, e.g., "welcome-delay")'),
-  name: z.string().min(1).max(100).describe('Human readable step name, never in kebab-case'),
+  name: z.string().min(1).max(100).describe('Must be exactly "Delay Step"'),
   type: z.literal(StepTypeEnum.DELAY),
   controlValues: aiDelayControlSchema,
 });
 
 export const throttleStepOutputSchema = z.object({
   stepId: z.string().describe('Unique step identifier (lowercase, kebab-case, e.g., "welcome-throttle")'),
-  name: z.string().min(1).max(100).describe('Human readable step name, never in kebab-case'),
+  name: z.string().min(1).max(100).describe('Must be exactly "Throttle Step"'),
   type: z.literal(StepTypeEnum.THROTTLE),
   controlValues: aiThrottleControlSchema,
 });
