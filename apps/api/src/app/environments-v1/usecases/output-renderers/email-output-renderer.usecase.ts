@@ -374,8 +374,14 @@ export class EmailOutputRendererUsecase extends BaseTranslationRendererUsecase {
             .catch((promiseError) => {
               this.logger.error({ error: promiseError }, 'Failed to create execution details');
             });
+          throw error;
         }
-        throw error;
+        // During preview (no job), gracefully continue without layout
+        // rather than crashing the preview render.
+        this.logger.warn(
+          `Layout "${overriddenStepLayoutId}" not found in environment ${environmentId}, rendering without layout`
+        );
+        overriddenStepLayoutId = undefined;
       }
     }
 
