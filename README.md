@@ -460,6 +460,28 @@ git push origin next
 
 ## Changelog
 
+### ReNovu v1.4.0 — 2026-03-01
+
+**Email Layout Fixes**
+- Fixed email layouts not being applied during rendering — default layout now correctly resolved using V2 layout lookup instead of V1 `findDefault()` which returned layouts invisible to V2 queries
+- Fixed preview crash when layout not found — preview mode now gracefully continues without layout instead of throwing `Layout not found for id novu-default-layout`
+- Per-step layout selection working: each email step can independently select a layout from the dropdown (null = no layout, undefined = default, specific ID = that layout)
+
+**Upstream Sync — Novu v3.14.1 (8 commits)**
+- Merged 8 upstream commits from `novuhq/novu:next` with all ReNovu customizations preserved
+- Community Docker images bumped to v3.14.0
+- Standardized workflow step names (NV-7152)
+- AI sidekick UI polishing and granular workflow tools
+- Socket type explicit option for JS/React SDKs
+- API test tsconfig improvements
+- Worker workflow skip logic e2e tests
+- Monthly usage email polish (provider icons, layout refinements)
+
+**Build & Infrastructure**
+- Added `check-ee.mjs` stubs for enterprise package builds — prevents build failures when enterprise source is absent
+- Made `STEP_RESOLVER_DISPATCH_URL` optional for self-hosted deployments
+- Removed outdated `docker-compose` configuration for Coolify deployment
+
 ### ReNovu v1.3.0 — 2026-02-27
 
 **Upstream Sync — Novu v3.14.0 (30 commits)**
@@ -583,8 +605,8 @@ git push origin next
 
 | | Version | Branch | Last Synced |
 |---|---------|--------|-------------|
-| **ReNovu** | v1.3.0 | `next` → `release` | — |
-| **Upstream Novu** | v3.14.0 | `next` | 2026-02-27 |
+| **ReNovu** | v1.4.0 | `next` → `release` | — |
+| **Upstream Novu** | v3.14.1 | `next` | 2026-03-01 |
 
 ## Disclaimer
 
