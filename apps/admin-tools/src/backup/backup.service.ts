@@ -74,30 +74,39 @@ interface CollectionEntry {
 
 const COLLECTION_REGISTRY: CollectionEntry[] = [
   // ── Regular collections (find → JSON) ──
+  // Use highVolume: false ONLY for collections expected to stay small.
+  // Large or unbounded collections must stream as NDJSON to avoid V8
+  // heap exhaustion in pm2 cluster workers (default heap ~256MB).
   { name: 'users', highVolume: false },
   { name: 'organizations', highVolume: false },
   { name: 'environments', highVolume: false },
   { name: 'members', highVolume: false },
-  { name: 'notificationtemplates', highVolume: false },
-  { name: 'messagetemplates', highVolume: false },
   { name: 'notificationgroups', highVolume: false },
   { name: 'layouts', highVolume: false },
   { name: 'integrations', highVolume: false },
-  { name: 'subscribers', highVolume: false },
   { name: 'topics', highVolume: false },
   { name: 'tenants', highVolume: false },
   { name: 'workflowoverrides', highVolume: false },
-  { name: 'preferences', highVolume: false },
-  { name: 'controls', highVolume: false },
   { name: 'feeds', highVolume: false },
-  { name: 'changes', highVolume: false },
   { name: 'contexts', highVolume: false },
   { name: 'channelconnections', highVolume: false },
   { name: 'channelendpoints', highVolume: false },
-  { name: 'localizations', highVolume: false },
   { name: 'localizationgroups', highVolume: false },
 
   // ── High-volume collections (cursor → NDJSON) ──
+  // notificationtemplates: workflow definitions can carry large step
+  //   templates; production seen with 579 docs, 3400 message templates.
+  // messagetemplates: per-step content (Maily JSON / HTML); largest
+  //   single offender — caused OOM at 3400 docs / 257MB heap.
+  // controls: layout + step control bodies, also large JSON payloads.
+  // preferences, changes, subscribers, localizations: grow with usage.
+  { name: 'notificationtemplates', highVolume: true },
+  { name: 'messagetemplates', highVolume: true },
+  { name: 'subscribers', highVolume: true },
+  { name: 'preferences', highVolume: true },
+  { name: 'controls', highVolume: true },
+  { name: 'changes', highVolume: true },
+  { name: 'localizations', highVolume: true },
   { name: 'jobs', highVolume: true },
   { name: 'notifications', highVolume: true },
   { name: 'messages', highVolume: true },
