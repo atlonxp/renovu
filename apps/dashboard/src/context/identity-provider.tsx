@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { LAUNCH_DARKLY_CLIENT_SIDE_ID } from '@/config';
 import { getRegionConfig, useRegion } from '@/context/region';
 import { useAuth } from './auth/hooks';
+import { useCustomerIo } from './customer-io/hooks';
 import { useSegment } from './segment/hooks';
 
 // Wrapper hook that safely handles missing LaunchDarkly provider
@@ -21,24 +22,10 @@ function useLDClientSafe() {
 export function IdentityProvider({ children }: { children: React.ReactNode }) {
   const ldClient = useLDClientSafe();
   const segment = useSegment();
+  const customerIo = useCustomerIo();
   const { currentUser, currentOrganization } = useAuth();
   const { selectedRegion } = useRegion();
-  const hasIdentifiedUser = useRef(false);
   const hasIdentifiedOrg = useRef(false);
-
-  useEffect(() => {
-    if (!currentUser || !currentUser._id || !ldClient || hasIdentifiedUser.current) return;
-
-    ldClient.identify({
-      kind: 'user',
-      key: currentUser._id,
-      firstName: currentUser.firstName,
-      lastName: currentUser.lastName,
-      email: currentUser.email,
-    });
-
-    hasIdentifiedUser.current = true;
-  }, [ldClient, currentUser]);
 
   useEffect(() => {
     if (!currentOrganization || !currentUser) return;
@@ -50,6 +37,7 @@ export function IdentityProvider({ children }: { children: React.ReactNode }) {
     if (shouldMonitor) {
       if (!hasIdentifiedOrg.current) {
         segment.identify(currentUser);
+        customerIo.identify(currentUser);
 
         sentrySetUser({
           email: currentUser.email ?? '',
@@ -95,7 +83,7 @@ export function IdentityProvider({ children }: { children: React.ReactNode }) {
     } else {
       sentrySetUser(null);
     }
-  }, [ldClient, currentOrganization, currentUser, segment, selectedRegion]);
+  }, [ldClient, currentOrganization, currentUser, segment, customerIo, selectedRegion]);
 
   return <>{children}</>;
 }

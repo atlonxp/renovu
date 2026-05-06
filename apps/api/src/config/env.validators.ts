@@ -8,12 +8,25 @@ export function validateEnv() {
 export type ValidatedEnv = StringifyEnv<CleanedEnv<typeof envValidators>>;
 const processEnv = process.env as Record<string, string>; // Hold the initial process.env to avoid circular reference
 
+function getFeatureFlagValidator(key: FeatureFlagsKeysEnum): ValidatorSpec<string | number | boolean | undefined> {
+  if (key.endsWith('_NUMBER') || key === FeatureFlagsKeysEnum.MAX_ENVIRONMENT_COUNT) {
+    return num({ default: undefined });
+  }
+
+  if (key.startsWith('IS_')) {
+    return bool({ default: false });
+  }
+
+  return str({ default: undefined });
+}
+
 export const envValidators = {
   TZ: str({ default: 'UTC' }),
   NODE_ENV: str({ choices: ['dev', 'test', 'production', 'ci', 'local'], default: 'local' }),
   LOG_LEVEL: str({ choices: ['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'none'] }),
   PORT: port(),
   FRONT_BASE_URL: str(),
+  DASHBOARD_URL: str({ default: '' }),
   DISABLE_USER_REGISTRATION: bool({ default: false }),
   REDIS_HOST: str(),
   REDIS_PORT: port(),
@@ -40,6 +53,8 @@ export const envValidators = {
   WORKER_DEFAULT_CONCURRENCY: num({ default: undefined }),
   WORKER_DEFAULT_LOCK_DURATION: num({ default: undefined }),
   ENABLE_OTEL: bool({ default: false }),
+  ENABLE_OTEL_LOGS: bool({ default: false }),
+  OTEL_PROMETHEUS_PORT: num({ default: 9464 }),
   NOTIFICATION_RETENTION_DAYS: num({ default: DEFAULT_NOTIFICATION_RETENTION_DAYS }),
   API_ROOT_URL: url(),
   NOVU_INVITE_TEAM_MEMBER_NUDGE_TRIGGER_IDENTIFIER: str({ default: undefined }),
@@ -50,17 +65,10 @@ export const envValidators = {
   SCHEDULER_URL: str({ default: undefined }),
   SCHEDULER_API_KEY: str({ default: undefined }),
   INTERNAL_CALLBACK_API_KEY: str({ default: undefined }),
-  // AI/LLM Configuration
-  AI_LLM_PROVIDER: str({ choices: ['openai', 'anthropic'], default: 'openai' }),
-  AI_LLM_API_KEY: str({ default: '' }),
-  AI_LLM_MODEL: str({ default: '' }),
-  AI_LLM_MAX_OUTPUT_TOKENS: num({ default: 4096 }),
-  AI_LLM_TEMPERATURE: num({ default: 0.7 }),
-  AI_LLM_MAX_RETRIES: num({ default: 3 }),
   STEP_RESOLVER_CF_ACCOUNT_ID: str({ default: undefined }),
   STEP_RESOLVER_CF_API_TOKEN: str({ default: undefined }),
   STEP_RESOLVER_CF_DISPATCH_NAMESPACE: str({ default: undefined }),
-  STEP_RESOLVER_DISPATCH_URL: str({ default: '' }),
+  STEP_RESOLVER_DISPATCH_URL: str({ default: undefined }),
   STEP_RESOLVER_HMAC_SECRET: str({ default: '' }),
   // Novu Cloud third party services
   ...(processEnv.IS_SELF_HOSTED !== 'true' &&
@@ -78,23 +86,28 @@ export const envValidators = {
       NOVU_INTERNAL_SECRET_KEY: str({ default: '' }),
       KEYLESS_ORGANIZATION_ID: str({ desc: 'Required organizationId for Keyless authentication', default: undefined }),
       KEYLESS_USER_EMAIL: str({ desc: 'Required email for Keyless authentication', default: undefined }),
-
+      // ClickHouse
       CLICK_HOUSE_URL: str({ default: '' }),
       CLICK_HOUSE_DATABASE: str({ default: '' }),
       CLICK_HOUSE_USER: str({ default: '' }),
       CLICK_HOUSE_PASSWORD: str({ default: '' }),
+      // AI/LLM Configuration
+      AI_LLM_PROVIDER: str({ choices: ['openai', 'anthropic'], default: 'openai' }),
+      AI_LLM_API_KEY: str({ default: '' }),
+      AI_LLM_MODEL: str({ default: '' }),
+      AI_LLM_MAX_OUTPUT_TOKENS: num({ default: 8192 }),
+      AI_LLM_TEMPERATURE: num({ default: 0.7 }),
+      AI_LLM_MAX_RETRIES: num({ default: 3 }),
+      AI_LLM_SERVICE_TIER: str({ choices: ['auto', 'default', 'flex', 'priority'], default: 'priority' }),
+      AI_LLM_PROMPT_CACHE_RETENTION: str({ choices: ['in-memory', '24h'], default: '24h' }),
+      // Brand enrichment
+      CONTEXT_DEV_API_KEY: str({ default: '' }),
     }),
 
   // Feature Flags
-  ...Object.keys(FeatureFlagsKeysEnum).reduce(
-    (acc, key) => {
-      return {
-        ...acc,
-        [key as FeatureFlagsKeysEnum]: bool({ default: false }),
-      };
-    },
-    {} as Record<FeatureFlagsKeysEnum, ValidatorSpec<boolean>>
-  ),
+  ...(Object.fromEntries(
+    Object.values(FeatureFlagsKeysEnum).map((key) => [key, getFeatureFlagValidator(key)])
+  ) as Record<FeatureFlagsKeysEnum, ValidatorSpec<string | number | boolean | undefined>>),
 
   // Azure validators
   ...(processEnv.STORAGE_SERVICE === 'AZURE' && {

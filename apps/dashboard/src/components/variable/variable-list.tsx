@@ -88,7 +88,7 @@ export const VariableList = React.forwardRef<VariableListRef, VariablesListProps
     }, [hoveredOptionIndex, maxIndex, scrollToOption]);
 
     const select = useCallback(() => {
-      if (hoveredOptionIndex !== -1) {
+      if (hoveredOptionIndex !== -1 && hoveredOptionIndex < options.length) {
         onSelect(options[hoveredOptionIndex].value ?? '');
         setHoveredOptionIndex(-1);
       }
@@ -189,6 +189,9 @@ const VariableListItem = ({
             isHovered ? 'bg-neutral-100' : ''
           )}
           value={option.value}
+          onMouseDown={(e) => {
+            e.preventDefault();
+          }}
           onClick={(e) => {
             e.stopPropagation();
             e.preventDefault();

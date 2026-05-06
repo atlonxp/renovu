@@ -18,7 +18,7 @@ import {
   WorkflowResponseDto,
 } from '@novu/shared';
 
-import { JobsService, SubscribersService, UserSession } from '@novu/testing';
+import { SubscribersService, UserSession } from '@novu/testing';
 import axios from 'axios';
 import { expect } from 'chai';
 import getPort from 'get-port';
@@ -31,11 +31,7 @@ type Context = { name: string; isStateful: boolean };
 const contexts: Context[] = [{ name: 'stateful', isStateful: true }];
 
 contexts.forEach((context: Context) => {
-  /**
-   * For some reason, the bridge trigger is very flaky in setting up the test server,
-   * It's not clear why, but it's causing the tests to fail.
-   */
-  describe.skip('Self-Hosted Bridge Trigger #novu-v2', async () => {
+  describe('Self-Hosted Bridge Trigger #novu-v2', async () => {
     let session: UserSession;
     let bridgeServer: TestBridgeServer;
     const messageRepository = new MessageRepository();
@@ -159,6 +155,143 @@ contexts.forEach((context: Context) => {
       expect(inAppMessage?.content).to.include('in-app result test_name');
       const smsMessage = messages.find((message) => message.channel === ChannelTypeEnum.SMS);
       expect(smsMessage?.content).to.include('sms result test_name');
+    });
+
+    it(`should update message template type when replacing a step with the same stepId after re-sync [${context.name}]`, async () => {
+      const workflowId = `step-type-replace-${context.name}`;
+      const middleStepId = 'shared-middle-step';
+
+      const workflowWithCustomMiddle = workflow(
+        workflowId,
+        async ({ step, payload }) => {
+          await step.inApp(
+            'first-in-app',
+            async () => ({
+              body: `first ${payload.name}`,
+            }),
+            {
+              controlSchema: {
+                type: 'object',
+                properties: {},
+              } as const,
+            }
+          );
+
+          await step.custom(
+            middleStepId,
+            async () => ({
+              data: 'custom',
+            }),
+            {
+              controlSchema: {
+                type: 'object',
+                properties: {},
+              } as const,
+            }
+          );
+
+          await step.inApp(
+            'last-in-app',
+            async () => ({
+              body: `last ${payload.name}`,
+            }),
+            {
+              controlSchema: {
+                type: 'object',
+                properties: {},
+              } as const,
+            }
+          );
+        },
+        {
+          payloadSchema: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', default: 'default_name' },
+            },
+            required: [],
+            additionalProperties: false,
+          } as const,
+        }
+      );
+
+      const workflowWithChatMiddle = workflow(
+        workflowId,
+        async ({ step, payload }) => {
+          await step.inApp(
+            'first-in-app',
+            async () => ({
+              body: `first ${payload.name}`,
+            }),
+            {
+              controlSchema: {
+                type: 'object',
+                properties: {},
+              } as const,
+            }
+          );
+
+          await step.chat(middleStepId, async () => ({
+            body: 'chat body',
+          }));
+
+          await step.inApp(
+            'last-in-app',
+            async () => ({
+              body: `last ${payload.name}`,
+            }),
+            {
+              controlSchema: {
+                type: 'object',
+                properties: {},
+              } as const,
+            }
+          );
+        },
+        {
+          payloadSchema: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', default: 'default_name' },
+            },
+            required: [],
+            additionalProperties: false,
+          } as const,
+        }
+      );
+
+      await bridgeServer.start({ workflows: [workflowWithCustomMiddle] });
+
+      if (context.isStateful) {
+        await syncWorkflow(session, workflowsRepository, workflowId, bridgeServer);
+
+        const afterCustom = await workflowsRepository.findByTriggerIdentifier(session.environment._id, workflowId);
+        expect(afterCustom?.steps?.length).to.be.eq(3);
+        const middleAfterCustom = afterCustom?.steps?.find((s) => s.stepId === middleStepId);
+        expect(middleAfterCustom?.template?.type).to.eql(StepTypeEnum.CUSTOM);
+      }
+
+      await bridgeServer.stop();
+
+      /*
+       * The framework Client caches discovery per workflow id. Reusing the same TestBridgeServer
+       * after start/stop would still serve the first discovered definition, so use a fresh server
+       * (fresh Client) for the updated workflow.
+       */
+      const chatBridgePort = await getPort();
+      const bridgeServerChat = new TestBridgeServer(chatBridgePort);
+      await bridgeServerChat.start({ workflows: [workflowWithChatMiddle] });
+
+      if (context.isStateful) {
+        await syncWorkflow(session, workflowsRepository, workflowId, bridgeServerChat);
+
+        const afterChat = await workflowsRepository.findByTriggerIdentifier(session.environment._id, workflowId);
+        expect(afterChat?.steps?.length).to.be.eq(3);
+        const middleAfterChat = afterChat?.steps?.find((s) => s.stepId === middleStepId);
+        expect(middleAfterChat?.template?.type).to.eql(StepTypeEnum.CHAT);
+      }
+
+      await bridgeServerChat.stop();
     });
 
     it(`should skip by static value [${context.name}]`, async () => {
@@ -1678,7 +1811,7 @@ contexts.forEach((context: Context) => {
           transactionId: transactionIdNoSkip,
           type: StepTypeEnum.DELAY,
         });
-        expect(delayJobNoSkip?.status).to.equal(JobStatusEnum.COMPLETED, 'Scenario 1: Delay job should be COMPLETED');
+        expect(delayJobNoSkip?.status).to.equal(JobStatusEnum.SKIPPED, 'Scenario 1: Delay job should be SKIPPED');
 
         const failedExecDetailsNoSkip = await executionDetailsRepository.find({
           _environmentId: session.environment._id,
@@ -1951,16 +2084,6 @@ describe('Novu-Hosted Bridge Trigger #novu-v2', () => {
   });
 
   it('should execute a Novu-managed workflow', async () => {
-    // Log current Redis jobs count before starting the test
-    const jobsService = new JobsService();
-    let currentMetrics = await (jobsService as any).getQueueMetrics();
-    console.log(
-      `[Test] Starting 'should execute a Novu-managed workflow' - Current Redis jobs count: ${currentMetrics.totalCount}`
-    );
-    console.log(
-      `[Test] Queue breakdown - Workflow: ${currentMetrics.activeWorkflowJobsCount + currentMetrics.waitingWorkflowJobsCount}, Subscriber: ${currentMetrics.activeSubscriberJobsCount + currentMetrics.waitingSubscriberJobsCount}, Standard: ${currentMetrics.activeStandardJobsCount + currentMetrics.waitingStandardJobsCount}`
-    );
-
     const createWorkflowDto: CreateWorkflowDto = {
       tags: [],
       active: true,
@@ -1992,10 +2115,6 @@ describe('Novu-Hosted Bridge Trigger #novu-v2', () => {
     const responseData = response.body.data as WorkflowResponseDto;
 
     await triggerEvent(session, responseData.workflowId, subscriber._id, {});
-    currentMetrics = await (jobsService as any).getQueueMetrics();
-    console.log(
-      `[Test] Queue breakdown - Workflow: ${currentMetrics.activeWorkflowJobsCount + currentMetrics.waitingWorkflowJobsCount}, Subscriber: ${currentMetrics.activeSubscriberJobsCount + currentMetrics.waitingSubscriberJobsCount}, Standard: ${currentMetrics.activeStandardJobsCount + currentMetrics.waitingStandardJobsCount}`
-    );
     await session.waitForJobCompletion();
 
     const sentMessages = await messageRepository.find({

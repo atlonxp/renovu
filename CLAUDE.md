@@ -80,6 +80,10 @@ pnpm build          # Build all projects
 pnpm build:api      # Build specific service
 ```
 
+**Rebuild triggers** (from upstream AGENTS.md):
+- Run `pnpm build` after changes to `packages/` or `enterprise/`
+- Direct changes to `apps/` do not require a rebuild
+
 **🧪 Testing:**
 ```bash
 # API tests

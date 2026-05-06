@@ -9,7 +9,7 @@ type InitializationProps = {
   stepId?: string;
   environmentId?: string;
   value: string;
-  onChange: (value: string) => void;
+  onChange: (value: string) => unknown;
   workflow?: WorkflowResponseDto;
   isPayloadSchemaEnabled: boolean;
   loadPersistedPayload: () => PayloadData | null;
@@ -54,12 +54,14 @@ export function usePreviewDataInitialization({
             subscriber: {},
             steps: {},
             context: {},
+            env: {},
           },
           {
             payload: workflow.payloadExample as PayloadData,
             subscriber: {},
             steps: {},
             context: {},
+            env: {},
           }
         );
         finalData.payload = mergedData.payload;

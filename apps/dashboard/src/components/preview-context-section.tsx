@@ -7,10 +7,39 @@ import { ExternalLink } from './shared/external-link';
 import { ACCORDION_STYLES } from './workflow-editor/steps/constants/preview-context.constants';
 import { ContextSectionProps } from './workflow-editor/steps/types/preview-context.types';
 
-export function PreviewContextSection({ error, context, schema, onUpdate, onClearPersisted }: ContextSectionProps) {
+export function PreviewContextSection({
+  error,
+  context,
+  schema,
+  onUpdate,
+  onClearPersisted,
+  className,
+}: ContextSectionProps) {
   return (
-    <AccordionItem value="context" className={ACCORDION_STYLES.itemLast}>
-      <AccordionTrigger className={ACCORDION_STYLES.trigger}>
+    <AccordionItem value="context" className={className ?? ACCORDION_STYLES.itemLast}>
+      <AccordionTrigger
+        className={ACCORDION_STYLES.trigger}
+        rightSlot={
+          onClearPersisted ? (
+            <div className="mr-2">
+              <Button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onClearPersisted();
+                }}
+                type="button"
+                variant="secondary"
+                mode="ghost"
+                size="2xs"
+                className="text-foreground-600 gap-1"
+              >
+                <RiRefreshLine className="h-3 w-3" />
+                Reset defaults
+              </Button>
+            </div>
+          ) : null
+        }
+      >
         <div className="flex w-full items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-0.5">
@@ -34,25 +63,6 @@ export function PreviewContextSection({ error, context, schema, onUpdate, onClea
               </Tooltip>
             </div>
           </div>
-          {onClearPersisted && (
-            <div className="mr-2">
-              <Button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  e.preventDefault();
-                  onClearPersisted();
-                }}
-                type="button"
-                variant="secondary"
-                mode="ghost"
-                size="2xs"
-                className="text-foreground-600 gap-1"
-              >
-                <RiRefreshLine className="h-3 w-3" />
-                Reset defaults
-              </Button>
-            </div>
-          )}
         </div>
       </AccordionTrigger>
       <AccordionContent className="flex flex-col gap-2">

@@ -37,4 +37,13 @@ export const QueryKeys = Object.freeze({
   translationSettings: 'translationSettings',
   fetchBackups: 'fetchBackups',
   fetchChat: 'fetchChat',
+  fetchEnvironmentVariables: 'fetchEnvironmentVariables',
+  fetchEnvironmentVariable: 'fetchEnvironmentVariable',
+  fetchEnvironmentVariableUsage: 'fetchEnvironmentVariableUsage',
+  stepResolversCount: 'stepResolversCount',
+  fetchWorkflowSuggestions: 'fetchWorkflowSuggestions',
+  fetchDomains: 'fetchDomains',
+  fetchDomain: 'fetchDomain',
+  fetchDomainRoutes: 'fetchDomainRoutes',
+  fetchDomainConnectStatus: 'fetchDomainConnectStatus',
 });

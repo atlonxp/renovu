@@ -3,17 +3,20 @@ import {
   AnalyticsService,
   ClickHouseService,
   CreateExecutionDetails,
+  CreateVariablesObject,
   FeatureFlagsService,
   GetDecryptedSecretKey,
-  GetLayoutUseCase as GetLayoutUseCaseV1,
+  GetLayoutUseCase,
+  GetLayoutUseCaseV0,
   InMemoryLRUCacheService,
+  LayoutVariablesSchemaUseCase,
   TraceLogRepository,
 } from '@novu/application-generic';
-
 import {
   CommunityOrganizationRepository,
   ControlValuesRepository,
   EnvironmentRepository,
+  EnvironmentVariableRepository,
   ExecutionDetailsRepository,
   IntegrationRepository,
   JobRepository,
@@ -21,10 +24,8 @@ import {
   NotificationTemplateRepository,
 } from '@novu/dal';
 import { NovuClient, NovuHandler } from '@novu/framework/nest';
-import { GetLayoutUseCase } from '../layouts-v2/usecases/get-layout';
-import { LayoutVariablesSchemaUseCase } from '../layouts-v2/usecases/layout-variables-schema';
 import { GetOrganizationSettings } from '../organization/usecases/get-organization-settings/get-organization-settings.usecase';
-import { CreateVariablesObject } from '../shared/usecases/create-variables-object';
+import { SharedModule } from '../shared/shared.module';
 import { NovuBridgeController } from './novu-bridge.controller';
 import { NovuBridgeClient } from './novu-bridge-client';
 import { ConstructFrameworkWorkflow } from './usecases/construct-framework-workflow';
@@ -50,6 +51,7 @@ export const featureFlagsService = {
 };
 
 @Module({
+  imports: [SharedModule],
   controllers: [NovuBridgeController],
   providers: [
     {
@@ -58,6 +60,7 @@ export const featureFlagsService = {
     },
     NovuHandler,
     EnvironmentRepository,
+    EnvironmentVariableRepository,
     NotificationTemplateRepository,
     CommunityOrganizationRepository,
     IntegrationRepository,
@@ -75,7 +78,7 @@ export const featureFlagsService = {
     DigestOutputRendererUsecase,
     ThrottleOutputRendererUsecase,
     AnalyticsService,
-    GetLayoutUseCaseV1,
+    GetLayoutUseCaseV0,
     LayoutVariablesSchemaUseCase,
     CreateVariablesObject,
     GetLayoutUseCase,

@@ -1,7 +1,7 @@
 import type { Operator } from 'react-querybuilder';
 import type { FieldDataType } from '@/utils/parseStepVariables';
 
-export const FIELD_TYPE_OPERATORS: Record<FieldDataType, Operator[]> = {
+const FIELD_TYPE_OPERATORS: Record<FieldDataType, Operator[]> = {
   string: [
     { name: '=', label: 'equals' },
     { name: '!=', label: 'does not equal' },
@@ -71,6 +71,8 @@ export const FIELD_TYPE_OPERATORS: Record<FieldDataType, Operator[]> = {
   array: [
     { name: 'contains', label: 'contains' },
     { name: 'doesNotContain', label: 'does not contain' },
+    { name: 'containsAny', label: 'contains any of' },
+    { name: 'doesNotContainAny', label: 'does not contain any of' },
     { name: 'null', label: 'is null' },
     { name: 'notNull', label: 'is not null' },
   ],
@@ -84,13 +86,7 @@ export function getOperatorsForFieldType(dataType: FieldDataType): Operator[] {
   return FIELD_TYPE_OPERATORS[dataType] || FIELD_TYPE_OPERATORS.string;
 }
 
-export const RELATIVE_DATE_OPERATORS = [
-  'moreThanXAgo',
-  'lessThanXAgo',
-  'withinLast',
-  'notWithinLast',
-  'exactlyXAgo',
-] as const;
+const RELATIVE_DATE_OPERATORS = ['moreThanXAgo', 'lessThanXAgo', 'withinLast', 'notWithinLast', 'exactlyXAgo'] as const;
 
 export function isRelativeDateOperator(operator: string): boolean {
   return RELATIVE_DATE_OPERATORS.includes(operator as any);

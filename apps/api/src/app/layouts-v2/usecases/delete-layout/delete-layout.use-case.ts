@@ -1,10 +1,14 @@
 import { ConflictException, Injectable } from '@nestjs/common';
-import { AnalyticsService, PinoLogger } from '@novu/application-generic';
+import {
+  AnalyticsService,
+  GetLayoutCommand,
+  GetLayoutUseCase,
+  LayoutResponseDto,
+  PinoLogger,
+} from '@novu/application-generic';
 import { ControlValuesRepository, LayoutRepository, LocalizationResourceEnum } from '@novu/dal';
 import { ControlValuesLevelEnum } from '@novu/shared';
 import { DeleteTranslationGroup } from '@novu/translation';
-import { LayoutResponseDto } from '../../dtos';
-import { GetLayoutCommand, GetLayoutUseCase } from '../get-layout';
 import { DeleteLayoutCommand } from './delete-layout.command';
 
 @Injectable()
@@ -16,7 +20,9 @@ export class DeleteLayoutUseCase {
     private analyticsService: AnalyticsService,
     private deleteTranslationGroupUseCase: DeleteTranslationGroup,
     private logger: PinoLogger
-  ) {}
+  ) {
+    this.logger.setContext(this.constructor.name);
+  }
 
   async execute(command: DeleteLayoutCommand): Promise<void> {
     const { environmentId, organizationId, userId } = command;

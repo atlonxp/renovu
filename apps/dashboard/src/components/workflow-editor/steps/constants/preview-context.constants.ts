@@ -1,32 +1,34 @@
 import { StepTypeEnum } from '@novu/shared';
 import { IconType } from 'react-icons';
 import {
-  RiBracesFill,
-  RiChat1Line,
-  RiCodeLine,
-  RiMailLine,
-  RiNotificationLine,
-  RiPlayCircleLine,
-  RiSmartphoneLine,
-  RiSpeedFill,
-  RiTimeLine,
+  RiCellphoneFill,
+  RiChatThreadFill,
+  RiCodeBlock,
+  RiFlashlightFill,
+  RiHourglassFill,
+  RiShadowLine,
+  RiSpeedUpFill,
 } from 'react-icons/ri';
-import { InboxBell } from '../../../icons';
+import { Api } from '@/components/icons/api';
+import { Mail3Fill } from '@/components/icons/mail-3-fill';
+import { Notification5Fill } from '@/components/icons/notification-5-fill';
+import { Sms } from '@/components/icons/sms';
 
 export const STEP_TYPE_ICONS: Record<StepTypeEnum, IconType> = {
-  [StepTypeEnum.EMAIL]: RiMailLine,
-  [StepTypeEnum.SMS]: RiSmartphoneLine,
-  [StepTypeEnum.PUSH]: RiNotificationLine,
-  [StepTypeEnum.IN_APP]: InboxBell as IconType,
-  [StepTypeEnum.CHAT]: RiChat1Line,
-  [StepTypeEnum.DIGEST]: RiTimeLine,
-  [StepTypeEnum.DELAY]: RiTimeLine,
-  [StepTypeEnum.THROTTLE]: RiSpeedFill,
-  [StepTypeEnum.CUSTOM]: RiBracesFill,
-  [StepTypeEnum.TRIGGER]: RiPlayCircleLine,
+  [StepTypeEnum.CHAT]: RiChatThreadFill,
+  [StepTypeEnum.CUSTOM]: RiCodeBlock,
+  [StepTypeEnum.DELAY]: RiHourglassFill,
+  [StepTypeEnum.DIGEST]: RiShadowLine,
+  [StepTypeEnum.EMAIL]: Mail3Fill as IconType,
+  [StepTypeEnum.HTTP_REQUEST]: Api as IconType,
+  [StepTypeEnum.IN_APP]: Notification5Fill as IconType,
+  [StepTypeEnum.PUSH]: RiCellphoneFill,
+  [StepTypeEnum.SMS]: Sms as IconType,
+  [StepTypeEnum.THROTTLE]: RiSpeedUpFill,
+  [StepTypeEnum.TRIGGER]: RiFlashlightFill,
 } as const;
 
-export const DEFAULT_STEP_ICON = RiCodeLine;
+export const DEFAULT_STEP_ICON = RiCodeBlock;
 
 export const ACCORDION_STYLES = {
   item: 'border-b border-b-neutral-200 bg-transparent border-t-0 border-l-0 border-r-0 rounded-none p-3',
@@ -35,4 +37,4 @@ export const ACCORDION_STYLES = {
   jsonViewer: 'border-neutral-alpha-200 bg-background text-foreground-600 rounded-lg border border-solid',
 } as const;
 
-export const DEFAULT_ACCORDION_VALUES = ['payload', 'subscriber', 'step-results', 'context'];
+export const DEFAULT_ACCORDION_VALUES = ['payload', 'subscriber', 'step-results', 'context', 'env'];

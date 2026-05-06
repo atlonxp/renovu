@@ -5,7 +5,15 @@ import { type SupportedFrameworkName } from './src/internal';
 const frameworks: SupportedFrameworkName[] = ['h3', 'express', 'next', 'nuxt', 'sveltekit', 'remix', 'lambda', 'nest'];
 
 const baseConfig: Options = {
-  entry: ['src/index.ts', 'src/internal/index.ts', ...frameworks.map((framework) => `src/servers/${framework}.ts`)],
+  entry: [
+    'src/index.ts',
+    'src/jsx-runtime.ts',
+    'src/jsx-dev-runtime.ts',
+    'src/internal/index.ts',
+    'src/step-resolver.ts',
+    'src/validators.ts',
+    ...frameworks.map((framework) => `src/servers/${framework}.ts`),
+  ],
   sourcemap: false,
   clean: true,
   dts: true,
@@ -13,6 +21,7 @@ const baseConfig: Options = {
   minifyWhitespace: true,
   minifyIdentifiers: true,
   minifySyntax: true,
+  noExternal: ['chat'],
   define: {
     SDK_VERSION: `"${version}"`,
     FRAMEWORK_VERSION: `"2024-06-26"`,

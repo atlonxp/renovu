@@ -1,3 +1,5 @@
+const CONTENT_EASE = [0.16, 1, 0.3, 1] as const;
+
 export const ANIMATION_VARIANTS = {
   page: {
     hidden: { opacity: 0 },
@@ -16,7 +18,7 @@ export const ANIMATION_VARIANTS = {
       y: 0,
       transition: {
         duration: 0.5,
-        ease: [0.16, 1, 0.3, 1],
+        ease: CONTENT_EASE,
       },
     },
   },

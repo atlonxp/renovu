@@ -5,13 +5,14 @@ import { Outlet } from 'react-router-dom';
 import { ToastIcon } from '@/components/primitives/sonner';
 import { showToast } from '@/components/primitives/sonner-helpers';
 import { TooltipProvider } from '@/components/primitives/tooltip';
-import { IS_SELF_HOSTED } from '@/config';
 import { AuthProvider } from '@/context/auth/auth-provider';
+import { CustomerIoProvider } from '@/context/customer-io';
 import { EEAuthProvider as ClerkProvider } from '@/context/ee-auth-provider';
 import { EscapeKeyManagerProvider } from '@/context/escape-key-manager/escape-key-manager';
 import { IdentityProvider } from '@/context/identity-provider';
 import { RegionProvider } from '@/context/region';
 import { SegmentProvider } from '@/context/segment';
+import { RootRouteErrorFallback } from '@/routes/root-route-error-fallback';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -45,40 +46,25 @@ const queryClient = new QueryClient({
 
 const RootRouteInternal = () => {
   return (
-    <ErrorBoundary
-      fallback={({ error, eventId }) => (
-        <>
-          We apologize, but something unexpected happened. <br />
-          {IS_SELF_HOSTED
-            ? 'Please check your application logs or try refreshing the page. If the issue persists, consider restarting your Novu services.'
-            : 'Please try refreshing the page. If the problem continues, you can contact our support team with the event ID below for assistance.'}
-          <br />
-          <code>
-            <small style={{ color: 'lightGrey' }}>
-              Event ID: {eventId}
-              <br />
-              {(error as object).toString()}
-            </small>
-          </code>
-        </>
-      )}
-    >
+    <ErrorBoundary fallback={({ error, eventId }) => <RootRouteErrorFallback error={error} eventId={eventId} />}>
       <QueryClientProvider client={queryClient}>
         <ClerkProvider>
           <SegmentProvider>
-            <AuthProvider>
-              <RegionProvider>
-                <IdentityProvider>
-                  <HelmetProvider>
-                    <TooltipProvider delayDuration={100}>
-                      <EscapeKeyManagerProvider>
-                        <Outlet />
-                      </EscapeKeyManagerProvider>
-                    </TooltipProvider>
-                  </HelmetProvider>
-                </IdentityProvider>
-              </RegionProvider>
-            </AuthProvider>
+            <CustomerIoProvider>
+              <AuthProvider>
+                <RegionProvider>
+                  <IdentityProvider>
+                    <HelmetProvider>
+                      <TooltipProvider delayDuration={100}>
+                        <EscapeKeyManagerProvider>
+                          <Outlet />
+                        </EscapeKeyManagerProvider>
+                      </TooltipProvider>
+                    </HelmetProvider>
+                  </IdentityProvider>
+                </RegionProvider>
+              </AuthProvider>
+            </CustomerIoProvider>
           </SegmentProvider>
         </ClerkProvider>
       </QueryClientProvider>

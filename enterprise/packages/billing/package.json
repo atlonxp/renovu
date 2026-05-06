@@ -11,7 +11,7 @@
     "test": "echo 'skip test in the ci'",
     "check": "biome check .",
     "check:fix": "biome check --write .",
-    "test-ee": "cross-env TS_NODE_COMPILER_OPTIONS='{\"strictNullChecks\": false}' NODE_ENV=test mocha --timeout 10000 --require ts-node/register --exit --file tests/setup.ts src/**/**/*.spec.ts",
+    "test-ee": "cross-env TS_NODE_COMPILER_OPTIONS='{\"strictNullChecks\": false}' NODE_ENV=test NODE_OPTIONS=--no-experimental-strip-types mocha --timeout 10000 --require ts-node/register --exit --file tests/setup.ts src/**/**/*.spec.ts",
     "start:proxy": "ngrok http http://localhost:3000"
   },
   "dependencies": {
@@ -25,15 +25,15 @@
     "date-fns": "^4.1.0",
     "date-fns-tz": "^3.2.0",
     "mongoose": "^8.9.5",
-    "rxjs": "7.8.1",
-    "shortid": "^2.2.16",
+    "rxjs": "7.8.2",
+    "shortid": "^2.2.17",
     "stripe": "^11.18.0",
     "stripe-event-types": "^3.1.0"
   },
   "devDependencies": {
     "@types/chai": "^4.2.11",
     "@types/mocha": "^8.0.1",
-    "@types/node": "^20.15.0",
+    "@types/node": "^22.0.0",
     "@types/sinon": "^9.0.0",
     "chai": "^4.2.0",
     "cross-env": "^7.0.3",
@@ -48,7 +48,7 @@
     "@nestjs/jwt": "10.2.0",
     "@nestjs/platform-express": "10.4.18",
     "@nestjs/swagger": "7.4.0",
-    "@nestjs/throttler": "6.2.1",
+    "@nestjs/throttler": "6.5.0",
     "@novu/dal": "workspace:*"
   }
 }

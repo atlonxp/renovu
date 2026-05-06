@@ -105,9 +105,20 @@ async function getFilesFromPnpmSelector(selector, cwd, options = {}) {
 
 async function getMetafilesFromPnpmSelector(selector, cwd, options = {}) {
   const [rootMetas, projectMetas] = await Promise.all([
-    globby(['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'nx.json',
-            'tsconfig.json', 'tsconfig.build.json', '.npmrc', '.npmrc-cloud'],
-           { cwd, dot: true, gitignore: true }),
+    globby(
+      [
+        'package.json',
+        'pnpm-lock.yaml',
+        'pnpm-workspace.yaml',
+        'patches/**',
+        'nx.json',
+        'tsconfig.json',
+        'tsconfig.build.json',
+        '.npmrc',
+        '.npmrc-cloud',
+      ],
+      { cwd, dot: true, gitignore: true }
+    ),
     getPackagePathsFromPnpmSelector(selector, cwd).then((paths) => {
       const patterns = paths.map((p) => `${p}/**/package.json`)
                             .concat(options.extraPatterns || []);

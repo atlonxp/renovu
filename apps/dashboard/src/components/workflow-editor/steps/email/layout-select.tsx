@@ -45,7 +45,7 @@ export const LayoutSelect = () => {
           field.value === null ? 'no_layout' : field.value === undefined ? (defaultLayoutId ?? 'no_layout') : field.value;
 
         return (
-          <FormItem className="w-full">
+          <FormItem className="w-auto">
             <FormControl>
               <Tooltip>
                 <TooltipTrigger disabled={layoutsSortedByDefault?.length === 0}>

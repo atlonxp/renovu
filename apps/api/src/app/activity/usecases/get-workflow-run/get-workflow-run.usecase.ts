@@ -10,7 +10,7 @@ import {
   WorkflowRunRepository,
 } from '@novu/application-generic';
 import { JobEntity, JobRepository } from '@novu/dal';
-import { SeverityLevelEnum, StepTypeEnum } from '@novu/shared';
+import { StepTypeEnum } from '@novu/shared';
 import { GetWorkflowRunResponseDto, StepRunDto } from '../../dtos/workflow-run-response.dto';
 import { mapTraceToExecutionDetailDto, mapWorkflowRunStatusToDto } from '../../shared/mappers';
 import { GetWorkflowRunCommand } from './get-workflow-run.command';
@@ -82,6 +82,57 @@ export class GetWorkflowRun {
     this.logger.setContext(this.constructor.name);
   }
 
+  async execute(command: GetWorkflowRunCommand): Promise<GetWorkflowRunResponseDto> {
+    this.logger.debug(
+      {
+        organizationId: command.organizationId,
+        environmentId: command.environmentId,
+        workflowRunId: command.workflowRunId,
+      },
+      'Getting workflow run from ClickHouse'
+    );
+
+    try {
+      const workflowRunQuery = new QueryBuilder<WorkflowRun>({
+        environmentId: command.environmentId,
+      })
+        .whereEquals('workflow_run_id', command.workflowRunId)
+        .build();
+
+      const workflowRunResult = await this.workflowRunRepository.findOne({
+        where: workflowRunQuery,
+        useFinal: true,
+        select: workflowRunSelectColumns,
+      });
+
+      if (!workflowRunResult.data) {
+        throw new NotFoundException('Workflow run not found', {
+          cause: `Workflow run with id ${command.workflowRunId} not found`,
+        });
+      }
+
+      const workflowRun = workflowRunResult.data;
+      const [stepRuns, overrides] = await Promise.all([
+        this.getStepRunsForWorkflowRun(command, workflowRun),
+        this.getOverridesByTransactionId(workflowRun.transaction_id, command),
+      ]);
+      const workflowRunDto = this.mapWorkflowRunToDto(workflowRun, stepRuns, overrides);
+
+      return workflowRunDto;
+    } catch (error) {
+      this.logger.error(
+        {
+          error: error.message,
+          organizationId: command.organizationId,
+          environmentId: command.environmentId,
+          workflowRunId: command.workflowRunId,
+        },
+        'Failed to get workflow run'
+      );
+      throw error;
+    }
+  }
+
   /**
    * BACKWARD COMPATIBILITY: This method fetches digest data from Job entities at runtime
    * for step runs that don't have digest data stored in ClickHouse.
@@ -110,54 +161,38 @@ export class GetWorkflowRun {
 
       return digestDataByStepId;
     } catch (error) {
-      this.logger.warn('Failed to get job digest data', {
-        error: error.message,
-        transactionId,
-      });
+      this.logger.warn(
+        {
+          error: error.message,
+          transactionId,
+        },
+        'Failed to get job digest data'
+      );
 
       return new Map();
     }
   }
 
-  async execute(command: GetWorkflowRunCommand): Promise<GetWorkflowRunResponseDto> {
-    this.logger.debug('Getting workflow run from ClickHouse', {
-      organizationId: command.organizationId,
-      environmentId: command.environmentId,
-      workflowRunId: command.workflowRunId,
-    });
-
+  private async getOverridesByTransactionId(
+    transactionId: string,
+    command: GetWorkflowRunCommand
+  ): Promise<Record<string, unknown>> {
     try {
-      const workflowRunQuery = new QueryBuilder<WorkflowRun>({
-        environmentId: command.environmentId,
-      })
-        .whereEquals('workflow_run_id', command.workflowRunId)
-        .build();
+      const jobs: Pick<JobEntity, 'overrides'>[] = await this.jobRepository.find(
+        {
+          transactionId,
+          _environmentId: command.environmentId,
+        },
+        'overrides'
+      );
 
-      const workflowRunResult = await this.workflowRunRepository.findOne({
-        where: workflowRunQuery,
-        useFinal: true,
-        select: workflowRunSelectColumns,
-      });
+      const firstWithOverrides = jobs.find((job) => job.overrides && Object.keys(job.overrides).length > 0);
 
-      if (!workflowRunResult.data) {
-        throw new NotFoundException('Workflow run not found', {
-          cause: `Workflow run with id ${command.workflowRunId} not found`,
-        });
-      }
-
-      const workflowRun = workflowRunResult.data;
-      const stepRuns = await this.getStepRunsForWorkflowRun(command, workflowRun);
-      const workflowRunDto = this.mapWorkflowRunToDto(workflowRun, stepRuns);
-
-      return workflowRunDto;
+      return firstWithOverrides?.overrides ?? {};
     } catch (error) {
-      this.logger.error('Failed to get workflow run', {
-        error: error.message,
-        organizationId: command.organizationId,
-        environmentId: command.environmentId,
-        workflowRunId: command.workflowRunId,
-      });
-      throw error;
+      this.logger.warn({ error: error.message, transactionId }, 'Failed to get job overrides data');
+
+      return {};
     }
   }
 
@@ -260,10 +295,13 @@ export class GetWorkflowRun {
 
       return executionDetailsByEntityId;
     } catch (error) {
-      this.logger.warn('Failed to get execution details from traces', {
-        error: error.message,
-        entityIds,
-      });
+      this.logger.warn(
+        {
+          error: error.message,
+          entityIds,
+        },
+        'Failed to get execution details from traces'
+      );
 
       return new Map();
     }
@@ -286,7 +324,8 @@ export class GetWorkflowRun {
 
   private mapWorkflowRunToDto(
     workflowRun: WorkflowRunFetchResult,
-    stepRuns: IStepRunWithDetails[]
+    stepRuns: IStepRunWithDetails[],
+    overrides: Record<string, unknown>
   ): GetWorkflowRunResponseDto {
     return {
       id: workflowRun.workflow_run_id,
@@ -308,6 +347,7 @@ export class GetWorkflowRun {
       critical: workflowRun.critical,
       contextKeys: workflowRun.context_keys,
       topics: workflowRun.topics ? JSON.parse(workflowRun.topics) : [],
+      overrides,
     };
   }
 }

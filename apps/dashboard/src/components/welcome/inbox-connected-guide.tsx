@@ -131,7 +131,7 @@ export function InboxConnectedGuide({ subscriberId, environment }: InboxConnecte
   async function handleCompleteOnboarding() {
     try {
       // Track telemetry event
-      await telemetry(TelemetryEvent.ONBOARDING_COMPLETED);
+      await telemetry(TelemetryEvent.ONBOARDING_COMPLETED, { usecase: 'inbox' });
     } catch (error) {
       console.error('Failed to track onboarding completion telemetry:', error);
       // Continue with navigation even if telemetry fails
@@ -208,17 +208,7 @@ export function InboxConnectedGuide({ subscriberId, environment }: InboxConnecte
 
                 {/* Complete onboarding button - positioned under the waiting text */}
                 <div className="flex justify-start mt-4">
-                  <Button
-                    onClick={handleCompleteOnboarding}
-                    disabled={
-                      !hasDetectedFirstTrigger ||
-                      isTriggerDetectionLoading ||
-                      isTriggerDetectionError ||
-                      isWorkflowsError
-                    }
-                    variant="primary"
-                    mode="gradient"
-                  >
+                  <Button onClick={handleCompleteOnboarding} variant="primary" mode="gradient">
                     <RiCheckboxCircleFill className="mr-1 h-4 w-4" />
                     Complete Onboarding
                   </Button>

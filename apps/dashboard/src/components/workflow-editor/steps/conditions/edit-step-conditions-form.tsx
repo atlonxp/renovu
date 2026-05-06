@@ -1,5 +1,5 @@
 import { standardSchemaResolver } from '@hookform/resolvers/standard-schema';
-import { ContentIssueEnum, type StepUpdateDto } from '@novu/shared';
+import { ContentIssueEnum, EnvironmentTypeEnum, type StepUpdateDto } from '@novu/shared';
 import { useEffect, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import {
@@ -18,6 +18,7 @@ import { isRelativeDateOperator } from '@/components/conditions-editor/field-typ
 import { Form, FormField } from '@/components/primitives/form/form';
 import { updateStepInWorkflow } from '@/components/workflow-editor/step-utils';
 import { useWorkflow } from '@/components/workflow-editor/workflow-provider';
+import { useEnvironment } from '@/context/environment/hooks';
 import { useDataRef } from '@/hooks/use-data-ref';
 import { useFormAutosave } from '@/hooks/use-form-autosave';
 import { useParseVariables } from '@/hooks/use-parse-variables';
@@ -36,9 +37,13 @@ const PAYLOAD_FIELD_PREFIX = 'payload.';
 const SUBSCRIBER_DATA_FIELD_PREFIX = 'subscriber.data.';
 const CONTEXT_FIELD_PREFIX = 'context.';
 
-// Custom rule processor to handle relative date operators
+const CONTAINS_ANY_OPERATORS = ['containsAny', 'doesNotContainAny'] as const;
+
+function isContainsAnyOperator(operator: string): boolean {
+  return (CONTAINS_ANY_OPERATORS as readonly string[]).includes(operator);
+}
+
 const customRuleProcessor = (rule: RuleType, options: any) => {
-  // Handle relative date operators
   if (isRelativeDateOperator(rule.operator)) {
     try {
       const parsedValue = JSON.parse(rule.value as string);
@@ -48,18 +53,35 @@ const customRuleProcessor = (rule: RuleType, options: any) => {
         (typeof parsedValue.amount === 'number' || typeof parsedValue.amount === 'string') &&
         parsedValue.unit
       ) {
-        const result = {
+        return {
           [rule.operator]: [{ var: rule.field }, parsedValue],
         };
-
-        return result;
       }
     } catch (error) {
       console.warn('Failed to parse relative date value:', rule.value, error);
     }
   }
 
-  // Fall back to the default rule processor for all other operators
+  if (isContainsAnyOperator(rule.operator)) {
+    const trimmedValue = (rule.value as string).trim();
+    const variableMatch = trimmedValue.match(/^\{\{(.+?)\}\}$/);
+
+    if (variableMatch) {
+      return {
+        [rule.operator]: [{ var: rule.field }, { var: variableMatch[1].trim() }],
+      };
+    }
+
+    const values = trimmedValue
+      .split(',')
+      .map((v) => v.trim())
+      .filter(Boolean);
+
+    return {
+      [rule.operator]: [{ var: rule.field }, values],
+    };
+  }
+
   return defaultRuleProcessorJsonLogic(rule, options);
 };
 
@@ -165,6 +187,8 @@ const getConditionsSchema = (
 export const EditStepConditionsForm = () => {
   const track = useTelemetry();
   const { workflow, step, update, digestStepBeforeCurrent } = useWorkflow();
+  const { currentEnvironment, readOnly } = useEnvironment();
+  const isReadOnly = readOnly || currentEnvironment?.type !== EnvironmentTypeEnum.DEV;
   const hasConditions = !!step?.controls.values.skip;
   const query = useMemo(
     () =>
@@ -229,6 +253,7 @@ export const EditStepConditionsForm = () => {
     form,
     shouldClientValidate: true,
     save: (data) => {
+      if (isReadOnly) return;
       if (!step || !workflow) return;
 
       const skip = formatQuery(data.query as unknown as RuleGroupType, {
@@ -302,33 +327,32 @@ export const EditStepConditionsForm = () => {
   }, [form, step]);
 
   return (
-    <>
-      <Form {...form}>
-        <EditStepConditionsLayout
-          stepName={step?.name}
-          onBlur={onBlur}
-          onSubmit={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-          }}
-        >
-          <FormField
-            control={form.control}
-            name="query"
-            render={({ field }) => (
-              <ConditionsEditor
-                saveForm={saveForm}
-                query={field.value as RuleGroupType}
-                onQueryChange={field.onChange}
-                fields={fields}
-                variables={variables}
-                isAllowedVariable={isAllowedVariable}
-                enhancedVariables={filteredEnhancedVariables}
-              />
-            )}
-          />
-        </EditStepConditionsLayout>
-      </Form>
-    </>
+    <Form {...form}>
+      <EditStepConditionsLayout
+        stepName={step?.name}
+        onBlur={onBlur}
+        onSubmit={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }}
+      >
+        <FormField
+          control={form.control}
+          name="query"
+          render={({ field }) => (
+            <ConditionsEditor
+              saveForm={saveForm}
+              query={field.value as RuleGroupType}
+              onQueryChange={field.onChange}
+              fields={fields}
+              variables={variables}
+              isAllowedVariable={isAllowedVariable}
+              enhancedVariables={filteredEnhancedVariables}
+              disabled={isReadOnly}
+            />
+          )}
+        />
+      </EditStepConditionsLayout>
+    </Form>
   );
 };

@@ -16,7 +16,7 @@ import { getToken } from '@/utils/auth';
 import { useDataRef } from './use-data-ref';
 
 type UseAiChatOptions<D extends UIDataTypes = UIDataTypes, T extends UITools = UITools> = {
-  id: string;
+  id?: string;
   agentType: AiAgentTypeEnum;
   initialMessages?: UIMessage<unknown, D, T>[];
   onData?: ChatOnDataCallback<UIMessage>;
@@ -81,9 +81,19 @@ export function useAiChatStream<D extends UIDataTypes = UIDataTypes, T extends U
   const isGenerating = status === 'streaming' || status === 'submitted';
 
   const sendPrompt = useCallback(
-    ({ messageId, chatId, prompt }: { messageId?: string; chatId?: string; prompt: string }) => {
+    ({
+      messageId,
+      chatId,
+      prompt,
+      metadata,
+    }: {
+      messageId?: string;
+      chatId?: string;
+      prompt: string;
+      metadata?: UIMessage<unknown, D, T>['metadata'];
+    }) => {
       setIsAborted(false);
-      return sendMessage({ text: prompt, messageId }, { body: { id: chatId, agentType } });
+      return sendMessage({ text: prompt, messageId, metadata }, { body: { id: chatId, agentType } });
     },
     [sendMessage, agentType]
   );
@@ -109,9 +119,9 @@ export function useAiChatStream<D extends UIDataTypes = UIDataTypes, T extends U
       .flatMap((m) => m.parts.filter((p) => p.type.startsWith('data-'))) as DataUIPart<D>[];
   }, [messages]);
 
-  const handleStop = useCallback(() => {
+  const handleStop = useCallback(async () => {
     setIsAborted(true);
-    stop();
+    await stop();
   }, [stop]);
 
   return {

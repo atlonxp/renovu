@@ -3,8 +3,8 @@
 import { Command } from 'commander';
 import { v4 as uuidv4 } from 'uuid';
 import { DevCommandOptions, devCommand } from './commands';
-import { emailInit, emailPublish } from './commands/email';
 import { IInitCommandOptions, init } from './commands/init';
+import { stepPublish } from './commands/step';
 import { sync } from './commands/sync';
 import { pullTranslations, pushTranslations } from './commands/translations';
 import { NOVU_API_URL, NOVU_SECRET_KEY } from './constants';
@@ -77,6 +77,7 @@ program
   .option('-sh, --studio-host <host>', 'The Local Studio server host', 'localhost')
   .option('-t, --tunnel <url>', 'Self hosted tunnel. e.g. https://my-tunnel.ngrok.app')
   .option('-H, --headless', 'Run the Bridge in headless mode without opening the browser', false)
+  .option('--no-studio', 'Skip starting the local Studio server')
   .action(async (options: DevCommandOptions) => {
     analytics.track({
       identity: {
@@ -97,6 +98,8 @@ program
     `The Novu development environment Secret Key. Note that your Novu app won't work outside of local mode without it.`
   )
   .option('-a, --api-url <url>', 'The Novu Cloud API URL', 'https://api.novu.co')
+  .option('-t, --template <name>', 'The template to use (notifications or agent)')
+  .option('--agent-identifier <id>', 'Agent identifier to use in the scaffolded template')
   .action(async (options: IInitCommandOptions) => {
     return await init(options, anonymousId);
   });
@@ -137,27 +140,9 @@ translationsCommand
     await pushTranslations(options);
   });
 
-const emailCommand = program.command('email').description('Manage Novu email step resolvers');
+const stepCommand = program.command('step').description('Manage Novu step resolvers');
 
-emailCommand
-  .command('init')
-  .description('Generate step handler files from novu.config.ts')
-  .option('-c, --config <path>', 'Path to config file')
-  .option('--force', 'Overwrite existing handler files')
-  .option('--out <path>', 'Output directory for handlers')
-  .option('--dry-run', 'Show what would be generated')
-  .action(async (options) => {
-    analytics.track({
-      identity: {
-        anonymousId,
-      },
-      data: {},
-      event: 'Email Init Command',
-    });
-    await emailInit(options);
-  });
-
-emailCommand
+stepCommand
   .command('publish')
   .description('Bundle and deploy step handlers to Novu')
   .option('-s, --secret-key <key>', 'Novu API secret key', NOVU_SECRET_KEY || '')
@@ -166,6 +151,10 @@ emailCommand
   .option('--out <path>', 'Directory containing step handlers')
   .option('--workflow <id...>', 'Deploy only specific workflows')
   .option('--step <id...>', 'Deploy only specific steps (requires --workflow)')
+  .option(
+    '--template <path>',
+    'Path to React Email template; scaffolds a React Email email handler if it does not exist'
+  )
   .option('--bundle-out-dir [path]', 'Write bundled workflow artifacts to a directory for debugging')
   .option('--dry-run', 'Bundle without deploying')
   .action(async (options) => {
@@ -174,9 +163,9 @@ emailCommand
         anonymousId,
       },
       data: {},
-      event: 'Email Publish Command',
+      event: 'Step Publish Command',
     });
-    await emailPublish(options);
+    await stepPublish(options);
   });
 
 program.parse(process.argv);

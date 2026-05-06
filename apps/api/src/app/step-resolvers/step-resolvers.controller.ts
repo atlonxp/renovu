@@ -3,21 +3,36 @@ import {
   Body,
   ClassSerializerInterceptor,
   Controller,
+  Delete,
+  Get,
+  Param,
   Post,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiExcludeController } from '@nestjs/swagger';
-import { ExternalApiAccessible, RequirePermissions } from '@novu/application-generic';
+import {
+  DisconnectStepResolverCommand,
+  DisconnectStepResolverUsecase,
+  ExternalApiAccessible,
+  RequirePermissions,
+} from '@novu/application-generic';
 import { ApiRateLimitCategoryEnum, PermissionsEnum, UserSessionData } from '@novu/shared';
 import { plainToInstance } from 'class-transformer';
 import { ValidationError, validateSync } from 'class-validator';
 import { RequireAuthentication } from '../auth/framework/auth.decorator';
 import { ThrottlerCategory } from '../rate-limiting/guards/throttler.decorator';
 import { UserSession } from '../shared/framework/user.decorator';
-import { DeployStepResolverManifestDto, DeployStepResolverRequestDto, DeployStepResolverResponseDto } from './dtos';
+import {
+  DeployStepResolverManifestDto,
+  DeployStepResolverRequestDto,
+  DeployStepResolverResponseDto,
+  DisconnectStepResolverRequestDto,
+  StepResolversCountResponseDto,
+} from './dtos';
 import { DeployStepResolverCommand, DeployStepResolverUsecase } from './usecases/deploy-step-resolver';
+import { GetStepResolversCountUsecase } from './usecases/get-step-resolvers-count';
 
 interface UploadedBundleFile {
   buffer: Buffer;
@@ -32,7 +47,18 @@ interface UploadedBundleFile {
 @ThrottlerCategory(ApiRateLimitCategoryEnum.CONFIGURATION)
 @RequireAuthentication()
 export class StepResolversController {
-  constructor(private deployStepResolverUsecase: DeployStepResolverUsecase) {}
+  constructor(
+    private deployStepResolverUsecase: DeployStepResolverUsecase,
+    private disconnectStepResolverUsecase: DisconnectStepResolverUsecase,
+    private getStepResolversCountUsecase: GetStepResolversCountUsecase
+  ) {}
+
+  @Get('/count')
+  @ExternalApiAccessible()
+  @RequirePermissions(PermissionsEnum.WORKFLOW_READ)
+  async getCount(@UserSession() user: UserSessionData): Promise<StepResolversCountResponseDto> {
+    return this.getStepResolversCountUsecase.execute(user.environmentId);
+  }
 
   @Post('/deploy')
   @ExternalApiAccessible()
@@ -65,6 +91,23 @@ export class StepResolversController {
         user,
         manifestSteps: manifest.steps,
         bundleBuffer,
+      })
+    );
+  }
+
+  @Delete('/:stepInternalId/disconnect')
+  @ExternalApiAccessible()
+  @RequirePermissions(PermissionsEnum.WORKFLOW_WRITE)
+  async disconnect(
+    @UserSession() user: UserSessionData,
+    @Param('stepInternalId') stepInternalId: string,
+    @Body() body: DisconnectStepResolverRequestDto
+  ): Promise<void> {
+    await this.disconnectStepResolverUsecase.execute(
+      DisconnectStepResolverCommand.create({
+        stepInternalId,
+        stepType: body.stepType,
+        user,
       })
     );
   }

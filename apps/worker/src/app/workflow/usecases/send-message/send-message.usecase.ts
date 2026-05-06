@@ -1,8 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
   AnalyticsService,
-  buildSubscriberKey,
-  CachedResponse,
   ConditionsFilter,
   ConditionsFilterCommand,
   CreateExecutionDetails,
@@ -11,19 +9,21 @@ import {
   GetPreferences,
   GetSubscriberTemplatePreference,
   GetSubscriberTemplatePreferenceCommand,
+  ICompileContext,
   IConditionsFilterResponse,
-  IFilterVariables,
+  InMemoryLRUCacheService,
+  InMemoryLRUCacheStore,
   Instrument,
   InstrumentUsecase,
-  NormalizeVariables,
-  NormalizeVariablesCommand,
   PlatformException,
+  resolveEnvironmentVariables,
 } from '@novu/application-generic';
 import {
   ContextRepository,
+  EnvironmentRepository,
+  EnvironmentVariableRepository,
   JobEntity,
   NotificationTemplateRepository,
-  SubscriberEntity,
   SubscriberRepository,
   TenantEntity,
   TenantRepository,
@@ -33,6 +33,7 @@ import {
   DeliveryLifecycleDetail,
   DeliveryLifecycleStatusEnum,
   DigestTypeEnum,
+  EnvironmentSystemVariables,
   ExecutionDetailsSourceEnum,
   ExecutionDetailsStatusEnum,
   IDigestRegularMetadata,
@@ -44,7 +45,8 @@ import {
 } from '@novu/shared';
 import { ExecuteBridgeJob } from '../execute-bridge-job';
 import { Digest } from './digest';
-import { ExecuteStepCustom } from './execute-step-custom.usecase';
+import { ExecuteCodeFirstCustomStep } from './execute-code-first-custom-step.usecase';
+import { ExecuteHttpRequestStep } from './execute-http-request-step.usecase';
 import { SendMessageCommand } from './send-message.command';
 import { SendMessageChannelCommand } from './send-message-channel.command';
 import { SendMessageChat } from './send-message-chat.usecase';
@@ -70,42 +72,34 @@ export class SendMessage {
     private notificationTemplateRepository: NotificationTemplateRepository,
     private sendMessageDelay: SendMessageDelay,
     private throttle: Throttle,
-    private executeStepCustom: ExecuteStepCustom,
+    private executeCodeFirstCustomStep: ExecuteCodeFirstCustomStep,
+    private executeHttpRequestStep: ExecuteHttpRequestStep,
     private conditionsFilter: ConditionsFilter,
     private subscriberRepository: SubscriberRepository,
     private tenantRepository: TenantRepository,
     private analyticsService: AnalyticsService,
-    private normalizeVariablesUsecase: NormalizeVariables,
     private contextRepository: ContextRepository,
-    private executeBridgeJob: ExecuteBridgeJob
+    private environmentVariableRepository: EnvironmentVariableRepository,
+    private environmentRepository: EnvironmentRepository,
+    private executeBridgeJob: ExecuteBridgeJob,
+    private inMemoryLRUCacheService: InMemoryLRUCacheService
   ) {}
 
   @InstrumentUsecase()
   public async execute(command: SendMessageCommand): Promise<SendMessageResult> {
-    const payload = await this.buildCompileContext(command);
-
-    const variables = await this.normalizeVariablesUsecase.execute(
-      NormalizeVariablesCommand.create({
-        filters: command.job.step.filters || [],
-        environmentId: command.environmentId,
-        organizationId: command.organizationId,
-        userId: command.userId,
-        step: command.step,
-        job: command.job,
-        variables: payload,
-      })
-    );
+    const variables = await this.buildVariables(command);
 
     const stepType = command.step?.template?.type;
 
     let bridgeResponse: ExecuteOutput | null = null;
-    if (isChannelStep(stepType)) {
+    if (requiresBridgeExecution(stepType)) {
       bridgeResponse = await this.executeBridgeJob.execute({
         ...command,
         variables,
         workflow: command.workflow,
       });
     }
+
     const isBridgeSkipped = bridgeResponse?.options?.skip;
     if (isBridgeSkipped) {
       await this.createExecutionDetails.execute(
@@ -121,7 +115,7 @@ export class SendMessage {
       );
     }
 
-    const { stepCondition, channelPreference } = await this.evaluateFilters(command, variables, payload);
+    const { stepCondition, channelPreference } = await this.evaluateFilters(command, variables);
     if (!command.payload?.$on_boarding_trigger) {
       this.sendProcessStepEvent(
         command,
@@ -171,7 +165,7 @@ export class SendMessage {
 
     const sendMessageChannelCommand = SendMessageChannelCommand.create({
       ...command,
-      compileContext: payload,
+      compileContext: variables,
       bridgeData: bridgeResponse,
       severity,
     });
@@ -204,8 +198,11 @@ export class SendMessage {
       case StepTypeEnum.THROTTLE: {
         return await this.throttle.execute(command);
       }
+      case StepTypeEnum.HTTP_REQUEST: {
+        return await this.executeHttpRequestStep.execute(sendMessageChannelCommand);
+      }
       case StepTypeEnum.CUSTOM: {
-        return await this.executeStepCustom.execute(sendMessageChannelCommand);
+        return await this.executeCodeFirstCustomStep.execute(sendMessageChannelCommand);
       }
       default: {
         throw new Error(`Unsupported step type: ${stepType}`);
@@ -215,21 +212,20 @@ export class SendMessage {
 
   private async evaluateFilters(
     command: SendMessageCommand,
-    variables: IFilterVariables,
-    compileContext: SendMessageChannelCommand['compileContext']
+    variables: ICompileContext
   ): Promise<{
     stepCondition: IConditionsFilterResponse;
     channelPreference: { result: boolean; reason?: DetailEnum };
   }> {
     const [stepCondition, channelPreference] = await Promise.all([
       this.evaluateStepCondition(command, variables),
-      this.evaluateChannelPreference(command, compileContext),
+      this.evaluateChannelPreference(command, variables),
     ]);
 
     return { stepCondition, channelPreference };
   }
 
-  private async evaluateStepCondition(command: SendMessageCommand, variables: IFilterVariables) {
+  private async evaluateStepCondition(command: SendMessageCommand, variables: ICompileContext) {
     const stepCondition = await this.conditionsFilter.filter(
       ConditionsFilterCommand.create({
         filters: command.job.step.filters || [],
@@ -318,18 +314,18 @@ export class SendMessage {
       preferencesPassed: preferredResult,
       isBridgeSkipped,
       ...(usedFilters || {}),
-      source: command.payload.__source || 'api',
+      source: command.payload?.__source || 'api',
     });
   }
 
   @Instrument()
   private async evaluateChannelPreference(
     command: SendMessageCommand,
-    compileContext: SendMessageChannelCommand['compileContext']
+    compileContext: ICompileContext
   ): Promise<{ result: boolean; reason?: DetailEnum }> {
     const { job } = command;
 
-    if (this.isActionStep(job)) {
+    if (!this.isChannelStep(job)) {
       return { result: true };
     }
 
@@ -423,8 +419,8 @@ export class SendMessage {
   }
 
   @Instrument()
-  private async buildCompileContext(command: SendMessageCommand): Promise<SendMessageChannelCommand['compileContext']> {
-    const [subscriber, actor, tenant, context] = await Promise.all([
+  private async buildVariables(command: SendMessageCommand): Promise<ICompileContext> {
+    const [subscriber, actor, tenant, context, envVars, environmentEntity] = await Promise.all([
       this.getSubscriberBySubscriberId({
         subscriberId: command.subscriberId,
         _environmentId: command.environmentId,
@@ -436,9 +432,23 @@ export class SendMessage {
         }),
       this.handleTenantExecution(command.job),
       this.resolveContext(command),
+      this.getEnvironmentVariables(command),
+      this.environmentRepository.findByIdAndOrganization(command.environmentId, command.organizationId),
     ]);
 
     if (!subscriber) throw new PlatformException('Subscriber not found');
+    if (!environmentEntity) throw new PlatformException('EnvironmentEntity not found');
+
+    // Compile-safe: adding a required field to EnvironmentSystemVariables will cause a TS error here
+    const environmentSystemVars: EnvironmentSystemVariables = {
+      name: environmentEntity.name,
+      type: environmentEntity.type,
+    };
+
+    const env: EnvironmentSystemVariables & Record<string, string> = {
+      ...envVars,
+      ...environmentSystemVars,
+    };
 
     return {
       subscriber,
@@ -451,7 +461,39 @@ export class SendMessage {
       ...(tenant && { tenant }),
       ...(actor && { actor }),
       ...(context && { context }),
+      env,
     };
+  }
+
+  @Instrument()
+  private async getEnvironmentVariables(command: SendMessageCommand): Promise<Record<string, string>> {
+    const cacheKey = `${command.organizationId}:${command.environmentId}`;
+
+    return this.inMemoryLRUCacheService.get(
+      InMemoryLRUCacheStore.ENVIRONMENT_VARIABLES,
+      cacheKey,
+      async () => {
+        try {
+          const rawEnvVars = await this.environmentVariableRepository.findByEnvironment(
+            command.organizationId,
+            command.environmentId
+          );
+
+          return resolveEnvironmentVariables(rawEnvVars);
+        } catch (error) {
+          Logger.warn(
+            { err: error, organizationId: command.organizationId, environmentId: command.environmentId },
+            'Failed to fetch environment variables, falling back to empty object'
+          );
+
+          return {};
+        }
+      },
+      {
+        environmentId: command.environmentId,
+        organizationId: command.organizationId,
+      }
+    );
   }
 
   @Instrument()
@@ -494,17 +536,17 @@ export class SendMessage {
   private stepPreferred(preference: { enabled: boolean; channels: IPreferenceChannels }, job: JobEntity) {
     const workflowPreferred = preference.enabled;
 
-    const channelPreferred = Object.keys(preference.channels).some(
-      (channelKey) => channelKey === job.type && preference.channels[job.type]
+    const channelPreferred = Object.keys(preference.channels || {}).some(
+      (channelKey) => channelKey === job.type && preference.channels?.[job.type]
     );
 
     return workflowPreferred && channelPreferred;
   }
 
-  private isActionStep(job: JobEntity) {
+  private isChannelStep(job: JobEntity) {
     const channels = [StepTypeEnum.IN_APP, StepTypeEnum.EMAIL, StepTypeEnum.SMS, StepTypeEnum.PUSH, StepTypeEnum.CHAT];
 
-    return !channels.find((channel) => channel === job.type);
+    return !!channels.find((channel) => channel === job.type);
   }
 
   protected async sendSelectedTenantExecution(job: JobEntity, tenant: TenantEntity) {
@@ -562,6 +604,8 @@ export class SendMessage {
   }
 }
 
-function isChannelStep(stepType: StepTypeEnum | undefined) {
-  return ![StepTypeEnum.DIGEST, StepTypeEnum.DELAY, StepTypeEnum.TRIGGER].includes(stepType as StepTypeEnum);
+function requiresBridgeExecution(stepType: StepTypeEnum | undefined): boolean {
+  if (!stepType) return false;
+
+  return ![StepTypeEnum.TRIGGER, StepTypeEnum.DIGEST, StepTypeEnum.DELAY, StepTypeEnum.HTTP_REQUEST].includes(stepType);
 }

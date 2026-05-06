@@ -142,7 +142,7 @@ export const nodemailerConfig: IConfigCredential[] = [
   {
     key: CredentialsKeyEnum.Secure,
     displayName: 'Secure',
-    type: 'boolean',
+    type: 'switch',
     required: false,
   },
   {
@@ -496,7 +496,7 @@ export const messagebirdConfig: IConfigCredential[] = [
 export const slackConfigLegacy: IConfigCredential[] = [
   {
     key: CredentialsKeyEnum.ApplicationId,
-    displayName: 'Application Id',
+    displayName: 'App ID',
     type: 'string',
     required: true,
   },
@@ -509,6 +509,13 @@ export const slackConfigLegacy: IConfigCredential[] = [
   {
     key: CredentialsKeyEnum.SecretKey,
     displayName: 'Client Secret',
+    type: 'string',
+    required: true,
+  },
+  {
+    key: CredentialsKeyEnum.SigningSecret,
+    displayName: 'Signing Secret',
+    description: 'Slack app Signing Secret, used for verifying inbound webhook requests',
     type: 'string',
     required: true,
   },
@@ -530,7 +537,7 @@ export const slackConfigLegacy: IConfigCredential[] = [
 export const slackConfig: IConfigCredential[] = [
   {
     key: CredentialsKeyEnum.ApplicationId,
-    displayName: 'Application Id',
+    displayName: 'App ID',
     type: 'string',
     required: true,
   },
@@ -543,6 +550,13 @@ export const slackConfig: IConfigCredential[] = [
   {
     key: CredentialsKeyEnum.SecretKey,
     displayName: 'Client Secret',
+    type: 'string',
+    required: true,
+  },
+  {
+    key: CredentialsKeyEnum.SigningSecret,
+    displayName: 'Signing Secret',
+    description: 'Slack app Signing Secret, used for verifying inbound webhook requests',
     type: 'string',
     required: true,
   },
@@ -558,22 +572,22 @@ export const slackConfig: IConfigCredential[] = [
 export const msTeamsConfig: IConfigCredential[] = [
   {
     key: CredentialsKeyEnum.ClientId,
-    displayName: 'Client ID',
-    description: 'Azure Bot Application (client) ID',
+    displayName: 'Microsoft App ID',
+    description: 'From Azure Bot resource → Configuration, or App Registration → Overview (Application client ID)',
     type: 'string',
     required: false,
   },
   {
     key: CredentialsKeyEnum.SecretKey,
     displayName: 'Client Secret',
-    description: 'Azure Bot Client Secret value',
+    description: 'Secret value from App Registration → Certificates & secrets → New client secret',
     type: 'string',
     required: false,
   },
   {
     key: CredentialsKeyEnum.TenantId,
-    displayName: 'Tenant ID',
-    description: 'Azure Bot Tenant ID',
+    displayName: 'Directory (tenant) ID',
+    description: 'From App Registration → Overview (Directory tenant ID)',
     type: 'string',
     required: false,
   },
@@ -1276,6 +1290,21 @@ export const whatsAppBusinessConfig: IConfigCredential[] = [
     type: 'string',
     required: true,
   },
+  {
+    key: CredentialsKeyEnum.SecretKey,
+    displayName: 'App Secret',
+    description:
+      'Found under App Settings > Basic in your Meta app dashboard — used to verify inbound webhook signatures',
+    type: 'string',
+    required: false,
+  },
+  {
+    key: CredentialsKeyEnum.Token,
+    displayName: 'Verify Token',
+    description: 'A secret string you define — must match the Verify Token entered in your Meta webhook configuration',
+    type: 'string',
+    required: false,
+  },
 ];
 
 export const mobishastraConfig: IConfigCredential[] = [
@@ -1405,4 +1434,15 @@ export const ISendProProviderConfig: IConfigCredential[] = [
     type: 'text',
     required: false,
   },
+];
+
+export const cmTelecomConfig: IConfigCredential[] = [
+  {
+    key: CredentialsKeyEnum.ApiToken,
+    displayName: 'Product Token',
+    description: 'Your CM.com product token',
+    type: 'string',
+    required: true,
+  },
+  ...smsConfigBase,
 ];

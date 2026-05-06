@@ -2,7 +2,7 @@ import { useOrganization } from '@/utils/self-hosted';
 import { EnvironmentTypeEnum, FeatureFlagsKeysEnum } from '@novu/shared';
 import { CalendarIcon } from 'lucide-react';
 import { motion } from 'motion/react';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   type ActiveSubscribersTrendDataPoint,
@@ -45,11 +45,12 @@ export function AnalyticsPage() {
 
   const isDevMockMode = searchParams.get('dev_mock_date') === 'true';
 
-  const { selectedDateRange, setSelectedDateRange, dateFilterOptions, chartsDateRange } = useAnalyticsDateFilter({
-    organization,
-    subscription,
-    upgradeCtaIcon: AnalyticsUpgradeCtaIcon,
-  });
+  const { selectedDateRange, setSelectedDateRange, dateFilterOptions, chartsDateRange, selectedPeriodLabel } =
+    useAnalyticsDateFilter({
+      organization,
+      subscription,
+      upgradeCtaIcon: AnalyticsUpgradeCtaIcon,
+    });
 
   const [selectedWorkflows, setSelectedWorkflows] = useState<string[]>([]);
   const { data: workflowTemplates } = useFetchWorkflows({ limit: 100 });
@@ -112,10 +113,17 @@ export function AnalyticsPage() {
     useMockData: isDevMockMode,
   });
 
-  const chartsData = { ...trendsCharts, ...workflowCharts };
+  const chartsData = useMemo(() => ({ ...trendsCharts, ...workflowCharts }), [trendsCharts, workflowCharts]);
 
   const { messagesDeliveredData, activeSubscribersData, avgMessagesPerSubscriberData, totalInteractionsData } =
     useMetricData(metricsCharts);
+
+  const workflowRunsCount = useMemo(() => {
+    const trend = workflowCharts?.[ReportTypeEnum.WORKFLOW_RUNS_TREND] as WorkflowRunsTrendDataPoint[] | undefined;
+    if (!trend) return undefined;
+
+    return trend.reduce((sum, day) => sum + day.completed + day.error, 0);
+  }, [workflowCharts]);
 
   useEffect(() => {
     telemetry(TelemetryEvent.ANALYTICS_PAGE_VISIT);
@@ -136,7 +144,12 @@ export function AnalyticsPage() {
           </h1>
         }
       >
-        <motion.div className="flex flex-col gap-2" variants={ANIMATION_VARIANTS.page} initial="hidden" animate="show">
+        <motion.div
+          className="flex flex-col gap-1.5"
+          variants={ANIMATION_VARIANTS.page}
+          initial="hidden"
+          animate="show"
+        >
           <motion.div variants={ANIMATION_VARIANTS.section} className="flex justify-start gap-2">
             <FacetedFormFilter
               size="small"
@@ -167,52 +180,56 @@ export function AnalyticsPage() {
             )}
           </motion.div>
 
-          <div className="flex flex-col gap-2">
-            <motion.div variants={ANIMATION_VARIANTS.section}>
-              <AnalyticsSection
-                messagesDeliveredData={messagesDeliveredData}
-                activeSubscribersData={activeSubscribersData}
-                avgMessagesPerSubscriberData={avgMessagesPerSubscriberData}
-                totalInteractionsData={totalInteractionsData}
-                isLoading={isMetricsLoading}
-              />
-            </motion.div>
+          <motion.div variants={ANIMATION_VARIANTS.section}>
+            <AnalyticsSection
+              messagesDeliveredData={messagesDeliveredData}
+              activeSubscribersData={activeSubscribersData}
+              avgMessagesPerSubscriberData={avgMessagesPerSubscriberData}
+              totalInteractionsData={totalInteractionsData}
+              isLoading={isMetricsLoading}
+            />
+          </motion.div>
 
-            <motion.div variants={ANIMATION_VARIANTS.section}>
-              <ChartsSection
-                charts={chartsData}
-                isTrendsLoading={isTrendsLoading}
-                isWorkflowLoading={isWorkflowLoading}
-                trendsError={trendsError}
-                workflowError={workflowError}
-              />
-            </motion.div>
+          <motion.div variants={ANIMATION_VARIANTS.section}>
+            <ChartsSection
+              charts={chartsData}
+              isTrendsLoading={isTrendsLoading}
+              isWorkflowLoading={isWorkflowLoading}
+              trendsError={trendsError}
+              workflowError={workflowError}
+            />
+          </motion.div>
 
-            <motion.div variants={ANIMATION_VARIANTS.section}>
-              <WorkflowRunsTrendChart
-                data={chartsData?.[ReportTypeEnum.WORKFLOW_RUNS_TREND] as WorkflowRunsTrendDataPoint[]}
-                isLoading={isWorkflowLoading}
-                error={workflowError}
-              />
-            </motion.div>
+          <motion.div variants={ANIMATION_VARIANTS.section}>
+            <WorkflowRunsTrendChart
+              data={chartsData?.[ReportTypeEnum.WORKFLOW_RUNS_TREND] as WorkflowRunsTrendDataPoint[]}
+              count={workflowRunsCount}
+              periodLabel={selectedPeriodLabel}
+              isLoading={isWorkflowLoading}
+              error={workflowError}
+            />
+          </motion.div>
 
-            <motion.div variants={ANIMATION_VARIANTS.section} className="grid grid-cols-1 lg:grid-cols-12 gap-2">
-              <div className="lg:col-span-8">
-                <ActiveSubscribersTrendChart
-                  data={chartsData?.[ReportTypeEnum.ACTIVE_SUBSCRIBERS_TREND] as ActiveSubscribersTrendDataPoint[]}
-                  isLoading={isTrendsLoading}
-                  error={trendsError}
-                />
-              </div>
-              <div className="lg:col-span-4 h-full">
-                <ProvidersByVolume
-                  data={chartsData?.[ReportTypeEnum.PROVIDER_BY_VOLUME] as ProviderVolumeDataPoint[]}
-                  isLoading={isTrendsLoading}
-                  error={trendsError}
-                />
-              </div>
-            </motion.div>
-          </div>
+          <motion.div
+            variants={ANIMATION_VARIANTS.section}
+            className="grid grid-cols-1 lg:grid-cols-12 gap-1.5 items-stretch lg:h-[200px]"
+          >
+            <div className="lg:col-span-8 h-full min-h-0">
+              <ActiveSubscribersTrendChart
+                data={chartsData?.[ReportTypeEnum.ACTIVE_SUBSCRIBERS_TREND] as ActiveSubscribersTrendDataPoint[]}
+                isLoading={isTrendsLoading}
+                error={trendsError}
+              />
+            </div>
+            <div className="lg:col-span-4 h-full min-h-0">
+              <ProvidersByVolume
+                data={chartsData?.[ReportTypeEnum.PROVIDER_BY_VOLUME] as ProviderVolumeDataPoint[]}
+                isLoading={isTrendsLoading}
+                error={trendsError}
+              />
+            </div>
+          </motion.div>
+
           {currentEnvironment?.type === EnvironmentTypeEnum.DEV && (
             <InlineToast
               title="You're viewing usage for the Development environment"

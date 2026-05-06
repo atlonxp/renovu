@@ -20,6 +20,7 @@ import {
   featureFlagsService,
   GetDecryptedSecretKey,
   GetTenant,
+  HttpClientService,
   InMemoryLRUCacheService,
   InvalidateCacheService,
   LoggerModule,
@@ -37,9 +38,11 @@ import {
   WorkflowRunService,
 } from '@novu/application-generic';
 import {
+  AgentIntegrationRepository,
   ControlValuesRepository,
   DalService,
   EnvironmentRepository,
+  EnvironmentVariableRepository,
   ExecutionDetailsRepository,
   IntegrationRepository,
   JobRepository,
@@ -62,7 +65,9 @@ import { UNIQUE_WORKER_DEPENDENCIES } from '../../config/worker-init.config';
 import { ActiveJobsMetricService } from '../workflow/services';
 
 const DAL_MODELS = [
+  AgentIntegrationRepository,
   EnvironmentRepository,
+  EnvironmentVariableRepository,
   ExecutionDetailsRepository,
   NotificationTemplateRepository,
   SubscriberRepository,
@@ -132,6 +137,7 @@ const PROVIDERS = [
   ExecuteFrameworkRequest,
   ExecuteStepResolverRequest,
   GetDecryptedSecretKey,
+  HttpClientService,
   ...ANALYTICS_PROVIDERS,
 ];
 

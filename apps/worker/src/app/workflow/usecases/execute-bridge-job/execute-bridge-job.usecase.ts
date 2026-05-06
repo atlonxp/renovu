@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import {
+  BridgeError,
   CreateExecutionDetails,
   CreateExecutionDetailsCommand,
   DetailEnum,
@@ -104,17 +105,14 @@ export class ExecuteBridgeJob {
       throw new Error(`Bridge URL is not set for environment id: ${environment._id}`);
     }
 
-    const { subscriber, payload: originalPayload, context } = command.variables || {};
+    const { subscriber, payload: originalPayload, context, env } = command.variables || {};
     const payload = this.normalizePayload(originalPayload);
-
     const state = await this.generateState(command);
 
     const controlValuesResult = isStateful
       ? await this.findControlValues(command, workflow as NotificationTemplateEntity)
       : { controls: command.job.step.controlVariables, stepResolverHash: undefined };
-
     const variablesStores = controlValuesResult.controls;
-    const { stepResolverHash } = controlValuesResult;
 
     const bridgeEvent: Omit<Event, 'workflowId' | 'stepId' | 'action'> = {
       payload: payload ?? {},
@@ -122,11 +120,14 @@ export class ExecuteBridgeJob {
       state,
       subscriber: subscriber ?? {},
       context: context ?? {},
+      // biome-ignore lint/style/noNonNullAssertion: <explanation> we always have env.type and env.name
+      env: env!,
     };
 
     const workflowId = isStateful
       ? (workflow as NotificationTemplateEntity).triggers[0].identifier
       : command.identifier;
+    const { stepResolverHash } = controlValuesResult;
 
     const bridgeResponse = await this.sendBridgeRequest({
       environmentId: command.environmentId,
@@ -165,10 +166,10 @@ export class ExecuteBridgeJob {
     });
 
     const rawControls = controlsEntity?.controls;
-    const stepResolverHash = rawControls?.stepResolverHash as string | undefined;
+    const stepResolverHash = command.job.step.template?.stepResolverHash ?? undefined;
 
     let sanitizedControls: Record<string, unknown> = {};
-    if (workflow?.origin === ResourceOriginEnum.NOVU_CLOUD && rawControls) {
+    if (workflow?.origin === ResourceOriginEnum.NOVU_CLOUD && rawControls && !stepResolverHash) {
       const result = dashboardSanitizeControlValues(this.logger, rawControls, command.job?.step?.template?.type);
       sanitizedControls = result ?? {};
     } else {
@@ -245,14 +246,7 @@ export class ExecuteBridgeJob {
           status: ExecutionDetailsStatusEnum.FAILED,
           isTest: false,
           isRetry: false,
-          raw: JSON.stringify({
-            url: response.url,
-            statusCode: response.statusCode,
-            message: response.message,
-            code: response.code,
-            data: response.data,
-            cause: response.cause,
-          }),
+          raw: JSON.stringify(buildBridgeErrorRaw(response)),
         });
       },
     }) as Promise<ExecuteOutput>;
@@ -293,7 +287,8 @@ export class ExecuteBridgeJob {
           eventCount: events.length,
         } satisfies DigestResult;
       }
-      case 'custom': {
+      case 'custom':
+      case 'http_request': {
         return job.stepOutput || {};
       }
       case 'in_app': {
@@ -376,4 +371,17 @@ export class ExecuteBridgeJob {
       }
     );
   }
+}
+
+function buildBridgeErrorRaw(response: BridgeError): Record<string, unknown> {
+  const raw: Record<string, unknown> = {
+    message: response.message,
+    code: response.code,
+  };
+
+  if (response.data !== undefined) {
+    raw.data = response.data;
+  }
+
+  return raw;
 }

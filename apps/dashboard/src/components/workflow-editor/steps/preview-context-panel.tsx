@@ -1,4 +1,4 @@
-import { FeatureFlagsKeysEnum, ISubscriberResponseDto } from '@novu/shared';
+import { ISubscriberResponseDto } from '@novu/shared';
 import { JSONSchema7 } from 'json-schema';
 
 import { useCallback, useEffect, useMemo, useRef } from 'react';
@@ -7,7 +7,6 @@ import { useCreateVariable } from '@/components/variable/hooks/use-create-variab
 import { useEnvironment } from '@/context/environment/hooks';
 import { useDefaultSubscriberData } from '@/hooks/use-default-subscriber-data';
 import { useDynamicPreviewSchema } from '@/hooks/use-dynamic-preview-schema';
-import { useFeatureFlag } from '@/hooks/use-feature-flag';
 import { useFetchOrganizationSettings } from '@/hooks/use-fetch-organization-settings';
 import { useIsPayloadSchemaEnabled } from '@/hooks/use-is-payload-schema-enabled';
 import { StepTypeEnum } from '@/utils/enums';
@@ -15,11 +14,12 @@ import { usePreviewContext } from '../../../hooks/use-preview-context';
 import { PayloadSchemaDrawer } from '../payload-schema-drawer';
 import {
   PreviewContextSection,
+  PreviewEnvSection,
   PreviewPayloadSection,
   PreviewStepResultsSection,
   PreviewSubscriberSection,
 } from './components';
-import { DEFAULT_ACCORDION_VALUES } from './constants/preview-context.constants';
+import { ACCORDION_STYLES, DEFAULT_ACCORDION_VALUES } from './constants/preview-context.constants';
 import { usePersistedPreviewContext } from './hooks/use-persisted-preview-context';
 import { usePreviewDataInitialization } from './hooks/use-preview-data-initialization';
 import {
@@ -109,6 +109,7 @@ export function PreviewContextPanel({
       subscriber: previewSchema?.properties?.subscriber as JSONSchema7 | undefined,
       context: previewSchema?.properties?.context as JSONSchema7 | undefined,
       steps: previewSchema?.properties?.steps as JSONSchema7 | undefined,
+      env: previewSchema?.properties?.env as JSONSchema7 | undefined,
     }),
     [previewSchema, workflow?.payloadSchema]
   );
@@ -138,43 +139,44 @@ export function PreviewContextPanel({
   });
 
   // Use the preview context hook with persistence callback
-  const { accordionValue, setAccordionValue, errors, previewContext, updatePreviewSection } = usePreviewContext<
-    ParsedData,
-    ValidationErrors
-  >({
-    value,
-    onChange,
-    defaultAccordionValue: DEFAULT_ACCORDION_VALUES,
-    defaultErrors: {
-      subscriber: null,
-      payload: null,
-      steps: null,
-      context: null,
-    },
-    parseJsonValue,
-    onDataPersist: (data: ParsedData) => {
-      // Persist payload, subscriber and context data
-      if (data.payload !== undefined) {
-        savePersistedPayload(data.payload);
-      }
+  const { accordionValue, setAccordionValue, errors, previewContext, updatePreviewSection, trackedOnChange } =
+    usePreviewContext<ParsedData, ValidationErrors>({
+      value,
+      onChange,
+      defaultAccordionValue: DEFAULT_ACCORDION_VALUES,
+      defaultErrors: {
+        subscriber: null,
+        payload: null,
+        steps: null,
+        context: null,
+        env: null,
+      },
+      parseJsonValue,
+      onDataPersist: (data: ParsedData) => {
+        if (data.payload !== undefined) {
+          savePersistedPayload(data.payload);
+        }
 
-      if (data.subscriber !== undefined) {
-        savePersistedSubscriber(data.subscriber);
-      }
+        if (data.subscriber !== undefined) {
+          savePersistedSubscriber(data.subscriber);
+        }
 
-      if (data.context !== undefined) {
-        savePersistedContext(data.context);
-      }
-    },
-  });
+        if (data.context !== undefined) {
+          savePersistedContext(data.context);
+        }
+      },
+    });
 
-  // Initialize data using the new simplified hook
+  // Initialize data using the new simplified hook.
+  // trackedOnChange keeps a synchronous ref of the latest value so that
+  // subsequent updatePreviewSection calls in the same render cycle
+  // (e.g. the subscriber-default effect) read fresh data instead of stale props.
   usePreviewDataInitialization({
     workflowId: workflow?.workflowId,
     stepId: currentStepId,
     environmentId: currentEnvironment?._id,
     value,
-    onChange,
+    onChange: trackedOnChange,
     workflow,
     isPayloadSchemaEnabled,
     loadPersistedPayload,
@@ -284,7 +286,10 @@ export function PreviewContextPanel({
           schema={schemas.context}
           onUpdate={updatePreviewSection}
           onClearPersisted={canClearPersisted ? handleClearPersistedContext : undefined}
+          className={ACCORDION_STYLES.item}
         />
+
+        <PreviewEnvSection schema={schemas.env} env={previewContext.env} onUpdate={updatePreviewSection} />
       </Accordion>
       <PayloadSchemaDrawer
         isOpen={isPayloadSchemaDrawerOpen}

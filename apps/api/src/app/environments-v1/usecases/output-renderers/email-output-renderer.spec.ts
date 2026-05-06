@@ -1,5 +1,5 @@
 import { ModuleRef } from '@nestjs/core';
-import { CreateExecutionDetails, DetailEnum, FeatureFlagsService, PinoLogger } from '@novu/application-generic';
+import { CreateExecutionDetails, DetailEnum, GetLayoutUseCaseV0, PinoLogger } from '@novu/application-generic';
 import { ControlValuesRepository, JobEntity, JobRepository } from '@novu/dal';
 import { JSONContent as MailyJSONContent } from '@novu/maily-render';
 import {
@@ -12,7 +12,6 @@ import {
 } from '@novu/shared';
 import { expect } from 'chai';
 import sinon from 'sinon';
-import { GetLayoutUseCase } from '../../../layouts-v2/usecases/get-layout';
 import { GetOrganizationSettings } from '../../../organization/usecases/get-organization-settings/get-organization-settings.usecase';
 import { EmailOutputRendererCommand, EmailOutputRendererUsecase } from './email-output-renderer.usecase';
 import { FullPayloadForRender } from './render-command';
@@ -81,7 +80,7 @@ describe('EmailOutputRendererUsecase', () => {
   let getOrganizationSettingsMock: sinon.SinonStubbedInstance<GetOrganizationSettings>;
   let pinoLoggerMock: sinon.SinonStubbedInstance<PinoLogger>;
   let controlValuesRepositoryMock: sinon.SinonStubbedInstance<ControlValuesRepository>;
-  let getLayoutUseCase: sinon.SinonStubbedInstance<GetLayoutUseCase>;
+  let getLayoutUseCaseV0: sinon.SinonStubbedInstance<GetLayoutUseCaseV0>;
   let jobRepositoryMock: sinon.SinonStubbedInstance<JobRepository>;
   let createExecutionDetailsMock: sinon.SinonStubbedInstance<CreateExecutionDetails>;
   let emailOutputRendererUsecase: EmailOutputRendererUsecase;
@@ -98,7 +97,7 @@ describe('EmailOutputRendererUsecase', () => {
     });
     pinoLoggerMock = sinon.createStubInstance(PinoLogger);
     controlValuesRepositoryMock = sinon.createStubInstance(ControlValuesRepository);
-    getLayoutUseCase = sinon.createStubInstance(GetLayoutUseCase);
+    getLayoutUseCaseV0 = sinon.createStubInstance(GetLayoutUseCaseV0);
     jobRepositoryMock = sinon.createStubInstance(JobRepository);
     createExecutionDetailsMock = sinon.createStubInstance(CreateExecutionDetails);
 
@@ -107,7 +106,7 @@ describe('EmailOutputRendererUsecase', () => {
       moduleRef as any,
       pinoLoggerMock as any,
       controlValuesRepositoryMock as any,
-      getLayoutUseCase as any,
+      getLayoutUseCaseV0 as any,
       jobRepositoryMock as any,
       createExecutionDetailsMock as any
     );
@@ -944,6 +943,127 @@ describe('EmailOutputRendererUsecase', () => {
       const matches = result.body.match(/Item item/g);
       expect(matches).to.have.length(3);
     });
+
+    it('should render repeat block over steps.<digest>.events whose payload contains apostrophes', async () => {
+      const mockTipTapNode: MailyJSONContent = {
+        type: 'doc',
+        content: [
+          {
+            type: 'repeat',
+            attrs: {
+              each: 'steps.digest-step.events',
+              isUpdatingKey: false,
+              showIfKey: null,
+            },
+            content: [
+              {
+                type: 'paragraph',
+                attrs: {
+                  textAlign: 'left',
+                },
+                content: [
+                  {
+                    type: 'text',
+                    text: 'Order: ',
+                  },
+                  {
+                    type: 'variable',
+                    attrs: {
+                      id: 'steps.digest-step.events.payload.title',
+                      label: null,
+                      fallback: null,
+                      required: false,
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      };
+
+      const renderCommand: EmailOutputRendererCommand = {
+        dbWorkflow: mockDbWorkflow,
+        controlValues: {
+          subject: 'Digest Events Repeat Regression',
+          body: JSON.stringify(mockTipTapNode),
+          disableOutputSanitization: true,
+        },
+        fullPayloadForRender: {
+          ...mockFullPayload,
+          steps: {
+            'digest-step': {
+              events: [{ payload: { title: "John's order" } }, { payload: { title: "it's a test" } }],
+            },
+          },
+        },
+        stepId: 'fake_step_id',
+      };
+
+      const result = await emailOutputRendererUsecase.execute(renderCommand);
+
+      expect(result.body).to.include("Order: John's order");
+      expect(result.body).to.include("Order: it's a test");
+
+      const matches = result.body.match(/Order: /g);
+      expect(matches).to.have.length(2);
+    });
+
+    it('should render repeat block over payload.items when string values contain apostrophes', async () => {
+      const mockTipTapNode: MailyJSONContent = {
+        type: 'doc',
+        content: [
+          {
+            type: 'repeat',
+            attrs: {
+              each: 'payload.names',
+              isUpdatingKey: false,
+              showIfKey: null,
+            },
+            content: [
+              {
+                type: 'paragraph',
+                attrs: {
+                  textAlign: 'left',
+                },
+                content: [
+                  {
+                    type: 'variable',
+                    attrs: {
+                      id: 'payload.names',
+                      label: null,
+                      fallback: null,
+                      required: false,
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      };
+
+      const renderCommand: EmailOutputRendererCommand = {
+        dbWorkflow: mockDbWorkflow,
+        controlValues: {
+          subject: 'Apostrophe primitives repeat',
+          body: JSON.stringify(mockTipTapNode),
+          disableOutputSanitization: true,
+        },
+        fullPayloadForRender: {
+          ...mockFullPayload,
+          payload: {
+            names: ["O'Brien", 'Jane'],
+          },
+        },
+        stepId: 'fake_step_id',
+      };
+
+      const result = await emailOutputRendererUsecase.execute(renderCommand);
+
+      expect(result.body).to.include("O'Brien");
+      expect(result.body).to.include('Jane');
+    });
   });
 
   describe('node attrs and marks attrs hydration', () => {
@@ -1189,7 +1309,7 @@ describe('EmailOutputRendererUsecase', () => {
       };
 
       controlValuesRepositoryMock.findOne.resolves(mockControlValuesEntity as any);
-      getLayoutUseCase.execute.resolves(mockLayoutDto as any);
+      getLayoutUseCaseV0.execute.resolves(mockLayoutDto as any);
     });
 
     it('should skip layout rendering when skipLayoutRendering is true', async () => {
@@ -1216,7 +1336,7 @@ describe('EmailOutputRendererUsecase', () => {
       expect(result.body).to.not.include('<body>');
 
       // Verify that layout was fetched but not applied
-      expect(getLayoutUseCase.execute.calledOnce).to.be.true;
+      expect(getLayoutUseCaseV0.execute.calledOnce).to.be.true;
       expect(controlValuesRepositoryMock.findOne.calledOnce).to.be.true;
     });
 
@@ -1270,7 +1390,7 @@ describe('EmailOutputRendererUsecase', () => {
 
       await emailOutputRendererUsecase.execute(renderCommand);
 
-      expect(getLayoutUseCase.execute.calledOnce).to.be.true;
+      expect(getLayoutUseCaseV0.execute.calledOnce).to.be.true;
       expect(controlValuesRepositoryMock.findOne.calledOnce).to.be.true;
       expect(jobRepositoryMock.findOne.calledOnce).to.be.true;
       expect(jobRepositoryMock.findOne.firstCall.args[0]._id).to.equal(mockJob._id);
@@ -1310,7 +1430,7 @@ describe('EmailOutputRendererUsecase', () => {
       expect(result.body).to.include('<html>');
       expect(result.body).to.include('<body>');
 
-      expect(getLayoutUseCase.execute.calledOnce).to.be.true;
+      expect(getLayoutUseCaseV0.execute.calledOnce).to.be.true;
       expect(controlValuesRepositoryMock.findOne.calledOnce).to.be.true;
     });
 
@@ -1336,7 +1456,7 @@ describe('EmailOutputRendererUsecase', () => {
       expect(result.body).to.include('<html>');
       expect(result.body).to.include('<body>');
 
-      expect(getLayoutUseCase.execute.calledOnce).to.be.true;
+      expect(getLayoutUseCaseV0.execute.calledOnce).to.be.true;
       expect(controlValuesRepositoryMock.findOne.calledOnce).to.be.true;
     });
 
@@ -1431,7 +1551,7 @@ describe('EmailOutputRendererUsecase', () => {
       expect(result.body).to.not.include('class="layout"');
 
       // Should still attempt to fetch layout but gracefully handle null result
-      expect(getLayoutUseCase.execute.calledOnce).to.be.true;
+      expect(getLayoutUseCaseV0.execute.calledOnce).to.be.true;
       expect(controlValuesRepositoryMock.findOne.calledOnce).to.be.true;
     });
   });
@@ -1460,7 +1580,7 @@ describe('EmailOutputRendererUsecase', () => {
 
       // Set default stub returns
       controlValuesRepositoryMock.findOne.resolves(mockControlValuesEntity as any);
-      getLayoutUseCase.execute.resolves(mockLayoutDto as any);
+      getLayoutUseCaseV0.execute.resolves(mockLayoutDto as any);
     });
 
     afterEach(() => {
@@ -1482,7 +1602,7 @@ describe('EmailOutputRendererUsecase', () => {
           },
           stepId: 'fake_step_id',
         };
-        getLayoutUseCase.execute.resolves({ _id: 'test_layout_id', isDefault: false } as any);
+        getLayoutUseCaseV0.execute.resolves({ _id: 'test_layout_id', isDefault: false } as any);
 
         const result = await emailOutputRendererUsecase.execute(renderCommand);
 
@@ -1500,7 +1620,7 @@ describe('EmailOutputRendererUsecase', () => {
           level: ControlValuesLevelEnum.LAYOUT_CONTROLS,
         });
 
-        expect(getLayoutUseCase.execute.called).to.be.true;
+        expect(getLayoutUseCaseV0.execute.called).to.be.true;
       });
 
       it('should not use layout when layoutId is null', async () => {
@@ -1524,13 +1644,13 @@ describe('EmailOutputRendererUsecase', () => {
         expect(result.body).to.include('Step content John');
         expect(result.body).to.not.include('<html>');
 
-        expect(getLayoutUseCase.execute.calledOnce).to.be.false;
+        expect(getLayoutUseCaseV0.execute.calledOnce).to.be.false;
         expect(controlValuesRepositoryMock.findOne.calledOnce).to.be.false;
       });
 
       it('should render without layout when no layout controls are found', async () => {
         controlValuesRepositoryMock.findOne.resolves(null);
-        getLayoutUseCase.execute.resolves({ _id: 'non_existent_layout_id' } as any);
+        getLayoutUseCaseV0.execute.resolves({ _id: 'non_existent_layout_id' } as any);
 
         const renderCommand: EmailOutputRendererCommand = {
           dbWorkflow: mockDbWorkflow,
@@ -1743,7 +1863,7 @@ describe('EmailOutputRendererUsecase', () => {
           stepId: 'fake_step_id',
         };
 
-        getLayoutUseCase.execute.resolves({ _id: 'specific_layout_id', isDefault: false } as any);
+        getLayoutUseCaseV0.execute.resolves({ _id: 'specific_layout_id', isDefault: false } as any);
 
         await emailOutputRendererUsecase.execute(renderCommand);
 
@@ -1773,7 +1893,7 @@ describe('EmailOutputRendererUsecase', () => {
 
         const result = await emailOutputRendererUsecase.execute(renderCommand);
 
-        expect(getLayoutUseCase.execute.called).to.be.false;
+        expect(getLayoutUseCaseV0.execute.called).to.be.false;
         expect(controlValuesRepositoryMock.findOne.called).to.be.false;
         expect(result.body).to.include('Step content John');
         expect(result.body).to.not.include('class="layout"');
@@ -1795,7 +1915,7 @@ describe('EmailOutputRendererUsecase', () => {
 
         const result = await emailOutputRendererUsecase.execute(renderCommand);
 
-        expect(getLayoutUseCase.execute.called).to.be.false;
+        expect(getLayoutUseCaseV0.execute.called).to.be.false;
         expect(controlValuesRepositoryMock.findOne.called).to.be.false;
         expect(result.body).to.include('Step content John');
         expect(result.body).to.not.include('class="layout"');
@@ -1862,7 +1982,7 @@ describe('EmailOutputRendererUsecase', () => {
       };
 
       controlValuesRepositoryMock.findOne.resolves(mockControlValuesEntity as any);
-      getLayoutUseCase.execute.resolves(mockLayoutDto as any);
+      getLayoutUseCaseV0.execute.resolves(mockLayoutDto as any);
     });
 
     it('should use step-level layout override (highest priority)', async () => {
@@ -1912,7 +2032,7 @@ describe('EmailOutputRendererUsecase', () => {
       createExecutionDetailsMock.execute.resolves();
 
       // Mock the layout for the step override
-      getLayoutUseCase.execute.resolves({
+      getLayoutUseCaseV0.execute.resolves({
         _id: 'step_override_layout_id',
         isDefault: false,
         name: 'step_override_layout_name',
@@ -1936,9 +2056,9 @@ describe('EmailOutputRendererUsecase', () => {
 
       await emailOutputRendererUsecase.execute(renderCommand);
 
-      // Verify that getLayoutUseCase was called with the step override layout ID
-      expect(getLayoutUseCase.execute.calledOnce).to.be.true;
-      const layoutCommand = getLayoutUseCase.execute.firstCall.args[0];
+      // Verify that getLayoutUseCaseV0 was called with the step override layout ID
+      expect(getLayoutUseCaseV0.execute.calledOnce).to.be.true;
+      const layoutCommand = getLayoutUseCaseV0.execute.firstCall.args[0];
       expect(layoutCommand.layoutIdOrInternalId).to.equal('step_override_layout_id');
     });
 
@@ -1984,7 +2104,7 @@ describe('EmailOutputRendererUsecase', () => {
       createExecutionDetailsMock.execute.resolves();
 
       // Mock the layout for the channel override
-      getLayoutUseCase.execute.resolves({
+      getLayoutUseCaseV0.execute.resolves({
         _id: 'channel_override_layout_id',
         isDefault: false,
         name: 'channel_override_layout_name',
@@ -2008,9 +2128,9 @@ describe('EmailOutputRendererUsecase', () => {
 
       await emailOutputRendererUsecase.execute(renderCommand);
 
-      // Verify that getLayoutUseCase was called with the channel override layout ID
-      expect(getLayoutUseCase.execute.calledOnce).to.be.true;
-      const layoutCommand = getLayoutUseCase.execute.firstCall.args[0];
+      // Verify that getLayoutUseCaseV0 was called with the channel override layout ID
+      expect(getLayoutUseCaseV0.execute.calledOnce).to.be.true;
+      const layoutCommand = getLayoutUseCaseV0.execute.firstCall.args[0];
       expect(layoutCommand.layoutIdOrInternalId).to.equal('channel_override_layout_id');
     });
 
@@ -2051,7 +2171,7 @@ describe('EmailOutputRendererUsecase', () => {
       createExecutionDetailsMock.execute.resolves();
 
       // Mock the layout for the deprecated override
-      getLayoutUseCase.execute.resolves({
+      getLayoutUseCaseV0.execute.resolves({
         _id: 'deprecated_layout_id',
         isDefault: false,
         name: 'deprecated_layout_name',
@@ -2075,9 +2195,9 @@ describe('EmailOutputRendererUsecase', () => {
 
       await emailOutputRendererUsecase.execute(renderCommand);
 
-      // Verify that getLayoutUseCase was called with the deprecated override layout ID
-      expect(getLayoutUseCase.execute.calledOnce).to.be.true;
-      const layoutCommand = getLayoutUseCase.execute.firstCall.args[0];
+      // Verify that getLayoutUseCaseV0 was called with the deprecated override layout ID
+      expect(getLayoutUseCaseV0.execute.calledOnce).to.be.true;
+      const layoutCommand = getLayoutUseCaseV0.execute.firstCall.args[0];
       expect(layoutCommand.layoutIdOrInternalId).to.equal('deprecated_layout_id');
     });
 
@@ -2116,7 +2236,7 @@ describe('EmailOutputRendererUsecase', () => {
       createExecutionDetailsMock.execute.resolves();
 
       // Mock the layout for the step configuration
-      getLayoutUseCase.execute.resolves({
+      getLayoutUseCaseV0.execute.resolves({
         _id: 'original_layout_id',
         isDefault: false,
         name: 'original_layout_name',
@@ -2140,9 +2260,9 @@ describe('EmailOutputRendererUsecase', () => {
 
       await emailOutputRendererUsecase.execute(renderCommand);
 
-      // Verify that getLayoutUseCase was called with the original layout ID
-      expect(getLayoutUseCase.execute.calledOnce).to.be.true;
-      const layoutCommand = getLayoutUseCase.execute.firstCall.args[0];
+      // Verify that getLayoutUseCaseV0 was called with the original layout ID
+      expect(getLayoutUseCaseV0.execute.calledOnce).to.be.true;
+      const layoutCommand = getLayoutUseCaseV0.execute.firstCall.args[0];
       expect(layoutCommand.layoutIdOrInternalId).to.equal('original_layout_id');
     });
 
@@ -2208,8 +2328,8 @@ describe('EmailOutputRendererUsecase', () => {
       expect(result.body).to.not.include('class="layout"');
       expect(result.body).to.not.include('<html>');
 
-      // getLayoutUseCase should not be called when override is null
-      expect(getLayoutUseCase.execute.called).to.be.false;
+      // getLayoutUseCaseV0 should not be called when override is null
+      expect(getLayoutUseCaseV0.execute.called).to.be.false;
       expect(controlValuesRepositoryMock.findOne.called).to.be.false;
     });
 
@@ -2260,7 +2380,7 @@ describe('EmailOutputRendererUsecase', () => {
       createExecutionDetailsMock.execute.resolves();
 
       // Mock the layout for the step override (highest priority)
-      getLayoutUseCase.execute.resolves({
+      getLayoutUseCaseV0.execute.resolves({
         _id: 'step_priority_layout_id',
         isDefault: false,
         name: 'step_priority_layout_name',
@@ -2285,8 +2405,8 @@ describe('EmailOutputRendererUsecase', () => {
       await emailOutputRendererUsecase.execute(renderCommand);
 
       // Verify that the step override was used (highest priority)
-      expect(getLayoutUseCase.execute.calledOnce).to.be.true;
-      const layoutCommand = getLayoutUseCase.execute.firstCall.args[0];
+      expect(getLayoutUseCaseV0.execute.calledOnce).to.be.true;
+      const layoutCommand = getLayoutUseCaseV0.execute.firstCall.args[0];
       expect(layoutCommand.layoutIdOrInternalId).to.equal('step_priority_layout_id');
     });
 
@@ -2331,7 +2451,7 @@ describe('EmailOutputRendererUsecase', () => {
       createExecutionDetailsMock.execute.resolves();
 
       // Mock the layout for the stepId override
-      getLayoutUseCase.execute.resolves({
+      getLayoutUseCaseV0.execute.resolves({
         _id: 'step_id_override_layout_id',
         isDefault: false,
         name: 'step_id_override_layout_name',
@@ -2356,8 +2476,8 @@ describe('EmailOutputRendererUsecase', () => {
       await emailOutputRendererUsecase.execute(renderCommand);
 
       // Verify that the stepId override was used
-      expect(getLayoutUseCase.execute.calledOnce).to.be.true;
-      const layoutCommand = getLayoutUseCase.execute.firstCall.args[0];
+      expect(getLayoutUseCaseV0.execute.calledOnce).to.be.true;
+      const layoutCommand = getLayoutUseCaseV0.execute.firstCall.args[0];
       expect(layoutCommand.layoutIdOrInternalId).to.equal('step_id_override_layout_id');
     });
   });

@@ -4,12 +4,12 @@ import {
   PatchSubscriberPreferencesDto,
   SubscriberResponseDto,
 } from '@novu/api/models/components';
+import { buildSlug } from '@novu/application-generic';
 import { NotificationTemplateEntity } from '@novu/dal';
 import { ShortIsPrefixEnum } from '@novu/shared';
 import { UserSession } from '@novu/testing';
 import { expect } from 'chai';
 import { randomBytes } from 'crypto';
-import { buildSlug } from '../../shared/helpers/build-slug';
 import {
   expectSdkExceptionGeneric,
   expectSdkValidationExceptionGeneric,
@@ -279,6 +279,54 @@ describe('Patch Subscriber Preferences - /subscribers/:subscriberId/preferences 
 
     expect(response.result.workflows).to.have.lengthOf(1);
     expect(response.result.workflows[0].channels).to.deep.equal({ inApp: true, email: false });
+  });
+
+  it('should patch workflow preferences with organization context as string id (dashboard shape)', async () => {
+    const organizationContextId = `org_ctx_${randomBytes(6).toString('hex')}`;
+
+    const patchRes = await session.testAgent
+      .patch(`/v2/subscribers/${subscriber.subscriberId}/preferences`)
+      .set('Authorization', `ApiKey ${session.apiKey}`)
+      .send({
+        workflowId: workflow._id,
+        channels: { email: false, in_app: true },
+        context: { organization: organizationContextId },
+      });
+
+    expect(patchRes.status).to.equal(200);
+
+    const listResponse = await novuClient.subscribers.preferences.list({
+      subscriberId: subscriber.subscriberId,
+      contextKeys: [`organization:${organizationContextId}`],
+    });
+
+    expect(listResponse.result.workflows).to.have.lengthOf(1);
+    expect(listResponse.result.workflows[0].workflow.identifier).to.equal(workflow.triggers[0].identifier);
+    expect(listResponse.result.workflows[0].channels).to.deep.include({ email: false, inApp: true });
+  });
+
+  it('should patch workflow preferences with organization context as { id, data } object', async () => {
+    const organizationContextId = `org_ctx_${randomBytes(6).toString('hex')}`;
+
+    const patchRes = await session.testAgent
+      .patch(`/v2/subscribers/${subscriber.subscriberId}/preferences`)
+      .set('Authorization', `ApiKey ${session.apiKey}`)
+      .send({
+        workflowId: workflow._id,
+        channels: { email: true, in_app: false },
+        context: { organization: { id: organizationContextId, data: { tier: 'pro' } } },
+      });
+
+    expect(patchRes.status).to.equal(200);
+
+    const listResponse = await novuClient.subscribers.preferences.list({
+      subscriberId: subscriber.subscriberId,
+      contextKeys: [`organization:${organizationContextId}`],
+    });
+
+    expect(listResponse.result.workflows).to.have.lengthOf(1);
+    expect(listResponse.result.workflows[0].workflow.identifier).to.equal(workflow.triggers[0].identifier);
+    expect(listResponse.result.workflows[0].channels).to.deep.include({ email: true, inApp: false });
   });
 
   it('should create separate preferences for different contexts', async () => {

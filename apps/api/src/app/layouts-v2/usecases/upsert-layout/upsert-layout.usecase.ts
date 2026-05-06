@@ -1,9 +1,14 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import {
   AnalyticsService,
-  GetLayoutCommand as GetLayoutCommandV0,
-  GetLayoutUseCase as GetLayoutUseCaseV0,
+  GetLayoutCommand,
+  GetLayoutCommandV0,
+  GetLayoutUseCase,
+  GetLayoutUseCaseV0,
   InstrumentUsecase,
+  isStringifiedMailyJSONContent,
+  LayoutDtoV0,
+  LayoutResponseDto,
   layoutControlSchema,
   PinoLogger,
   UpsertControlValuesCommand,
@@ -18,19 +23,14 @@ import {
   slugify,
 } from '@novu/shared';
 import { ManageTranslations } from '@novu/translation';
-import { LayoutDto } from '../../../layouts-v1/dtos';
 import {
   CreateLayoutCommand,
   CreateLayoutUseCase,
   UpdateLayoutCommand,
   UpdateLayoutUseCase,
 } from '../../../layouts-v1/usecases';
-import { isStringifiedMailyJSONContent } from '../../../shared/helpers/maily-utils';
-import { LayoutResponseDto } from '../../dtos';
 import { BuildLayoutIssuesCommand } from '../build-layout-issues/build-layout-issues.command';
 import { BuildLayoutIssuesUsecase } from '../build-layout-issues/build-layout-issues.usecase';
-import { GetLayoutCommand } from '../get-layout';
-import { GetLayoutUseCase } from '../get-layout/get-layout.use-case';
 import { UpsertLayoutCommand } from './upsert-layout.command';
 
 @Injectable()
@@ -47,7 +47,9 @@ export class UpsertLayout {
     private getLayoutUseCase: GetLayoutUseCase,
     private manageTranslations: ManageTranslations,
     private logger: PinoLogger
-  ) {}
+  ) {
+    this.logger.setContext(this.constructor.name);
+  }
 
   @InstrumentUsecase()
   async execute(command: UpsertLayoutCommand): Promise<LayoutResponseDto> {
@@ -70,7 +72,7 @@ export class UpsertLayout {
         )
       : null;
 
-    let upsertedLayout: LayoutDto;
+    let upsertedLayout: LayoutDtoV0;
     if (existingLayout) {
       this.mixpanelTrack(command, 'Layout Update - [Layouts]');
 
@@ -169,7 +171,7 @@ export class UpsertLayout {
     );
 
     if (Object.keys(issues).length > 0) {
-      throw new BadRequestException(issues);
+      throw new BadRequestException({ message: 'Layout has validation issues', ...issues });
     }
   }
 
@@ -213,7 +215,7 @@ export class UpsertLayout {
     });
   }
 
-  private async toggleTranslationsForLayout(command: UpsertLayoutCommand, layoutDto: LayoutDto) {
+  private async toggleTranslationsForLayout(command: UpsertLayoutCommand, layoutDto: LayoutDtoV0) {
     try {
       await this.manageTranslations.execute({
         enabled: command.layoutDto.isTranslationEnabled ?? false,

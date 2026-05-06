@@ -7,6 +7,14 @@ enum WorkerEnum {
   WORKFLOW = 'WorkflowWorker',
 }
 
+const WORKER_CONCURRENCY_ENV_MAP: Record<WorkerEnum, string> = {
+  [WorkerEnum.INBOUND_PARSE_MAIL]: 'INBOUND_PARSE_MAIL_WORKER_CONCURRENCY',
+  [WorkerEnum.SUBSCRIBER_PROCESS]: 'SUBSCRIBER_PROCESS_WORKER_CONCURRENCY',
+  [WorkerEnum.STANDARD]: 'STANDARD_WORKER_CONCURRENCY',
+  [WorkerEnum.WEB_SOCKET]: 'WEB_SOCKET_WORKER_CONCURRENCY',
+  [WorkerEnum.WORKFLOW]: 'WORKFLOW_WORKER_CONCURRENCY',
+};
+
 interface IWorkerConfig {
   concurrency: number;
   lockDuration: number;
@@ -17,6 +25,13 @@ const getDefaultConcurrency = () =>
 
 const getDefaultLockDuration = () =>
   process.env.WORKER_DEFAULT_LOCK_DURATION ? Number(process.env.WORKER_DEFAULT_LOCK_DURATION) : undefined;
+
+function getWorkerConcurrency(worker: WorkerEnum, hardcodedDefault: number): number {
+  const envKey = WORKER_CONCURRENCY_ENV_MAP[worker];
+  const perQueueValue = process.env[envKey] ? Number(process.env[envKey]) : undefined;
+
+  return perQueueValue ?? getDefaultConcurrency() ?? hardcodedDefault;
+}
 
 export const getSqsDefaultConcurrency = () =>
   process.env.SQS_DEFAULT_CONCURRENCY ? Number(process.env.SQS_DEFAULT_CONCURRENCY) : undefined;
@@ -43,47 +58,23 @@ export const getSqsDefaultWaitTimeSeconds = () => {
   return value ? Math.min(value, 20) : undefined;
 };
 
-const getWorkerConfig = (worker: WorkerEnum): IWorkerConfig => {
-  const workersConfig = {
-    [WorkerEnum.INBOUND_PARSE_MAIL]: {
-      concurrency: getDefaultConcurrency() ?? 200,
-      lockDuration: getDefaultLockDuration() ?? 90000,
-    },
-    [WorkerEnum.SUBSCRIBER_PROCESS]: {
-      concurrency: getDefaultConcurrency() ?? 200,
-      lockDuration: getDefaultLockDuration() ?? 90000,
-    },
-    [WorkerEnum.STANDARD]: {
-      concurrency: getDefaultConcurrency() ?? 200,
-      lockDuration: getDefaultLockDuration() ?? 90000,
-    },
-    [WorkerEnum.TRANSLATION]: {
-      // Lower concurrency for translation jobs as they involve external API calls
-      concurrency: getDefaultConcurrency() ?? 50,
-      // Longer lock duration for potentially slow OpenAI API calls
-      lockDuration: getDefaultLockDuration() ?? 180000,
-    },
-    [WorkerEnum.WEB_SOCKET]: {
-      concurrency: getDefaultConcurrency() ?? 400,
-      lockDuration: getDefaultLockDuration() ?? 90000,
-    },
-    [WorkerEnum.WORKFLOW]: {
-      concurrency: getDefaultConcurrency() ?? 200,
-      lockDuration: getDefaultLockDuration() ?? 90000,
-    },
-  };
+const getWorkerConfig = (
+  worker: WorkerEnum,
+  hardcodedConcurrency: number,
+  hardcodedLockDuration = 90000
+): IWorkerConfig => ({
+  concurrency: getWorkerConcurrency(worker, hardcodedConcurrency),
+  lockDuration: getDefaultLockDuration() ?? hardcodedLockDuration,
+});
 
-  return workersConfig[worker];
-};
+export const getInboundParseMailWorkerOptions = () => getWorkerConfig(WorkerEnum.INBOUND_PARSE_MAIL, 200);
 
-export const getInboundParseMailWorkerOptions = () => getWorkerConfig(WorkerEnum.INBOUND_PARSE_MAIL);
+export const getSubscriberProcessWorkerOptions = () => getWorkerConfig(WorkerEnum.SUBSCRIBER_PROCESS, 200);
 
-export const getSubscriberProcessWorkerOptions = () => getWorkerConfig(WorkerEnum.SUBSCRIBER_PROCESS);
+export const getStandardWorkerOptions = () => getWorkerConfig(WorkerEnum.STANDARD, 200);
 
-export const getStandardWorkerOptions = () => getWorkerConfig(WorkerEnum.STANDARD);
+export const getWebSocketWorkerOptions = () => getWorkerConfig(WorkerEnum.WEB_SOCKET, 400);
 
-export const getTranslationWorkerOptions = () => getWorkerConfig(WorkerEnum.TRANSLATION);
+export const getTranslationWorkerOptions = () => getWorkerConfig(WorkerEnum.TRANSLATION, 50, 180000);
 
-export const getWebSocketWorkerOptions = () => getWorkerConfig(WorkerEnum.WEB_SOCKET);
-
-export const getWorkflowWorkerOptions = () => getWorkerConfig(WorkerEnum.WORKFLOW);
+export const getWorkflowWorkerOptions = () => getWorkerConfig(WorkerEnum.WORKFLOW, 200);

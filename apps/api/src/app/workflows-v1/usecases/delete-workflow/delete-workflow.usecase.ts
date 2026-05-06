@@ -3,6 +3,7 @@ import {
   DeletePreferencesCommand,
   DeletePreferencesUseCase,
   GetWorkflowByIdsUseCase,
+  GetWorkflowWithPreferencesCommand,
   Instrument,
   InstrumentUsecase,
   PinoLogger,
@@ -18,7 +19,6 @@ import {
 } from '@novu/dal';
 import { PreferencesTypeEnum, WebhookEventEnum, WebhookObjectTypeEnum } from '@novu/shared';
 import { DeleteTranslationGroup } from '@novu/translation';
-import { GetWorkflowWithPreferencesCommand } from '../get-workflow-with-preferences/get-workflow-with-preferences.command';
 import { DeleteWorkflowCommand } from './delete-workflow.command';
 
 @Injectable()
@@ -32,7 +32,9 @@ export class DeleteWorkflowUseCase {
     private deleteTranslationGroup: DeleteTranslationGroup,
     private logger: PinoLogger,
     private sendWebhookMessage: SendWebhookMessage
-  ) {}
+  ) {
+    this.logger.setContext(this.constructor.name);
+  }
 
   @InstrumentUsecase()
   async execute(command: DeleteWorkflowCommand): Promise<void> {

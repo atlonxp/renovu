@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { InstrumentUsecase, PinoLogger } from '@novu/application-generic';
+import { InstrumentUsecase, PinoLogger, WorkflowDataContainer } from '@novu/application-generic';
 import {
   BaseRepository,
   ControlValuesRepository,
@@ -7,9 +7,9 @@ import {
   PreferencesRepository,
 } from '@novu/dal';
 import { ResourceOriginEnum, ResourceTypeEnum } from '@novu/shared';
-import { WorkflowDataContainer } from '../../../shared/containers/workflow-data.container';
 import { DependencyAnalyzerService, EnvironmentValidationService } from '../../services';
 import { IDiffResult, IEnvironmentDiffResult } from '../../types/sync.types';
+import { AgentSyncStrategy } from '../sync-strategies/agent-sync.strategy';
 import { LayoutSyncStrategy } from '../sync-strategies/layout-sync.strategy';
 import { WorkflowSyncStrategy } from '../sync-strategies/workflow-sync.strategy';
 import { DiffEnvironmentCommand } from './diff-environment.command';
@@ -21,6 +21,7 @@ export class DiffEnvironmentUseCase {
     private environmentValidationService: EnvironmentValidationService,
     private workflowSyncStrategy: WorkflowSyncStrategy,
     private layoutSyncStrategy: LayoutSyncStrategy,
+    private agentSyncStrategy: AgentSyncStrategy,
     private dependencyAnalyzerService: DependencyAnalyzerService,
     private controlValuesRepository: ControlValuesRepository,
     private workflowRepository: NotificationTemplateRepository,
@@ -66,8 +67,8 @@ export class DiffEnvironmentUseCase {
         command.targetEnvironmentId
       );
 
-      // Execute diff with workflow container optimization and layout strategy normally
-      const [workflowDiffResults, layoutDiffResults] = await Promise.all([
+      // Execute diff with workflow container optimization and layout/agent strategies normally
+      const [workflowDiffResults, layoutDiffResults, agentDiffResults] = await Promise.all([
         this.workflowSyncStrategy.diff(
           sourceEnvironmentId,
           command.targetEnvironmentId,
@@ -81,9 +82,15 @@ export class DiffEnvironmentUseCase {
           command.user.organizationId,
           command.user
         ),
+        this.agentSyncStrategy.diff(
+          sourceEnvironmentId,
+          command.targetEnvironmentId,
+          command.user.organizationId,
+          command.user
+        ),
       ]);
 
-      const resources = [...workflowDiffResults, ...layoutDiffResults];
+      const resources = [...workflowDiffResults, ...layoutDiffResults, ...agentDiffResults];
 
       const dependencyMap = await this.dependencyAnalyzerService.analyzeDependencies(
         resources,

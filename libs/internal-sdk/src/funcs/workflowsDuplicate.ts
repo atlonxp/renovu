@@ -4,6 +4,7 @@
 
 import { NovuCore } from "../core.js";
 import { encodeJSON, encodeSimple } from "../lib/encodings.js";
+import { matchStatusCode } from "../lib/http.js";
 import * as M from "../lib/matchers.js";
 import { compactMap } from "../lib/primitives.js";
 import { safeParse } from "../lib/schemas.js";
@@ -31,6 +32,8 @@ import { Result } from "../types/fp.js";
  *
  * @remarks
  * Duplicates a workflow by its unique identifier **workflowId**. This will create a new workflow with the same steps and settings.
+ *
+ * This operation requires {@link Security.bearerAuth} to be set on the `security` parameter when initializing the SDK.
  */
 export function workflowsDuplicate(
   client: NovuCore,
@@ -113,7 +116,6 @@ async function $do(
       charEncoding: "percent",
     }),
   };
-
   const path = pathToFunc("/v2/workflows/{workflowId}/duplicate")(pathParams);
 
   const headers = new Headers(compactMap({
@@ -127,7 +129,7 @@ async function $do(
   }));
 
   const securityInput = await extractSecurity(client._options.security);
-  const requestSecurity = resolveGlobalSecurity(securityInput);
+  const requestSecurity = resolveGlobalSecurity(securityInput, [1]);
 
   const context = {
     options: client._options,
@@ -171,23 +173,8 @@ async function $do(
 
   const doResult = await client._do(req, {
     context,
-    errorCodes: [
-      "400",
-      "401",
-      "403",
-      "404",
-      "405",
-      "409",
-      "413",
-      "414",
-      "415",
-      "422",
-      "429",
-      "4XX",
-      "500",
-      "503",
-      "5XX",
-    ],
+    isErrorStatusCode: (statusCode: number) =>
+      matchStatusCode({ status: statusCode } as Response, ["4XX", "5XX"]),
     retryConfig: context.retryConfig,
     retryCodes: context.retryCodes,
   });

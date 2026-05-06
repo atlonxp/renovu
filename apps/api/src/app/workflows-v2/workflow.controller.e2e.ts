@@ -17,6 +17,7 @@ import {
 } from '@novu/api/models/components';
 import { ErrorDto } from '@novu/api/models/errors';
 import { WorkflowResponseDto } from '@novu/api/src/models/components';
+import { buildSlug, JSONSchemaDto } from '@novu/application-generic';
 import { PreferencesRepository } from '@novu/dal';
 import {
   ApiServiceLevelEnum,
@@ -30,8 +31,6 @@ import {
 import { UserSession } from '@novu/testing';
 import chai, { expect } from 'chai';
 import chaiSubset from 'chai-subset';
-import { JSONSchemaDto } from '../shared/dtos/json-schema.dto';
-import { buildSlug } from '../shared/helpers/build-slug';
 import {
   expectSdkExceptionGeneric,
   expectSdkValidationExceptionGeneric,
@@ -562,6 +561,42 @@ describe('Workflow Controller E2E API Testing #novu-v2', () => {
       return { workflowV2Id, workflowId, name: listWorkflowResponse.workflows[0].name };
     }
 
+    it('should filter workflows by a single tag', async () => {
+      await createWorkflow(apiClient, buildWorkflow({ name: 'Tagged Workflow 1', tags: ['ai'] }));
+      await createWorkflow(apiClient, buildWorkflow({ name: 'Tagged Workflow 2', tags: ['ai', 'ml'] }));
+      await createWorkflow(apiClient, buildWorkflow({ name: 'Untagged Workflow', tags: ['other'] }));
+
+      const res = await apiClient.workflows.list({ tags: ['ai'] });
+      expect(res.result.totalCount).to.equal(2);
+      expect(res.result.workflows).to.have.lengthOf(2);
+      const names = res.result.workflows.map((w) => w.name);
+      expect(names).to.include('Tagged Workflow 1');
+      expect(names).to.include('Tagged Workflow 2');
+    });
+
+    it('should filter workflows by multiple tags', async () => {
+      await createWorkflow(apiClient, buildWorkflow({ name: 'AI Workflow', tags: ['ai'] }));
+      await createWorkflow(apiClient, buildWorkflow({ name: 'ML Workflow', tags: ['ml'] }));
+      await createWorkflow(apiClient, buildWorkflow({ name: 'Both Tags Workflow', tags: ['ai', 'ml'] }));
+      await createWorkflow(apiClient, buildWorkflow({ name: 'No Match Workflow', tags: ['other'] }));
+
+      const res = await apiClient.workflows.list({ tags: ['ai', 'ml'] });
+      expect(res.result.totalCount).to.equal(3);
+      expect(res.result.workflows).to.have.lengthOf(3);
+      const names = res.result.workflows.map((w) => w.name);
+      expect(names).to.include('AI Workflow');
+      expect(names).to.include('ML Workflow');
+      expect(names).to.include('Both Tags Workflow');
+    });
+
+    it('should return empty results when filtering by non-existent tag', async () => {
+      await createWorkflow(apiClient, buildWorkflow({ name: 'Some Workflow', tags: ['existing'] }));
+
+      const res = await apiClient.workflows.list({ tags: ['non-existent'] });
+      expect(res.result.totalCount).to.equal(0);
+      expect(res.result.workflows).to.have.lengthOf(0);
+    });
+
     it('old list endpoint should not retrieve the new workflow', async () => {
       const { workflowV2Id, name } = await getV2WorkflowIdAndExternalId('Test Workflow');
       const [, , workflowV0Created] = await Promise.all([
@@ -684,7 +719,6 @@ describe('Workflow Controller E2E API Testing #novu-v2', () => {
                 editorType: 'html',
                 subject: 'Example subject',
                 disableOutputSanitization: false,
-                rendererType: 'html',
               },
             }),
             id: devWorkflow.steps[0].id,
@@ -730,7 +764,6 @@ describe('Workflow Controller E2E API Testing #novu-v2', () => {
         subject: 'Example subject',
         disableOutputSanitization: false,
         editorType: 'html',
-        rendererType: 'html',
       });
 
       // Verify new created step
@@ -1052,13 +1085,13 @@ describe('Workflow Controller E2E API Testing #novu-v2', () => {
 
       it('should respond with 400 when name is too long', async () => {
         const createWorkflowDto: CreateWorkflowDto = buildWorkflow({
-          name: Array.from({ length: 80 }).join('X'),
+          name: 'X'.repeat(129),
         });
 
         await createWorkflowAndExpectValidationError(
           apiClient,
           createWorkflowDto,
-          'name must be shorter than or equal to 64 characters'
+          'name must be shorter than or equal to 128 characters'
         );
       });
 
@@ -1181,10 +1214,15 @@ describe('Workflow Controller E2E API Testing #novu-v2', () => {
             { message: 'Subject or body is required', issueType: 'MISSING_VALUE', variableName: 'body' },
           ]);
 
-          // TODO: This should return a different type such as 'INVALID_URL'
-          expect(stepData.issues!.controls!['redirect.url'][0].issueType).to.equal('MISSING_VALUE');
-          expect(stepData.issues!.controls!['primaryAction.redirect.url'][0].issueType).to.equal('MISSING_VALUE');
-          expect(stepData.issues!.controls!['secondaryAction.redirect.url'][0].issueType).to.equal('MISSING_VALUE');
+          expect(stepData.issues!.controls!['redirect.url'][0].issueType, 'redirect.url').to.equal('INVALID_URL');
+          expect(
+            stepData.issues!.controls!['primaryAction.redirect.url'][0].issueType,
+            'primaryAction.redirect.url'
+          ).to.equal('INVALID_URL');
+          expect(
+            stepData.issues!.controls!['secondaryAction.redirect.url'][0].issueType,
+            'secondaryAction.redirect.url'
+          ).to.equal('INVALID_URL');
         });
 
         it('should always show digest control value issues when illegal value provided', async () => {

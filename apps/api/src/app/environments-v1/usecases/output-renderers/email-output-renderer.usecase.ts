@@ -1,14 +1,26 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import {
   CreateExecutionDetails,
   CreateExecutionDetailsCommand,
   DetailEnum,
   EmailControlType,
+  GetLayoutCommand,
+  GetLayoutUseCase,
+  hasShow,
   InstrumentUsecase,
+  isButtonNode,
+  isImageNode,
+  isLinkNode,
+  isRepeatNode,
+  isVariableNode,
   LayoutControlType,
+  MailyAttrsEnum,
   PinoLogger,
+  removeBrandingFromHtml,
+  replaceMailyNodesByCondition,
   sanitizeHTML,
+  wrapMailyInLiquid,
 } from '@novu/application-generic';
 import {
   ControlValuesEntity,
@@ -31,21 +43,8 @@ import {
 } from '@novu/shared';
 import { decodeHTML } from 'entities';
 import { Liquid } from 'liquidjs';
-import { GetLayoutCommand, GetLayoutUseCase } from '../../../layouts-v2/usecases/get-layout';
 import { GetOrganizationSettingsCommand } from '../../../organization/usecases/get-organization-settings/get-organization-settings.command';
 import { GetOrganizationSettings } from '../../../organization/usecases/get-organization-settings/get-organization-settings.usecase';
-import { MailyAttrsEnum } from '../../../shared/helpers/maily.types';
-import {
-  hasShow,
-  isButtonNode,
-  isImageNode,
-  isLinkNode,
-  isRepeatNode,
-  isVariableNode,
-  replaceMailyNodesByCondition,
-  wrapMailyInLiquid,
-} from '../../../shared/helpers/maily-utils';
-import { removeBrandingFromHtml } from '../../../shared/utils/html';
 import { BaseTranslationRendererUsecase } from './base-translation-renderer.usecase';
 import { NOVU_BRANDING_HTML } from './novu-branding-html';
 import { FullPayloadForRender, RenderCommand } from './render-command';
@@ -584,7 +583,13 @@ export class EmailOutputRendererUsecase extends BaseTranslationRendererUsecase {
           organization,
         });
 
-    return JSON.parse(translatedContent);
+    try {
+      return JSON.parse(translatedContent);
+    } catch (error) {
+      throw new InternalServerErrorException(
+        `Translated Maily content is not valid JSON: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
 
   private async processTextTranslations({
@@ -637,7 +642,13 @@ export class EmailOutputRendererUsecase extends BaseTranslationRendererUsecase {
   ): Promise<MailyJSONContent> {
     const parsedString = await this.liquidEngine.parseAndRender(JSON.stringify(mailyContent), variables);
 
-    return JSON.parse(parsedString);
+    try {
+      return JSON.parse(parsedString);
+    } catch (error) {
+      throw new InternalServerErrorException(
+        `Liquid-rendered Maily content is not valid JSON: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
 
   private async transformMailyContent(
@@ -763,19 +774,24 @@ export class EmailOutputRendererUsecase extends BaseTranslationRendererUsecase {
   }
 
   private async getIterableArray(iterablePath: string, variables: FullPayloadForRender): Promise<unknown[]> {
-    const iterableArrayString = await this.liquidEngine.parseAndRender(iterablePath, variables);
+    // evalValue returns the real JS array; avoids a lossy " <-> ' JSON round-trip that
+    // breaks on apostrophes in string values (e.g. digest events with `John's order`).
+    const cleanPath = iterablePath.replace(/\{\{|\}\}/g, '').trim();
 
+    let value: unknown;
     try {
-      const parsedArray = JSON.parse(iterableArrayString.replace(/'/g, '"'));
-
-      if (!Array.isArray(parsedArray)) {
-        throw new Error(`Iterable "${iterablePath}" is not an array`);
-      }
-
-      return parsedArray;
+      value = await this.liquidEngine.evalValue(cleanPath, variables);
     } catch (error) {
-      throw new Error(`Failed to parse iterable value for "${iterablePath}": ${error.message}`);
+      throw new Error(
+        `Failed to resolve iterable value for "${iterablePath}": ${error instanceof Error ? error.message : String(error)}`
+      );
     }
+
+    if (!Array.isArray(value)) {
+      throw new Error(`Iterable "${iterablePath}" is not an array`);
+    }
+
+    return value;
   }
 
   private processForEachNodes(

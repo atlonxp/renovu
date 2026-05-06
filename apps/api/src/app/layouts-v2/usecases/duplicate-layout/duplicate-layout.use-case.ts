@@ -1,10 +1,14 @@
 import { Injectable } from '@nestjs/common';
-import { AnalyticsService, PinoLogger } from '@novu/application-generic';
+import {
+  AnalyticsService,
+  GetLayoutCommand,
+  GetLayoutUseCase,
+  LayoutResponseDto,
+  PinoLogger,
+} from '@novu/application-generic';
 import { ControlValuesRepository, LocalizationResourceEnum } from '@novu/dal';
 import { ControlValuesLevelEnum } from '@novu/shared';
 import { DuplicateLocales } from '@novu/translation';
-import { LayoutResponseDto } from '../../dtos';
-import { GetLayoutCommand, GetLayoutUseCase } from '../get-layout';
 import { UpsertLayout, UpsertLayoutCommand } from '../upsert-layout';
 import { DuplicateLayoutCommand } from './duplicate-layout.command';
 
@@ -17,7 +21,9 @@ export class DuplicateLayoutUseCase {
     private analyticsService: AnalyticsService,
     private duplicateLocalesUseCase: DuplicateLocales,
     private logger: PinoLogger
-  ) {}
+  ) {
+    this.logger.setContext(this.constructor.name);
+  }
 
   async execute(command: DuplicateLayoutCommand): Promise<LayoutResponseDto> {
     const originalLayout = await this.getLayoutUseCase.execute(
@@ -41,6 +47,7 @@ export class DuplicateLayoutUseCase {
       UpsertLayoutCommand.create({
         layoutDto: {
           name: command.overrides.name,
+          layoutId: command.overrides.layoutId,
           isTranslationEnabled: command.overrides.isTranslationEnabled,
           controlValues: originalControlValues?.controls ?? null,
         },

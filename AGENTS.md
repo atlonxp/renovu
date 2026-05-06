@@ -2,60 +2,32 @@
 
 ## Cursor Cloud specific instructions
 
-### Prerequisites
+`pnpm setup:agent` has already been run. Do not run it again. The environment is fully configured: dependencies installed, enterprise packages linked, project built, `.env` files in place, Docker services running, and a default user/org seeded.
 
-- **Node.js 20.19.0** (via nvm, see `.nvmrc`)
-- **pnpm 10.16.1** (see `package.json` `packageManager` field)
-- **Docker** required for MongoDB, Redis, ClickHouse, and LocalStack
+## Build
 
-### Infrastructure Services
+Run `pnpm build` after changes to `packages/` or `enterprise/`. Direct changes to `apps/` do not require a rebuild.
 
-Start with: `docker compose -f docker/local/docker-compose.yml up -d`
+## AI Boundaries
 
-| Service | Port | Purpose |
-|---------|------|---------|
-| MongoDB | 27017 | Primary database |
-| Redis | 6379 | Caching + Bull queues |
-| ClickHouse | 8123/9000 | Analytics (optional) |
-| LocalStack | 4566 | S3 emulation (optional) |
+### Always
+- Work within: `apps/api`, `apps/dashboard`, `apps/worker`, `apps/ws`
+- Use shared packages: `packages/shared`, `packages/framework`, `packages/js`, `packages/react`
+- Follow `libs/dal` for data access, `libs/application-generic` for business logic
 
-### Running Services
+### Ask First
+- Before creating new UI components not in `apps/dashboard/src/components/`
+- Before adding npm dependencies
+- Before modifying MongoDB models, ClickHouse table definitions, or anything in `enterprise/` or `packages/providers/`
 
-See `CLAUDE.md` for standard commands (`pnpm start:api:dev`, `pnpm start:dashboard`, etc.).
+### Never
+- Inactive apps — do not touch: `apps/webhook`
+- Auto-generated — never edit: `libs/internal-sdk`
+- Read-only dirs: `.idea/`, `playground/`, `.github/`, `scripts/`, `docker/`
+- UI: reuse existing Radix/shadcn components only; do not copy patterns from `playground/` into production
 
-Key gotchas:
-- The Dashboard Vite dev server runs on **port 4201** (configured in `apps/dashboard/vite.config.ts`), not 4200.
-- `FRONT_BASE_URL` in `apps/api/src/.env` must use `http://localhost:4201` (not `127.0.0.1`) to avoid CORS issues with the browser origin.
-- `.env` changes require restarting the respective service (NestJS `--watch` mode does NOT auto-reload env vars).
-- The Worker and WS services must also be running for full functionality.
-
-### Enterprise / Submodule Setup
-
-The enterprise submodule at `.source` requires SSH access to `github.com:novuhq/packages-enterprise.git`. In cloud environments where SSH is blocked, configure HTTPS:
-```bash
-git config --global url."https://github.com/".insteadOf "git@github.com:"
-gh auth setup-git
-git submodule update --init --recursive
-```
-
-After initializing the submodule: `pnpm install:with-ee && pnpm build:with-ee`
-
-See `.cursor/skills/enterprise-submodule/SKILL.md` for full submodule workflow.
-
-### Better Auth (Enterprise)
-
-When using Better Auth (`EE_AUTH_PROVIDER=better-auth`):
-- Add `BETTER_AUTH_SECRET`, `EE_AUTH_PROVIDER=better-auth`, `NOVU_ENTERPRISE=true`, and `IS_SELF_HOSTED=true` to `apps/api/src/.env`
-- Add `VITE_EE_AUTH_PROVIDER=better-auth`, `VITE_NOVU_ENTERPRISE=true`, `VITE_SELF_HOSTED=true` to `apps/dashboard/.env`
-- Better Auth stores users in `auth-system-users` and `auth-system-accounts` MongoDB collections (separate from the Novu `users` collection).
-- To skip email verification locally, set `BETTER_AUTH_REQUIRE_EMAIL_VERIFICATION=false` in the API env, or manually set `emailVerified: true` in the `auth-system-users` collection.
-
-### Linting
-
-`pnpm check` runs Biome across the entire monorepo. Pre-existing warnings/errors are expected in this large codebase. The linter itself functions correctly.
-
-### Testing
-
-- API E2E tests: see `.cursor/skills/run-api-e2e-tests/SKILL.md`
-- Dashboard E2E: `cd apps/dashboard && pnpm test:e2e`
-- API unit tests: `cd apps/api && pnpm test`
+<!-- Infrastructure & services: see .cursor/rules/infrastructure.mdc -->
+<!-- Dependency graph: see .cursor/rules/dependency-graph.mdc -->
+<!-- Testing: see .cursor/rules/testing.mdc -->
+<!-- PR format: see .cursor/rules/pullrequest.mdc -->
+<!-- Enterprise submodule: see .cursor/skills/enterprise-submodule/SKILL.md -->

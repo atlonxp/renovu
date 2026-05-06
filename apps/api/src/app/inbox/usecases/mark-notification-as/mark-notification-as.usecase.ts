@@ -3,9 +3,9 @@ import { AnalyticsService } from '@novu/application-generic';
 import { MessageEntity, MessageRepository } from '@novu/dal';
 
 import { GetSubscriber } from '../../../subscribers/usecases/get-subscriber';
+import { InboxNotificationDto } from '../../dtos/inbox-notification.dto';
 import { AnalyticsEventsEnum } from '../../utils';
 import { mapToDto } from '../../utils/notification-mapper';
-import { InboxNotification } from '../../utils/types';
 import { MarkManyNotificationsAsCommand } from '../mark-many-notifications-as/mark-many-notifications-as.command';
 import { MarkManyNotificationsAs } from '../mark-many-notifications-as/mark-many-notifications-as.usecase';
 import { MarkNotificationAsCommand } from './mark-notification-as.command';
@@ -19,7 +19,7 @@ export class MarkNotificationAs {
     private messageRepository: MessageRepository
   ) {}
 
-  async execute(command: MarkNotificationAsCommand): Promise<InboxNotification> {
+  async execute(command: MarkNotificationAsCommand): Promise<InboxNotificationDto> {
     const subscriber = await this.getSubscriber.execute({
       environmentId: command.environmentId,
       organizationId: command.organizationId,
@@ -61,11 +61,16 @@ export class MarkNotificationAs {
       snoozedUntil: command.snoozedUntil,
     });
 
-    return mapToDto(
-      (await this.messageRepository.findOneForInbox({
-        _environmentId: command.environmentId,
-        _id: command.notificationId,
-      })) as MessageEntity
-    );
+    const updatedMessage = await this.messageRepository.findOneForInbox({
+      _environmentId: command.environmentId,
+      _subscriberId: subscriber._id,
+      _id: command.notificationId,
+      contextKeys: command.contextKeys,
+    });
+    if (!updatedMessage) {
+      throw new NotFoundException(`Notification with id: ${command.notificationId} could not be found after update.`);
+    }
+
+    return mapToDto(updatedMessage);
   }
 }

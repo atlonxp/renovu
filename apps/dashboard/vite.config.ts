@@ -65,6 +65,7 @@ export default defineConfig(({ mode }) => {
       })),
       react(),
       viteStaticCopy({
+        silent: true,
         targets: [
           {
             src: path.resolve(__dirname, './legacy') + '/[!.]*',

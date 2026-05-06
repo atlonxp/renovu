@@ -51,7 +51,7 @@ export type WorkflowContextType = {
   lastSaveError: unknown | null;
 };
 
-export const WorkflowContext = createContext<WorkflowContextType>({} as WorkflowContextType);
+const WorkflowContext = createContext<WorkflowContextType>({} as WorkflowContextType);
 
 export const WorkflowProvider = ({ children }: { children: ReactNode }) => {
   const { currentEnvironment } = useEnvironment();
@@ -216,9 +216,13 @@ export const WorkflowProvider = ({ children }: { children: ReactNode }) => {
    */
   useEffect(() => {
     if (isAllowedToUnblock) {
-      setTimeout(() => {
-        blocker.proceed?.();
+      const timer = setTimeout(() => {
+        if (blocker.state === 'blocked') {
+          blocker.proceed?.();
+        }
       }, 500);
+
+      return () => clearTimeout(timer);
     }
   }, [isAllowedToUnblock, blocker]);
 

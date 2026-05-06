@@ -1,12 +1,10 @@
-export const SYNC_CONSTANTS = {
-  BATCH_SIZE: 100,
-} as const;
+import { SyncActionEnum } from '../../../types/sync.types';
 
 export const SYNC_ACTIONS = {
-  CREATED: 'created',
-  UPDATED: 'updated',
-  SKIPPED: 'skipped',
-  DELETED: 'deleted',
+  CREATED: SyncActionEnum.CREATED,
+  UPDATED: SyncActionEnum.UPDATED,
+  SKIPPED: SyncActionEnum.SKIPPED,
+  DELETED: SyncActionEnum.DELETED,
 } as const;
 
 export const SKIP_REASONS = {

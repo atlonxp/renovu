@@ -11,15 +11,15 @@ export type PersistedPreviewData = {
 const TTL_DAYS = 90;
 const TTL_MS = TTL_DAYS * 24 * 60 * 60 * 1000;
 
-export function getPayloadStorageKey(workflowId: string, environmentId: string): string {
+function getPayloadStorageKey(workflowId: string, environmentId: string): string {
   return `preview-payload-${workflowId}-${environmentId}`;
 }
 
-export function getSubscriberStorageKey(workflowId: string, environmentId: string): string {
+function getSubscriberStorageKey(workflowId: string, environmentId: string): string {
   return `preview-subscriber-${workflowId}-${environmentId}`;
 }
 
-export function getContextStorageKey(workflowId: string, environmentId: string): string {
+function getContextStorageKey(workflowId: string, environmentId: string): string {
   return `preview-context-data-${workflowId}-${environmentId}`;
 }
 
@@ -59,10 +59,11 @@ export function mergePreviewContextData(persistedData: ParsedData, serverDefault
     subscriber: mergeObjectData(persistedData.subscriber, serverDefaults.subscriber),
     steps: mergeObjectData(persistedData.steps, serverDefaults.steps),
     context: mergeObjectData(persistedData.context, serverDefaults.context),
+    env: mergeObjectData(persistedData.env, serverDefaults.env),
   };
 }
 
-export function mergeObjectData<T extends Record<string, unknown>>(persisted: T, serverDefault: T): T {
+function mergeObjectData<T extends Record<string, unknown>>(persisted: T, serverDefault: T): T {
   if (!persisted || typeof persisted !== 'object') {
     return serverDefault || ({} as T);
   }

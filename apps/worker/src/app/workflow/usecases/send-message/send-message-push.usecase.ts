@@ -38,6 +38,7 @@ import {
   InboxCountTypeEnum,
   ProvidersIdEnum,
   PushProviderIdEnum,
+  safeJsonStringify,
   TriggerOverrides,
   WebhookEventEnum,
   WebhookObjectTypeEnum,
@@ -51,6 +52,41 @@ import { SendMessageChannelCommand } from './send-message-channel.command';
 import { SendMessageResult, SendMessageStatus } from './send-message-type.usecase';
 
 const LOG_CONTEXT = 'SendMessagePush';
+
+export const SUBSCRIBER_ERROR_PATTERNS: string[] = [
+  'NotRegistered',
+  'InvalidRegistration',
+  'MismatchSenderId',
+  'Unregistered',
+  'BadDeviceToken',
+  'DeviceTokenNotForTopic',
+  'ExpiredPushToken',
+  'InvalidProviderToken',
+  'Requested entity was not found',
+  'SenderId mismatch',
+  'Make sure you have provided a server key as directed by the Expo FCM documentation',
+  'is not a valid Expo push token',
+  'The registration token is not a valid FCM registration token',
+];
+
+export function isSubscriberError(errorMessage: string): boolean {
+  return SUBSCRIBER_ERROR_PATTERNS.some((pattern) => errorMessage.includes(pattern));
+}
+
+/** Safe for Axios / Node errors that may contain circular socket references. */
+export function serializePushProviderError(error: unknown): string {
+  const serialized = safeJsonStringify(error);
+
+  if (serialized !== '{}') {
+    return serialized;
+  }
+
+  if (error instanceof Error) {
+    return JSON.stringify({ message: error.message, name: error.name });
+  }
+
+  return JSON.stringify({ message: String(error ?? '') });
+}
 
 interface IPushProviderOverride {
   providerId: PushProviderIdEnum;
@@ -279,9 +315,11 @@ export class SendMessagePush extends SendMessageBase {
         if (result.success) {
           status = SendMessageStatus.SUCCESS;
         } else {
-          Logger.error(
+          const errorMessage = result.error.message || result.error.toString();
+          const logMethod = isSubscriberError(errorMessage) ? 'debug' : 'error';
+          Logger[logMethod](
             { jobId: command.jobId },
-            `Error sending push notification for jobId ${command.jobId} ${result.error.message || result.error.toString()}`,
+            `Error sending push notification for jobId ${command.jobId} ${errorMessage}`,
             LOG_CONTEXT
           );
         }
@@ -329,9 +367,11 @@ export class SendMessagePush extends SendMessageBase {
         if (result.success) {
           status = SendMessageStatus.SUCCESS;
         } else {
-          Logger.error(
+          const errorMessage = result.error.message || result.error.toString();
+          const logMethod = isSubscriberError(errorMessage) ? 'debug' : 'error';
+          Logger[logMethod](
             { jobId: command.jobId },
-            `Error sending push notification for jobId ${command.jobId} ${result.error.message || result.error.toString()}`,
+            `Error sending push notification for jobId ${command.jobId} ${errorMessage}`,
             LOG_CONTEXT
           );
         }
@@ -586,6 +626,7 @@ export class SendMessagePush extends SendMessageBase {
         title: (bridgeOutputs as PushOutput)?.subject || title,
         content: (bridgeOutputs as PushOutput)?.body || content,
         payload: { ...command.payload, __nvMessageId: message._id },
+        messageId: message._id,
         overrides,
         subscriber,
         step,
@@ -628,7 +669,7 @@ export class SendMessagePush extends SendMessageBase {
       Logger.log(
         {
           jobId: command.jobId,
-          errorContent: JSON.stringify(e) || e?.message,
+          errorContent: serializePushProviderError(e),
           code: e?.code,
           message: e?.message,
           details: e?.details,
@@ -646,7 +687,7 @@ export class SendMessagePush extends SendMessageBase {
         e
       );
 
-      const raw = JSON.stringify(e) !== JSON.stringify({}) ? JSON.stringify(e) : JSON.stringify(e.message);
+      const raw = serializePushProviderError(e);
 
       try {
         await this.createExecutionDetailsError(DetailEnum.PROVIDER_ERROR, command.job, {

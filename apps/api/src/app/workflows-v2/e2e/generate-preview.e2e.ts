@@ -13,15 +13,13 @@ import {
   WorkflowCreationSourceEnum,
   WorkflowResponseDto,
 } from '@novu/api/models/components';
-import { EmailControlType } from '@novu/application-generic';
+import { buildWorkflowSchema, DEFAULT_ARRAY_ELEMENTS, EmailControlType } from '@novu/application-generic';
 import { EnvironmentRepository, NotificationTemplateEntity, NotificationTemplateRepository } from '@novu/dal';
 import { CronExpressionEnum, RedirectTargetEnum, StepTypeEnum, slugify } from '@novu/shared';
 import { UserSession } from '@novu/testing';
 import { expect } from 'chai';
 import { beforeEach } from 'mocha';
 import { initNovuClassSdkInternalAuth } from '../../shared/helpers/e2e/sdk/e2e-sdk.helper';
-import { DEFAULT_ARRAY_ELEMENTS } from '../../shared/usecases/create-variables-object/create-variables-object.usecase';
-import { buildWorkflowSchema } from '../../shared/utils/create-schema';
 import { fullCodeSnippet, previewPayloadExample } from '../maily-test-data';
 import { buildWorkflow } from '../workflow.controller.e2e';
 
@@ -213,6 +211,22 @@ describe('Workflow Step Preview - POST /:workflowId/step/:stepId/preview #novu-v
               required: [],
               additionalProperties: false,
             },
+          },
+          env: {
+            type: 'object',
+            description: 'Environment variables accessible in workflow templates',
+            properties: {
+              name: {
+                type: 'string',
+                description: 'Environment variable: name',
+              },
+              type: {
+                type: 'string',
+                description: 'Environment variable: type',
+              },
+            },
+            required: [],
+            additionalProperties: false,
           },
         },
         additionalProperties: false,
@@ -489,6 +503,22 @@ describe('Workflow Step Preview - POST /:workflowId/step/:stepId/preview #novu-v
               additionalProperties: false,
             },
           },
+          env: {
+            type: 'object',
+            description: 'Environment variables accessible in workflow templates',
+            properties: {
+              name: {
+                type: 'string',
+                description: 'Environment variable: name',
+              },
+              type: {
+                type: 'string',
+                description: 'Environment variable: type',
+              },
+            },
+            required: [],
+            additionalProperties: false,
+          },
         },
         type: 'object',
       },
@@ -514,6 +544,61 @@ describe('Workflow Step Preview - POST /:workflowId/step/:stepId/preview #novu-v
         steps: {},
       },
     });
+  });
+
+  it('should generate URL-safe in-app preview payload values for redirect URL variables', async () => {
+    const payloadSchema = {
+      type: 'object',
+      properties: {
+        reservation: {
+          type: 'string',
+        },
+        payment: {
+          type: 'string',
+        },
+      },
+    };
+    const workflow = await createWorkflow({}, payloadSchema);
+    await emulateExternalOrigin(workflow.id);
+
+    const stepId = workflow.steps[0].id;
+    const controlValues = {
+      subject: 'Payment pending',
+      body: 'Complete your payment',
+      primaryAction: {
+        label: 'Pay',
+        redirect: {
+          target: RedirectTargetEnum.SELF,
+          url: '/payments/{{payload.payment}}',
+        },
+      },
+      redirect: {
+        target: RedirectTargetEnum.SELF,
+        url: '/reservations/{{payload.reservation}}/payments',
+      },
+    };
+
+    const { result } = await novuClient.workflows.steps.generatePreview({
+      workflowId: workflow.id,
+      stepId,
+      generatePreviewRequestDto: {
+        controlValues,
+        previewPayload: {
+          payload: {
+            reservation: 'example text',
+            payment: 'example {payment}',
+          },
+        },
+      },
+    });
+
+    expect(result.result.type).to.equal(ChannelTypeEnum.InApp);
+    if (result.result.type !== ChannelTypeEnum.InApp) throw new Error('should have an in-app preview');
+
+    expect(result.previewPayloadExample.payload?.reservation).to.equal('example-text');
+    expect(result.previewPayloadExample.payload?.payment).to.equal('example-%7Bpayment%7D');
+    expect(result.result.preview.primaryAction?.redirect?.url).to.equal('/payments/example-%7Bpayment%7D');
+    expect(result.result.preview.redirect?.url).to.equal('/reservations/example-text/payments');
   });
 
   it('should return 201 for non-existent workflow', async () => {
@@ -1218,7 +1303,6 @@ describe('Workflow Step Preview - POST /:workflowId/step/:stepId/preview #novu-v
     expect(previewResponse.result.result.preview.body).to.contain('Paragraph static link');
     expect(previewResponse.result.result.preview.body).to.contain('href="https://paragraph.static.link"');
 
-    console.log('Blockquote');
     // blockquote
     expect(previewResponse.result.result.preview.body).to.contain('Just the blockquote');
     expect(previewResponse.result.result.preview.body).to.contain('Blockquote variable link');

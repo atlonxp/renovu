@@ -1,8 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { MessageWebhookResponseDto } from '@novu/application-generic';
+import { MessageWebhookResponseDto, WorkflowResponseDto } from '@novu/application-generic';
 import { WebhookEventEnum, WebhookObjectTypeEnum } from '@novu/shared';
 import { InboxPreference } from '../inbox/utils/types';
-import { WorkflowResponseDto } from '../workflows-v2/dtos/workflow-response.dto';
 
 interface WebhookEventConfig {
   event: WebhookEventEnum;
@@ -78,6 +77,58 @@ export class WebhookPreferenceDto {
 
   @ApiProperty({ description: 'Subscriber ID' })
   subscriberId: string;
+}
+
+export class WebhookInboundEmailDomainDto {
+  @ApiProperty({ description: 'Domain ID' })
+  id: string;
+
+  @ApiProperty({ description: 'Domain name' })
+  name: string;
+}
+
+export class WebhookInboundEmailRouteDto {
+  @ApiProperty({ description: 'Route address (local part of the email address)' })
+  address: string;
+}
+
+export class WebhookInboundEmailAddressDto {
+  @ApiProperty({ description: 'Display name' })
+  name: string;
+
+  @ApiProperty({ description: 'Email address' })
+  address: string;
+}
+
+export class WebhookInboundEmailMailDto {
+  @ApiProperty({ description: 'Sender address info', type: WebhookInboundEmailAddressDto })
+  from: WebhookInboundEmailAddressDto;
+
+  @ApiProperty({ description: 'Recipient address info', type: [WebhookInboundEmailAddressDto] })
+  to: WebhookInboundEmailAddressDto[];
+
+  @ApiProperty({ description: 'Email subject' })
+  subject: string;
+
+  @ApiProperty({ description: 'HTML body', required: false })
+  html?: string;
+
+  @ApiProperty({ description: 'Plain text body', required: false })
+  text?: string;
+
+  @ApiProperty({ description: 'Message ID header' })
+  messageId: string;
+}
+
+export class WebhookInboundEmailDto {
+  @ApiProperty({ description: 'Domain that received the email', type: WebhookInboundEmailDomainDto })
+  domain: WebhookInboundEmailDomainDto;
+
+  @ApiProperty({ description: 'Matched route info', required: false, type: WebhookInboundEmailRouteDto })
+  route?: WebhookInboundEmailRouteDto;
+
+  @ApiProperty({ description: 'Inbound email details', type: WebhookInboundEmailMailDto })
+  mail: WebhookInboundEmailMailDto;
 }
 
 // Create the webhook events as a record to ensure all enum values are covered
@@ -161,6 +212,11 @@ const webhookEventRecord = {
     event: WebhookEventEnum.PREFERENCE_UPDATED,
     payloadDto: WebhookPreferenceDto,
     objectType: WebhookObjectTypeEnum.PREFERENCE,
+  },
+  [WebhookEventEnum.EMAIL_RECEIVED]: {
+    event: WebhookEventEnum.EMAIL_RECEIVED,
+    payloadDto: WebhookInboundEmailDto,
+    objectType: WebhookObjectTypeEnum.EMAIL_INBOUND,
   },
 } as const satisfies WebhookEventRecord;
 

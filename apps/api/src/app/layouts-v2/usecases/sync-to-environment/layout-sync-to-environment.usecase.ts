@@ -1,14 +1,18 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { Instrument, InstrumentUsecase } from '@novu/application-generic';
+import {
+  GetLayoutCommand,
+  GetLayoutUseCase,
+  Instrument,
+  InstrumentUsecase,
+  LayoutResponseDto,
+} from '@novu/application-generic';
 import { LocalizationResourceEnum } from '@novu/dal';
 import { ResourceOriginEnum } from '@novu/shared';
 import { PublishTranslationGroup } from '@novu/translation';
-import { LayoutResponseDto } from '../../dtos';
-import { GetLayoutCommand, GetLayoutUseCase } from '../get-layout';
 import { UpsertLayout, UpsertLayoutCommand, UpsertLayoutDataCommand } from '../upsert-layout';
 import { LayoutSyncToEnvironmentCommand } from './layout-sync-to-environment.command';
 
-export const SYNCABLE_LAYOUT_ORIGINS = [ResourceOriginEnum.NOVU_CLOUD];
+const SYNCABLE_LAYOUT_ORIGINS = [ResourceOriginEnum.NOVU_CLOUD];
 
 class LayoutNotSyncableException extends BadRequestException {
   constructor(layout: Pick<LayoutResponseDto, 'layoutId' | 'origin'>) {
@@ -78,7 +82,7 @@ export class LayoutSyncToEnvironmentUseCase {
       layoutId: sourceLayout.layoutId,
       name: sourceLayout.name,
       isTranslationEnabled: sourceLayout.isTranslationEnabled,
-      controlValues: sourceLayout.controls.values,
+      controlValues: sourceLayout.controls?.values,
     };
   }
 
