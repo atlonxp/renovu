@@ -21,7 +21,9 @@ import * as fs from 'fs';
 import { AdminAuthGuard } from '../auth/admin-auth.guard';
 import { BackupService } from './backup.service';
 
-const MAX_UPLOAD_SIZE = 50 * 1024 * 1024; // 50 MB
+const MAX_UPLOAD_SIZE = process.env.ADMIN_TOOLS_MAX_UPLOAD_MB
+  ? Number(process.env.ADMIN_TOOLS_MAX_UPLOAD_MB) * 1024 * 1024
+  : 2 * 1024 * 1024 * 1024; // 2 GB default
 
 /**
  * Extract the organization ID from the authenticated request.
@@ -45,11 +47,12 @@ export class BackupController {
    * Create a full environment backup scoped to the caller's organization.
    */
   @Post('backup')
-  async createBackup(@Req() req: Request) {
+  async createBackup(@Req() req: Request, @Query('includeActivity') includeActivity?: string) {
     const orgId = getOrgId(req);
-    this.logger.log(`Creating backup for org ${orgId}...`);
+    const withActivity = includeActivity === 'true' || includeActivity === '1';
+    this.logger.log(`Creating backup for org ${orgId}${withActivity ? ' (including activity feed)' : ''}...`);
     try {
-      const result = await this.backupService.createBackup(orgId);
+      const result = await this.backupService.createBackup(orgId, withActivity);
       return result;
     } catch (error) {
       this.logger.error(`Backup failed: ${error.message}`, error.stack);
@@ -145,6 +148,7 @@ export class BackupController {
   async restoreBackup(
     @UploadedFile() file: Express.Multer.File,
     @Query('dryRun') dryRun: string,
+    @Query('includeActivity') includeActivity: string,
     @Req() req: Request,
   ) {
     if (!file) {
@@ -156,13 +160,14 @@ export class BackupController {
 
     const orgId = getOrgId(req);
     const isDryRun = dryRun === 'true';
+    const withActivity = includeActivity === 'true' || includeActivity === '1';
 
     this.logger.log(
-      `Restore request (org ${orgId}): ${file.originalname} (${file.size} bytes), dryRun=${isDryRun}`,
+      `Restore request (org ${orgId}): ${file.originalname} (${file.size} bytes), dryRun=${isDryRun}${withActivity ? ', includeActivity=true' : ''}`,
     );
 
     try {
-      const result = await this.backupService.restoreBackup(file.path, isDryRun, orgId);
+      const result = await this.backupService.restoreBackup(file.path, isDryRun, orgId, withActivity);
       return result;
     } catch (error) {
       this.logger.error(`Restore failed: ${error.message}`, error.stack);

@@ -28,6 +28,7 @@ ADMIN_API_KEY="${ADMIN_API_KEY:-}"
 # Defaults
 BACKUP_FILE=""
 DRY_RUN=false
+INCLUDE_ACTIVITY=false
 
 # ── Functions ────────────────────────────────────────────────────
 
@@ -71,6 +72,9 @@ for arg in "$@"; do
     --dry-run)
       DRY_RUN=true
       ;;
+    --include-activity)
+      INCLUDE_ACTIVITY=true
+      ;;
     -*)
       error "Unknown option: $arg (use --help for usage)"
       ;;
@@ -99,9 +103,17 @@ esac
 # ── Build URL ────────────────────────────────────────────────────
 
 RESTORE_URL="${ADMIN_TOOLS_URL}/api/restore"
+QUERY=""
 if [[ "$DRY_RUN" == true ]]; then
-  RESTORE_URL="${RESTORE_URL}?dryRun=true"
+  QUERY="${QUERY}&dryRun=true"
   warn "DRY-RUN mode: no changes will be made"
+fi
+if [[ "$INCLUDE_ACTIVITY" == true ]]; then
+  QUERY="${QUERY}&includeActivity=true"
+  warn "INCLUDE-ACTIVITY mode: jobs/notifications/messages/executiondetails will be restored (audit data)"
+fi
+if [[ -n "$QUERY" ]]; then
+  RESTORE_URL="${RESTORE_URL}?${QUERY:1}"
 fi
 
 # ── Upload and restore ──────────────────────────────────────────

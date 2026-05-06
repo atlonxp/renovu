@@ -8,7 +8,7 @@ import { validateEnv } from './config';
 // Validate the ENV variables before bootstrapping the app
 validateEnv();
 
-const BODY_PARSER_LIMIT = '50mb';
+const BODY_PARSER_LIMIT = process.env.ADMIN_TOOLS_BODY_LIMIT || '2gb';
 
 export async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });

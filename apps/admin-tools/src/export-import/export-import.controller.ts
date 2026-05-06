@@ -18,7 +18,9 @@ import { ImportService } from './import.service';
 import { ExportRequestDto, ImportStrategy } from './dto';
 
 const UPLOAD_DIR = process.env.BACKUP_DIR || '/tmp/admin-tools-backups';
-const MAX_UPLOAD_SIZE = 50 * 1024 * 1024; // 50 MB
+const MAX_UPLOAD_SIZE = process.env.ADMIN_TOOLS_MAX_UPLOAD_MB
+  ? Number(process.env.ADMIN_TOOLS_MAX_UPLOAD_MB) * 1024 * 1024
+  : 2 * 1024 * 1024 * 1024; // 2 GB default
 const OBJECT_ID_REGEX = /^[0-9a-f]{24}$/i;
 
 @Controller('api')

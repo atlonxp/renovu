@@ -70,6 +70,12 @@ interface CollectionEntry {
   name: string;
   /** If true, use cursor + NDJSON instead of find().toArray() + JSON */
   highVolume: boolean;
+  /**
+   * Audit/activity-feed data. Useful for forensics, useless for migration.
+   * Excluded by default; opt-in with `?includeActivity=true` query param
+   * (or `--include-activity` flag in the CLI script).
+   */
+  audit?: boolean;
 }
 
 const COLLECTION_REGISTRY: CollectionEntry[] = [
@@ -93,7 +99,7 @@ const COLLECTION_REGISTRY: CollectionEntry[] = [
   { name: 'channelendpoints', highVolume: false },
   { name: 'localizationgroups', highVolume: false },
 
-  // ── High-volume collections (cursor → NDJSON) ──
+  // ── High-volume config collections (cursor → NDJSON) ──
   // notificationtemplates: workflow definitions can carry large step
   //   templates; production seen with 579 docs, 3400 message templates.
   // messagetemplates: per-step content (Maily JSON / HTML); largest
@@ -107,10 +113,16 @@ const COLLECTION_REGISTRY: CollectionEntry[] = [
   { name: 'controls', highVolume: true },
   { name: 'changes', highVolume: true },
   { name: 'localizations', highVolume: true },
-  { name: 'jobs', highVolume: true },
-  { name: 'notifications', highVolume: true },
-  { name: 'messages', highVolume: true },
-  { name: 'executiondetails', highVolume: true },
+
+  // ── Audit / activity feed (excluded by default) ──
+  // These are append-only execution traces. Not needed for environment
+  // migration or disaster recovery of configuration. Restoring them on
+  // a fresh env causes orphaned references (workflows/subscribers may
+  // not match) and bloats backup size 100x.
+  { name: 'jobs', highVolume: true, audit: true },
+  { name: 'notifications', highVolume: true, audit: true },
+  { name: 'messages', highVolume: true, audit: true },
+  { name: 'executiondetails', highVolume: true, audit: true },
 ];
 
 /**
@@ -224,7 +236,7 @@ export class BackupService implements OnModuleInit {
   //  CREATE BACKUP
   // ──────────────────────────────────────────────────
 
-  async createBackup(orgId = 'global'): Promise<CreateBackupResponseDto> {
+  async createBackup(orgId = 'global', includeActivity = false): Promise<CreateBackupResponseDto> {
     await this.acquireLock();
     try {
       const orgDir = this.getOrgBackupDir(orgId);
@@ -255,8 +267,16 @@ export class BackupService implements OnModuleInit {
 
       this.logger.log(`Starting backup: ${backupName}`);
 
-      // Export each collection
-      for (const entry of COLLECTION_REGISTRY) {
+      // Export each collection (skip audit/activity-feed unless explicitly requested)
+      const entriesToExport = includeActivity
+        ? COLLECTION_REGISTRY
+        : COLLECTION_REGISTRY.filter((e) => !e.audit);
+      if (!includeActivity) {
+        const skipped = COLLECTION_REGISTRY.filter((e) => e.audit).map((e) => e.name);
+        this.logger.log(`Skipping audit collections: ${skipped.join(', ')} (use includeActivity=true to include)`);
+      }
+
+      for (const entry of entriesToExport) {
         try {
           const collection = db.collection(entry.name);
 
@@ -418,7 +438,7 @@ export class BackupService implements OnModuleInit {
   //  RESTORE BACKUP
   // ──────────────────────────────────────────────────
 
-  async restoreBackup(filePath: string, dryRun: boolean, orgId = 'global'): Promise<RestoreResponseDto> {
+  async restoreBackup(filePath: string, dryRun: boolean, orgId = 'global', includeActivity = false): Promise<RestoreResponseDto> {
     await this.acquireLock();
     const startTime = Date.now();
     const ts = Date.now();
@@ -482,25 +502,32 @@ export class BackupService implements OnModuleInit {
         const entry = COLLECTION_REGISTRY.find((e) => e.name === collectionName);
         if (!entry) continue;
 
+        // Skip audit/activity-feed collections unless explicitly requested.
+        // They reference workflow/subscriber/job IDs that may not exist in
+        // the target environment, leading to orphaned records.
+        if (entry.audit && !includeActivity) {
+          this.logger.log(`Skipping audit collection: ${collectionName}`);
+          continue;
+        }
+
         try {
           const collection = db.collection(collectionName);
 
-          if (entry.highVolume) {
-            const ndjsonPath = path.join(dataDir, `${collectionName}.ndjson`);
-            if (fs.existsSync(ndjsonPath)) {
-              const count = await this.restoreCollectionNdjson(collection, ndjsonPath);
-              restored[collectionName] = count;
-            } else {
-              restored[collectionName] = 0;
-            }
+          // Format-agnostic restore: check whichever file format exists in the backup.
+          // Old backups stored everything as .json; current backups stream highVolume as .ndjson.
+          // A future migration may flip this for some collections, so we check both regardless
+          // of the registry's current `highVolume` setting.
+          const ndjsonPath = path.join(dataDir, `${collectionName}.ndjson`);
+          const jsonPath = path.join(dataDir, `${collectionName}.json`);
+
+          if (fs.existsSync(ndjsonPath)) {
+            const count = await this.restoreCollectionNdjson(collection, ndjsonPath);
+            restored[collectionName] = count;
+          } else if (fs.existsSync(jsonPath)) {
+            const count = await this.restoreCollectionJson(collection, jsonPath);
+            restored[collectionName] = count;
           } else {
-            const jsonPath = path.join(dataDir, `${collectionName}.json`);
-            if (fs.existsSync(jsonPath)) {
-              const count = await this.restoreCollectionJson(collection, jsonPath);
-              restored[collectionName] = count;
-            } else {
-              restored[collectionName] = 0;
-            }
+            restored[collectionName] = 0;
           }
 
           this.logger.debug(`Restored ${collectionName}: ${restored[collectionName]} docs`);
