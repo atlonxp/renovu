@@ -11,7 +11,6 @@ import { useFetchSubscription } from '@/hooks/use-fetch-subscription';
 import { useTelemetry } from '@/hooks/use-telemetry';
 import { buildRoute, ROUTES } from '@/utils/routes';
 import { TelemetryEvent } from '@/utils/telemetry';
-import { IS_SELF_HOSTED } from '../../config';
 import { Button } from '../primitives/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../primitives/tooltip';
 import { useLayoutsUrlState } from './hooks/use-layouts-url-state';

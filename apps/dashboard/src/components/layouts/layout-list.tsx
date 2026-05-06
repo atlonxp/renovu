@@ -28,7 +28,6 @@ import { IS_SELF_HOSTED } from '@/config';
 import { useFetchLayouts } from '@/hooks/use-fetch-layouts';
 import { useFetchSubscription } from '@/hooks/use-fetch-subscription';
 import { cn } from '@/utils/ui';
-import { IS_SELF_HOSTED } from '../../config';
 import { CreateLayoutButton } from './create-layout-btn';
 import { LayoutsListUpgradeCta } from './layouts-list-upgrade-cta';
 
