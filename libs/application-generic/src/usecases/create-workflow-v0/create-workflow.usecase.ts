@@ -19,7 +19,6 @@ import {
   ResourceTypeEnum,
   TriggerTypeEnum,
 } from '@novu/shared';
-import { ManageTranslations } from '@novu/translation';
 import { PinoLogger } from 'nestjs-pino';
 import { WorkflowWithPreferencesResponseDto } from '../../dtos/get-workflow-with-preferences.dto';
 import { Instrument, InstrumentUsecase } from '../../instrumentation';
@@ -54,8 +53,7 @@ export class CreateWorkflowV0 {
     protected moduleRef: ModuleRef,
     private upsertPreferences: UpsertPreferences,
     private getWorkflowWithPreferencesUseCase: GetWorkflowWithPreferencesUseCase,
-    private resourceValidatorService: ResourceValidatorService,
-    private manageTranslations: ManageTranslations
+    private resourceValidatorService: ResourceValidatorService
   ) {}
 
   @InstrumentUsecase()
@@ -145,7 +143,11 @@ export class CreateWorkflowV0 {
     session?: ClientSession | null
   ) {
     try {
-      await this.manageTranslations.execute({
+      const manageTranslations = this.moduleRef.get(MANAGE_TRANSLATIONS, { strict: false });
+      if (!manageTranslations) {
+        return;
+      }
+      await manageTranslations.execute({
         enabled: command.isTranslationEnabled ?? false,
         resourceId: workflowIdentifier,
         resourceInternalId: workflowEntity._id,

@@ -21,11 +21,6 @@ import {
   PreferencesTypeEnum,
   ResourceOriginEnum,
 } from '@novu/shared';
-import {
-  AutoTranslate,
-  LocalizationResourceEnum as TranslationResourceEnum,
-  ManageTranslations,
-} from '@novu/translation';
 import { PinoLogger } from 'nestjs-pino';
 import { WorkflowWithPreferencesResponseDto } from '../../dtos/get-workflow-with-preferences.dto';
 import { Instrument, InstrumentUsecase } from '../../instrumentation';
@@ -33,7 +28,7 @@ import { AnalyticsService, ContentService } from '../../services';
 import { ResourceValidatorService } from '../../services/resource-validator.service';
 import { isVariantEmpty, PlatformException } from '../../utils';
 import { computeWorkflowStatus } from '../../utils/compute-workflow-status';
-import { MANAGE_TRANSLATIONS, TRANSLATIONS_SERVICE } from '../../utils/constants';
+import { AUTO_TRANSLATE, MANAGE_TRANSLATIONS, TRANSLATIONS_SERVICE } from '../../utils/constants';
 import { NotificationStep, NotificationStepVariantCommand } from '../../value-objects';
 import { CreateChange, CreateChangeCommand } from '../create-change';
 import { DeletePreferencesCommand, DeletePreferencesUseCase } from '../delete-preferences';
@@ -75,9 +70,7 @@ export class UpdateWorkflowV0 {
     private deletePreferencesUsecase: DeletePreferencesUseCase,
     private getWorkflowWithPreferencesUseCase: GetWorkflowWithPreferencesUseCase,
     private controlValuesRepository: ControlValuesRepository,
-    private resourceValidatorService: ResourceValidatorService,
-    private manageTranslations: ManageTranslations,
-    private autoTranslate: AutoTranslate
+    private resourceValidatorService: ResourceValidatorService
   ) {}
 
   @InstrumentUsecase()
@@ -390,7 +383,11 @@ export class UpdateWorkflowV0 {
     workflowEntity?: NotificationTemplateEntity
   ) {
     try {
-      const result = await this.manageTranslations.execute({
+      const manageTranslations = this.moduleRef.get(MANAGE_TRANSLATIONS, { strict: false });
+      if (!manageTranslations) {
+        return;
+      }
+      const result = await manageTranslations.execute({
         enabled: command.isTranslationEnabled ?? false,
         resourceId: workflowIdentifier,
         resourceInternalId: workflowInternalId,
@@ -418,10 +415,14 @@ export class UpdateWorkflowV0 {
           }
         );
 
-        const translateResult = await this.autoTranslate.execute({
+        const autoTranslate = this.moduleRef.get(AUTO_TRANSLATE, { strict: false });
+        if (!autoTranslate) {
+          return;
+        }
+        const translateResult = await autoTranslate.execute({
           resourceId: workflowIdentifier,
           resourceInternalId: workflowInternalId,
-          resourceType: TranslationResourceEnum.WORKFLOW,
+          resourceType: LocalizationResourceEnum.WORKFLOW,
           organizationId: command.organizationId,
           environmentId: command.environmentId,
           userId: command.userId,

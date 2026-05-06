@@ -7,7 +7,7 @@ export * from './LogDecorator';
 export { getLoggerToken, Logger, LoggerModule, PinoLogger, storage, Store };
 
 export function getErrorInterceptor(): NestInterceptor {
-  return new LoggerErrorInterceptor();
+  return new LoggerErrorInterceptor() as unknown as NestInterceptor;
 }
 
 const loggingLevelSet = {

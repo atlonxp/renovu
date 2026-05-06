@@ -5,7 +5,11 @@ import {
 	Module,
 	type Provider,
 } from "@nestjs/common";
-import { WorkflowInMemoryProviderService } from "@novu/application-generic";
+import {
+	AUTO_TRANSLATE,
+	MANAGE_TRANSLATIONS,
+	WorkflowInMemoryProviderService,
+} from "@novu/application-generic";
 import {
 	ControlValuesRepository,
 	DalService,
@@ -185,6 +189,10 @@ export class TranslationModule {
 				DuplicateLocales,
 				AutoTranslate,
 				EnqueueTranslation,
+				// String tokens used by libs/application-generic via moduleRef
+				// (avoids circular import application-generic -> translation -> application-generic)
+				{ provide: MANAGE_TRANSLATIONS, useExisting: ManageTranslations },
+				{ provide: AUTO_TRANSLATE, useExisting: AutoTranslate },
 			],
 			exports: [
 				// Repositories
@@ -207,6 +215,9 @@ export class TranslationModule {
 				DuplicateLocales,
 				AutoTranslate,
 				EnqueueTranslation,
+				// String tokens
+				MANAGE_TRANSLATIONS,
+				AUTO_TRANSLATE,
 			],
 			global: true,
 		};
