@@ -1,4 +1,5 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
+import { AI_SETTINGS_REPOSITORY, type IAiSettingsLookup } from "@novu/application-generic";
 import {
 	ControlValuesRepository,
 	LocalizationResourceEnum as DalLocalizationResourceEnum,
@@ -96,6 +97,8 @@ export class ManageTranslations {
 		private readonly localizationGroupRepository: LocalizationGroupRepository,
 		private readonly localizationRepository: LocalizationRepository,
 		private readonly settingsRepository: TranslationSettingsRepository,
+		@Inject(AI_SETTINGS_REPOSITORY)
+		private readonly aiSettingsRepository: IAiSettingsLookup,
 		private readonly contentExtractor: ContentExtractorService,
 		private readonly controlValuesRepository: ControlValuesRepository,
 	) {}
@@ -510,15 +513,17 @@ export class ManageTranslations {
 		}
 
 		// Get organization settings to check target locales
-		const settings =
-			await this.settingsRepository.findByOrganization(organizationId);
+		const [settings, aiSettings] = await Promise.all([
+			this.settingsRepository.findByOrganization(organizationId),
+			this.aiSettingsRepository.findByOrganization(organizationId),
+		]);
 
-		if (!settings?.openaiApiKey) {
-			this.logger.debug("No OpenAI API key configured, skipping auto-translate");
+		if (!aiSettings?.apiKey) {
+			this.logger.debug("No AI provider configured, skipping auto-translate");
 			return false;
 		}
 
-		const targetLocales = settings.targetLocales || [];
+		const targetLocales = settings?.targetLocales || [];
 		if (targetLocales.length === 0) {
 			this.logger.debug("No target locales configured, skipping auto-translate");
 			return false;
@@ -532,7 +537,7 @@ export class ManageTranslations {
 		});
 
 		const existingLocales = new Set(existingLocalizations.map((l) => l.locale));
-		const defaultLocale = settings.defaultLocale || "en_US";
+		const defaultLocale = settings?.defaultLocale || "en_US";
 
 		// Check if any target locale (excluding default) needs translation
 		for (const targetLocale of targetLocales) {

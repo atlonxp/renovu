@@ -13,7 +13,11 @@ type ChangePropsValueType<T, K extends keyof T, V = Types.ObjectId> = Omit<
 };
 
 /**
- * Supported OpenAI models for translation
+ * Supported OpenAI models for translation.
+ *
+ * Kept in this package for back-compat with code that imports it from
+ * `@novu/translation`. The canonical source for the configured model is now
+ * `AiSettings.model` in apps/api.
  */
 export enum OpenAIModelEnum {
 	GPT_4O_MINI = "gpt-4o-mini",
@@ -22,29 +26,15 @@ export enum OpenAIModelEnum {
 }
 
 /**
- * Translation settings entity for storing organization-level translation configuration
+ * Translation settings entity for storing organization-level translation configuration.
+ *
+ * Note: API key + model live in `AiSettings` (apps/api/src/app/ai-settings).
+ * This entity only holds locale-related fields.
  */
 export class TranslationSettingsEntity {
-	/**
-	 * Unique identifier for the translation settings
-	 */
 	_id: string;
 
-	/**
-	 * Organization ID - unique constraint, one settings per organization
-	 */
 	_organizationId: string;
-
-	/**
-	 * OpenAI API key (AES-256 encrypted at rest)
-	 */
-	openaiApiKey: string;
-
-	/**
-	 * OpenAI model to use for translation
-	 * Defaults to gpt-4o-mini for cost-effective translation
-	 */
-	openaiModel: OpenAIModelEnum;
 
 	/**
 	 * Default source locale for translations
@@ -65,20 +55,11 @@ export class TranslationSettingsEntity {
 	 */
 	localeAliases?: Record<string, string>;
 
-	/**
-	 * Timestamp when settings were created
-	 */
 	createdAt: string;
 
-	/**
-	 * Timestamp when settings were last updated
-	 */
 	updatedAt: string;
 }
 
-/**
- * Database model type with ObjectId references
- */
 export type TranslationSettingsDBModel = ChangePropsValueType<
 	TranslationSettingsEntity,
 	"_organizationId"

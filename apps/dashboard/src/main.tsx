@@ -676,6 +676,10 @@ const router = createBrowserRouter([
             element: IS_SELF_HOSTED ? <SettingsPage /> : <Navigate to={ROUTES.ROOT} />,
           },
           {
+            path: ROUTES.SETTINGS_AI,
+            element: <SettingsPage />,
+          },
+          {
             path: ROUTES.LOCAL_STUDIO_AUTH,
             element: <RedirectToLegacyStudioAuth />,
           },

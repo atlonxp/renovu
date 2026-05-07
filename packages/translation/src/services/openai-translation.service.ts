@@ -1,7 +1,8 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
+import { AI_SETTINGS_REPOSITORY, type IAiSettingsLookup } from "@novu/application-generic";
 import OpenAI from "openai";
 
-import { OpenAIModelEnum, TranslationSettingsRepository } from "../dal";
+import { OpenAIModelEnum } from "../dal";
 import {
 	ApiKeyNotConfiguredError,
 	type BatchTranslateRequest,
@@ -112,7 +113,8 @@ export class OpenAITranslationService {
 	private readonly logger = new Logger(OpenAITranslationService.name);
 
 	constructor(
-		private readonly settingsRepository: TranslationSettingsRepository,
+		@Inject(AI_SETTINGS_REPOSITORY)
+		private readonly aiSettingsRepository: IAiSettingsLookup,
 		private readonly tokenizer: VariableTokenizerService,
 		private readonly validator: TranslationValidatorService,
 	) {}
@@ -145,9 +147,9 @@ export class OpenAITranslationService {
 		try {
 			// 1. Get organization settings
 			const settings =
-				await this.settingsRepository.findByOrganization(organizationId);
+				await this.aiSettingsRepository.findByOrganization(organizationId);
 
-			if (!settings?.openaiApiKey) {
+			if (!settings?.apiKey) {
 				throw new ApiKeyNotConfiguredError(organizationId);
 			}
 
@@ -167,10 +169,10 @@ export class OpenAITranslationService {
 				contentType,
 				customInstructions,
 			);
-			const model = settings.openaiModel || DEFAULT_CONFIG.MODEL;
+			const model = settings.model || DEFAULT_CONFIG.MODEL;
 
 			const openai = new OpenAI({
-				apiKey: settings.openaiApiKey,
+				apiKey: settings.apiKey,
 			});
 
 			const completion = await this.withRetry(() =>
@@ -340,9 +342,9 @@ export class OpenAITranslationService {
 
 		try {
 			const settings =
-				await this.settingsRepository.findByOrganization(organizationId);
+				await this.aiSettingsRepository.findByOrganization(organizationId);
 
-			if (!settings?.openaiApiKey) {
+			if (!settings?.apiKey) {
 				return {
 					success: false,
 					error: "OpenAI API key not configured",
@@ -350,10 +352,10 @@ export class OpenAITranslationService {
 			}
 
 			const openai = new OpenAI({
-				apiKey: settings.openaiApiKey,
+				apiKey: settings.apiKey,
 			});
 
-			const model = settings.openaiModel || DEFAULT_CONFIG.MODEL;
+			const model = settings.model || DEFAULT_CONFIG.MODEL;
 
 			// Simple test call
 			const completion = await openai.chat.completions.create({

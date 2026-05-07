@@ -1,4 +1,5 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
+import { AI_SETTINGS_REPOSITORY, type IAiSettingsLookup } from "@novu/application-generic";
 import {
 	LocalizationResourceEnum as DalLocalizationResourceEnum,
 	type LocalizationGroupEntity,
@@ -58,6 +59,8 @@ export class AutoTranslate {
 		private readonly localizationGroupRepository: LocalizationGroupRepository,
 		private readonly localizationRepository: LocalizationRepository,
 		private readonly settingsRepository: TranslationSettingsRepository,
+		@Inject(AI_SETTINGS_REPOSITORY)
+		private readonly aiSettingsRepository: IAiSettingsLookup,
 		private readonly openAITranslationService: OpenAITranslationService,
 	) {}
 
@@ -85,8 +88,10 @@ export class AutoTranslate {
 		} = command;
 
 		// Step 1: Get organization settings
-		const settings =
-			await this.settingsRepository.findByOrganization(organizationId);
+		const [settings, aiSettings] = await Promise.all([
+			this.settingsRepository.findByOrganization(organizationId),
+			this.aiSettingsRepository.findByOrganization(organizationId),
+		]);
 
 		if (!settings) {
 			return this.createErrorResult(
@@ -96,9 +101,9 @@ export class AutoTranslate {
 			);
 		}
 
-		if (!settings.openaiApiKey) {
+		if (!aiSettings?.apiKey) {
 			return this.createErrorResult(
-				"OpenAI API key not configured",
+				"AI provider not configured",
 				overrideSourceLocale || settings.defaultLocale || "en_US",
 				startTime,
 			);

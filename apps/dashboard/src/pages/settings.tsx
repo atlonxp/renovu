@@ -14,6 +14,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { Card } from '@/components/primitives/card';
 import { InlineToast } from '@/components/primitives/inline-toast';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/primitives/tabs';
+import { AiSettings } from '@/components/settings/ai-settings';
 import { DataManagementSettings } from '@/components/settings/data-management-settings';
 import { OrganizationSettings } from '@/components/settings/organization-settings';
 import { CLERK_PUBLISHABLE_KEY, EE_AUTH_PROVIDER, IS_SELF_HOSTED } from '@/config';
@@ -146,6 +147,9 @@ export function SettingsPage() {
         }
 
         break;
+      case 'ai':
+        navigate(ROUTES.SETTINGS_AI);
+        break;
     }
   };
 
@@ -174,6 +178,10 @@ export function SettingsPage() {
               Data Management
             </TabsTrigger>
           )}
+
+          <TabsTrigger variant="regular" value="ai" size="xl">
+            AI
+          </TabsTrigger>
         </TabsList>
 
         <div
@@ -278,6 +286,16 @@ export function SettingsPage() {
               </motion.div>
             </TabsContent>
           )}
+
+          <TabsContent value="ai" className="rounded-lg">
+            <motion.div {...FADE_ANIMATION}>
+              <Card className="border-none shadow-none">
+                <div className="pb-6 pt-4 flex flex-col">
+                  <AiSettings />
+                </div>
+              </Card>
+            </motion.div>
+          </TabsContent>
         </div>
       </Tabs>
     </DashboardLayout>

@@ -1,5 +1,5 @@
-import { OpenAIModelEnum, TranslationSettingsRepository } from "../dal";
-import type { TranslationSettingsEntity } from "../dal/translation-settings.entity";
+import type { IAiSettingsLookup, IAiSettingsRecord } from "@novu/application-generic";
+import { OpenAIModelEnum } from "../dal";
 import { OpenAITranslationService } from "./openai-translation.service";
 import { TranslationValidatorService } from "./translation-validator.service";
 import { VariableTokenizerService } from "./variable-tokenizer.service";
@@ -17,18 +17,17 @@ jest.mock("openai", () => {
 
 describe("OpenAITranslationService", () => {
 	let service: OpenAITranslationService;
-	let settingsRepository: jest.Mocked<TranslationSettingsRepository>;
+	let aiSettingsRepository: jest.Mocked<IAiSettingsLookup>;
 	let tokenizer: VariableTokenizerService;
 	let validator: TranslationValidatorService;
 	let mockOpenAI: jest.Mock;
 
-	const mockSettings: TranslationSettingsEntity = {
+	const mockSettings: IAiSettingsRecord = {
 		_id: "settings_123",
 		_organizationId: "org_123",
-		openaiApiKey: "sk-test-key",
-		openaiModel: OpenAIModelEnum.GPT_4O_MINI,
-		defaultLocale: "en_US",
-		targetLocales: ["es_ES", "fr_FR"],
+		provider: "openai",
+		apiKey: "sk-test-key",
+		model: OpenAIModelEnum.GPT_4O_MINI,
 		createdAt: new Date().toISOString(),
 		updatedAt: new Date().toISOString(),
 	};
@@ -40,20 +39,15 @@ describe("OpenAITranslationService", () => {
 		tokenizer = new VariableTokenizerService();
 		validator = new TranslationValidatorService();
 
-		// Mock settings repository
-		settingsRepository = {
+		aiSettingsRepository = {
 			findByOrganization: jest.fn(),
-			upsertSettings: jest.fn(),
-			deleteByOrganization: jest.fn(),
-			exists: jest.fn(),
-			getDecryptedApiKey: jest.fn(),
-		} as unknown as jest.Mocked<TranslationSettingsRepository>;
+		} as jest.Mocked<IAiSettingsLookup>;
 
 		// Get the mocked OpenAI class
 		mockOpenAI = require("openai");
 
 		service = new OpenAITranslationService(
-			settingsRepository,
+			aiSettingsRepository,
 			tokenizer,
 			validator,
 		);
@@ -61,7 +55,7 @@ describe("OpenAITranslationService", () => {
 
 	describe("translate", () => {
 		it("should translate content successfully", async () => {
-			settingsRepository.findByOrganization.mockResolvedValue(mockSettings);
+			aiSettingsRepository.findByOrganization.mockResolvedValue(mockSettings);
 
 			// Mock OpenAI response
 			const mockCreate = jest.fn().mockResolvedValue({
@@ -86,7 +80,7 @@ describe("OpenAITranslationService", () => {
 		});
 
 		it("should fail when API key is not configured", async () => {
-			settingsRepository.findByOrganization.mockResolvedValue(null);
+			aiSettingsRepository.findByOrganization.mockResolvedValue(null);
 
 			const result = await service.translate({
 				organizationId: "org_123",
@@ -100,8 +94,8 @@ describe("OpenAITranslationService", () => {
 		});
 
 		it("should fail when settings have no API key", async () => {
-			const settingsWithoutKey = { ...mockSettings, openaiApiKey: "" };
-			settingsRepository.findByOrganization.mockResolvedValue(
+			const settingsWithoutKey = { ...mockSettings, apiKey: "" };
+			aiSettingsRepository.findByOrganization.mockResolvedValue(
 				settingsWithoutKey,
 			);
 
@@ -117,7 +111,7 @@ describe("OpenAITranslationService", () => {
 		});
 
 		it("should handle empty response from OpenAI", async () => {
-			settingsRepository.findByOrganization.mockResolvedValue(mockSettings);
+			aiSettingsRepository.findByOrganization.mockResolvedValue(mockSettings);
 
 			const mockCreate = jest.fn().mockResolvedValue({
 				choices: [{ message: { content: "" } }],
@@ -139,7 +133,7 @@ describe("OpenAITranslationService", () => {
 		});
 
 		it("should preserve HTML structure", async () => {
-			settingsRepository.findByOrganization.mockResolvedValue(mockSettings);
+			aiSettingsRepository.findByOrganization.mockResolvedValue(mockSettings);
 
 			const mockCreate = jest.fn().mockResolvedValue({
 				choices: [
@@ -170,7 +164,7 @@ describe("OpenAITranslationService", () => {
 		});
 
 		it("should handle multiple variables", async () => {
-			settingsRepository.findByOrganization.mockResolvedValue(mockSettings);
+			aiSettingsRepository.findByOrganization.mockResolvedValue(mockSettings);
 
 			const mockCreate = jest.fn().mockResolvedValue({
 				choices: [{ message: { content: "Hola [VAR_1] [VAR_2]!" } }],
@@ -192,7 +186,7 @@ describe("OpenAITranslationService", () => {
 		});
 
 		it("should skip validation when requested", async () => {
-			settingsRepository.findByOrganization.mockResolvedValue(mockSettings);
+			aiSettingsRepository.findByOrganization.mockResolvedValue(mockSettings);
 
 			const mockCreate = jest.fn().mockResolvedValue({
 				choices: [{ message: { content: "Hola!" } }],
@@ -215,7 +209,7 @@ describe("OpenAITranslationService", () => {
 		});
 
 		it("should include validation when not skipped", async () => {
-			settingsRepository.findByOrganization.mockResolvedValue(mockSettings);
+			aiSettingsRepository.findByOrganization.mockResolvedValue(mockSettings);
 
 			const mockCreate = jest.fn().mockResolvedValue({
 				choices: [{ message: { content: "Hola!" } }],
@@ -238,7 +232,7 @@ describe("OpenAITranslationService", () => {
 		});
 
 		it("should handle API errors gracefully", async () => {
-			settingsRepository.findByOrganization.mockResolvedValue(mockSettings);
+			aiSettingsRepository.findByOrganization.mockResolvedValue(mockSettings);
 
 			const mockCreate = jest
 				.fn()
@@ -261,10 +255,10 @@ describe("OpenAITranslationService", () => {
 		it("should use default model when not specified", async () => {
 			const settingsWithoutModel = {
 				...mockSettings,
-				openaiModel: undefined as unknown as OpenAIModelEnum,
+				model: "" as string,
 			};
-			settingsRepository.findByOrganization.mockResolvedValue(
-				settingsWithoutModel as TranslationSettingsEntity,
+			aiSettingsRepository.findByOrganization.mockResolvedValue(
+				settingsWithoutModel,
 			);
 
 			const mockCreate = jest.fn().mockResolvedValue({
@@ -287,7 +281,7 @@ describe("OpenAITranslationService", () => {
 		});
 
 		it("should handle content type hint", async () => {
-			settingsRepository.findByOrganization.mockResolvedValue(mockSettings);
+			aiSettingsRepository.findByOrganization.mockResolvedValue(mockSettings);
 
 			const mockCreate = jest.fn().mockResolvedValue({
 				choices: [{ message: { content: "Hola!" } }],
@@ -314,7 +308,7 @@ describe("OpenAITranslationService", () => {
 
 	describe("translateBatch", () => {
 		it("should translate multiple items successfully", async () => {
-			settingsRepository.findByOrganization.mockResolvedValue(mockSettings);
+			aiSettingsRepository.findByOrganization.mockResolvedValue(mockSettings);
 
 			let callCount = 0;
 			const mockCreate = jest.fn().mockImplementation(() => {
@@ -351,7 +345,7 @@ describe("OpenAITranslationService", () => {
 		});
 
 		it("should handle partial failures", async () => {
-			settingsRepository.findByOrganization.mockResolvedValue(mockSettings);
+			aiSettingsRepository.findByOrganization.mockResolvedValue(mockSettings);
 
 			let callCount = 0;
 			const mockCreate = jest.fn().mockImplementation(() => {
@@ -390,7 +384,7 @@ describe("OpenAITranslationService", () => {
 		});
 
 		it("should track total tokens across batch", async () => {
-			settingsRepository.findByOrganization.mockResolvedValue(mockSettings);
+			aiSettingsRepository.findByOrganization.mockResolvedValue(mockSettings);
 
 			const mockCreate = jest.fn().mockResolvedValue({
 				choices: [{ message: { content: "Hola!" } }],
@@ -417,7 +411,7 @@ describe("OpenAITranslationService", () => {
 
 	describe("testConnection", () => {
 		it("should return success for valid connection", async () => {
-			settingsRepository.findByOrganization.mockResolvedValue(mockSettings);
+			aiSettingsRepository.findByOrganization.mockResolvedValue(mockSettings);
 
 			const mockCreate = jest.fn().mockResolvedValue({
 				choices: [{ message: { content: "OK" } }],
@@ -434,7 +428,7 @@ describe("OpenAITranslationService", () => {
 		});
 
 		it("should return failure when API key not configured", async () => {
-			settingsRepository.findByOrganization.mockResolvedValue(null);
+			aiSettingsRepository.findByOrganization.mockResolvedValue(null);
 
 			const result = await service.testConnection("org_123");
 
@@ -443,7 +437,7 @@ describe("OpenAITranslationService", () => {
 		});
 
 		it("should handle invalid API key error", async () => {
-			settingsRepository.findByOrganization.mockResolvedValue(mockSettings);
+			aiSettingsRepository.findByOrganization.mockResolvedValue(mockSettings);
 
 			const mockCreate = jest
 				.fn()
@@ -459,7 +453,7 @@ describe("OpenAITranslationService", () => {
 		});
 
 		it("should handle rate limit error", async () => {
-			settingsRepository.findByOrganization.mockResolvedValue(mockSettings);
+			aiSettingsRepository.findByOrganization.mockResolvedValue(mockSettings);
 
 			const mockCreate = jest
 				.fn()
@@ -475,7 +469,7 @@ describe("OpenAITranslationService", () => {
 		});
 
 		it("should handle empty response", async () => {
-			settingsRepository.findByOrganization.mockResolvedValue(mockSettings);
+			aiSettingsRepository.findByOrganization.mockResolvedValue(mockSettings);
 
 			const mockCreate = jest.fn().mockResolvedValue({
 				choices: [{ message: { content: "" } }],

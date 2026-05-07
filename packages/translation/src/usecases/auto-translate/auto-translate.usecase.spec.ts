@@ -1,4 +1,5 @@
 import { Test, type TestingModule } from "@nestjs/testing";
+import { AI_SETTINGS_REPOSITORY, type IAiSettingsLookup } from "@novu/application-generic";
 import {
 	LocalizationResourceEnum as DalLocalizationResourceEnum,
 	LocalizationGroupRepository,
@@ -18,6 +19,7 @@ describe("AutoTranslate Usecase", () => {
 	let localizationGroupRepository: jest.Mocked<LocalizationGroupRepository>;
 	let localizationRepository: jest.Mocked<LocalizationRepository>;
 	let settingsRepository: jest.Mocked<TranslationSettingsRepository>;
+	let aiSettingsRepository: jest.Mocked<IAiSettingsLookup>;
 	let openAITranslationService: jest.Mocked<OpenAITranslationService>;
 
 	const mockOrganizationId = "60d5ec9f1c9d440000org001";
@@ -30,10 +32,18 @@ describe("AutoTranslate Usecase", () => {
 	const mockSettings = {
 		_id: "60d5ec9f1c9d440000set001",
 		_organizationId: mockOrganizationId,
-		openaiApiKey: "sk-test-key",
-		openaiModel: OpenAIModelEnum.GPT_4O_MINI,
 		defaultLocale: "en_US",
 		targetLocales: ["es_ES", "fr_FR"],
+		createdAt: new Date().toISOString(),
+		updatedAt: new Date().toISOString(),
+	};
+
+	const mockAiSettings = {
+		_id: "60d5ec9f1c9d440000ai0001",
+		_organizationId: mockOrganizationId,
+		provider: "openai",
+		apiKey: "sk-test-key",
+		model: OpenAIModelEnum.GPT_4O_MINI,
 		createdAt: new Date().toISOString(),
 		updatedAt: new Date().toISOString(),
 	};
@@ -70,6 +80,10 @@ describe("AutoTranslate Usecase", () => {
 			findByOrganization: jest.fn(),
 		};
 
+		const mockAiSettingsRepo = {
+			findByOrganization: jest.fn(),
+		};
+
 		const mockOpenAIService = {
 			translate: jest.fn(),
 		};
@@ -90,6 +104,10 @@ describe("AutoTranslate Usecase", () => {
 					useValue: mockSettingsRepo,
 				},
 				{
+					provide: AI_SETTINGS_REPOSITORY,
+					useValue: mockAiSettingsRepo,
+				},
+				{
 					provide: OpenAITranslationService,
 					useValue: mockOpenAIService,
 				},
@@ -100,7 +118,12 @@ describe("AutoTranslate Usecase", () => {
 		localizationGroupRepository = moduleRef.get(LocalizationGroupRepository);
 		localizationRepository = moduleRef.get(LocalizationRepository);
 		settingsRepository = moduleRef.get(TranslationSettingsRepository);
+		aiSettingsRepository = moduleRef.get(AI_SETTINGS_REPOSITORY);
 		openAITranslationService = moduleRef.get(OpenAITranslationService);
+
+		// Default: AI provider configured. Tests that assert "key not configured"
+		// override this with mockResolvedValueOnce(null) before calling execute().
+		aiSettingsRepository.findByOrganization.mockResolvedValue(mockAiSettings);
 	});
 
 	afterEach(() => {
@@ -280,12 +303,10 @@ describe("AutoTranslate Usecase", () => {
 			expect(result.results[0].error).toContain("not configured");
 		});
 
-		it("should return error when OpenAI API key not configured", async () => {
+		it("should return error when AI provider not configured", async () => {
 			// Arrange
-			settingsRepository.findByOrganization.mockResolvedValue({
-				...mockSettings,
-				openaiApiKey: "",
-			});
+			settingsRepository.findByOrganization.mockResolvedValue(mockSettings);
+			aiSettingsRepository.findByOrganization.mockResolvedValue(null);
 
 			const command = AutoTranslateCommand.create({
 				resourceId: mockResourceId,
@@ -302,7 +323,7 @@ describe("AutoTranslate Usecase", () => {
 
 			// Assert
 			expect(result.success).toBe(false);
-			expect(result.results[0].error).toContain("API key not configured");
+			expect(result.results[0].error).toContain("AI provider not configured");
 		});
 
 		it("should return error when no target locales configured", async () => {

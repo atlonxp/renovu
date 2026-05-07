@@ -6,29 +6,23 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Inject,
   Logger,
-  Post,
   Put,
   UseInterceptors,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { UserSession } from '@novu/application-generic';
+import { AI_SETTINGS_REPOSITORY, type IAiSettingsLookup, UserSession } from '@novu/application-generic';
 import { LocalizationGroupRepository, LocalizationRepository } from '@novu/dal';
 import type { UserSessionData } from '@novu/shared';
 import {
   AutoTranslate,
   LocalizationResourceEnum,
-  OpenAIModelEnum,
   TranslationSettingsRepository,
-  OpenAITranslationService,
 } from '@novu/translation';
 
 import { RequireAuthentication } from '../auth/framework/auth.decorator';
 
-/**
- * API Controller for managing organization translation settings
- * This wraps the translation package controller with proper authentication
- */
 @Controller('translation-settings')
 @ApiTags('Translation Settings')
 @UseInterceptors(ClassSerializerInterceptor)
@@ -38,7 +32,8 @@ export class TranslationSettingsController {
 
   constructor(
     private readonly settingsRepository: TranslationSettingsRepository,
-    private readonly openAITranslationService: OpenAITranslationService,
+    @Inject(AI_SETTINGS_REPOSITORY)
+    private readonly aiSettingsRepository: IAiSettingsLookup,
     private readonly localizationGroupRepository: LocalizationGroupRepository,
     private readonly localizationRepository: LocalizationRepository,
     private readonly autoTranslate: AutoTranslate
@@ -47,33 +42,26 @@ export class TranslationSettingsController {
   @Get()
   @ApiOperation({
     summary: 'Get translation settings',
-    description: 'Returns the translation settings for the current organization. API key is masked for security.',
+    description: 'Returns locale settings for the current organization. AI provider lives in /v1/ai-settings.',
   })
   async getSettings(@UserSession() user: UserSessionData) {
-    this.logger.log(`Getting translation settings for org: ${user.organizationId}`);
-
     const settings = await this.settingsRepository.findByOrganization(user.organizationId);
-
-    this.logger.log(`Settings found: ${settings ? 'yes' : 'no'}, hasApiKey: ${settings?.openaiApiKey ? 'yes' : 'no'}`);
 
     if (!settings) {
       return null;
     }
 
-    const response = this.mapToResponseDto(settings);
-    this.logger.log(`Response hasApiKey: ${response.hasApiKey}, apiKeyLast4: ${response.apiKeyLast4}`);
-
-    return response;
+    return this.mapToResponseDto(settings);
   }
 
   @Put()
   @ApiOperation({
     summary: 'Update translation settings',
-    description: 'Creates or updates translation settings for the organization. Supports partial updates.',
+    description: 'Creates or updates locale-related translation settings. AI provider lives in /v1/ai-settings.',
   })
   async saveSettings(
     @UserSession() user: UserSessionData,
-    @Body() dto: { openaiApiKey?: string; openaiModel?: OpenAIModelEnum; defaultLocale?: string; targetLocales?: string[]; localeAliases?: Record<string, string> }
+    @Body() dto: { defaultLocale?: string; targetLocales?: string[]; localeAliases?: Record<string, string> }
   ) {
     this.logger.log(`Updating translation settings for org: ${user.organizationId}`);
 
@@ -86,8 +74,6 @@ export class TranslationSettingsController {
     const newlyAddedLocales = newTargetLocales.filter((locale) => !existingLocales.has(locale));
 
     const settings = await this.settingsRepository.upsertSettings(user.organizationId, {
-      openaiApiKey: dto.openaiApiKey,
-      openaiModel: dto.openaiModel,
       defaultLocale: dto.defaultLocale,
       targetLocales: dto.targetLocales,
       localeAliases: dto.localeAliases,
@@ -96,7 +82,8 @@ export class TranslationSettingsController {
     this.logger.log(`Translation settings updated for org: ${user.organizationId}`);
 
     // Auto-translate for new locales OR fill in empty translations for existing locales
-    if (settings.openaiApiKey && newTargetLocales.length > 0) {
+    const aiSettings = await this.aiSettingsRepository.findByOrganization(user.organizationId);
+    if (aiSettings?.apiKey && newTargetLocales.length > 0) {
       this.triggerAutoTranslateForMissingLocales(user, newTargetLocales, newlyAddedLocales).catch((error) => {
         this.logger.error(`Failed to auto-translate for missing locales: ${error.message}`);
       });
@@ -120,7 +107,6 @@ export class TranslationSettingsController {
     );
 
     try {
-      // Find all enabled localization groups for this organization
       const groups = await this.localizationGroupRepository.findEnabledGroups(
         user.environmentId,
         user.organizationId
@@ -133,14 +119,11 @@ export class TranslationSettingsController {
 
       this.logger.log(`Found ${groups.length} enabled localization groups to check`);
 
-      // Get settings to find default locale
       const settings = await this.settingsRepository.findByOrganization(user.organizationId);
       const defaultLocale = settings?.defaultLocale || 'en_US';
 
-      // Process each group
       for (const group of groups) {
         try {
-          // Get source content from default locale
           const sourceLocalization = await this.localizationRepository.findOne({
             _localizationGroupId: group._id,
             locale: defaultLocale,
@@ -153,7 +136,6 @@ export class TranslationSettingsController {
             continue;
           }
 
-          // Parse source content
           let sourceContent: Record<string, string>;
           try {
             sourceContent =
@@ -169,10 +151,8 @@ export class TranslationSettingsController {
             continue;
           }
 
-          // Find locales that need translation (new locales + existing locales with empty content)
           const localesToTranslate: string[] = [];
 
-          // Get all existing localizations for this group
           const existingLocalizations = await this.localizationRepository.find({
             _localizationGroupId: group._id,
             _environmentId: user.environmentId,
@@ -185,26 +165,21 @@ export class TranslationSettingsController {
           }
 
           for (const targetLocale of allTargetLocales) {
-            // Skip the default/source locale
             if (targetLocale === defaultLocale) {
               continue;
             }
 
-            // Check if this locale needs translation
             const existingContent = existingLocaleMap.get(targetLocale);
 
             if (!existingContent) {
-              // Locale doesn't exist at all
               localesToTranslate.push(targetLocale);
             } else {
-              // Check if content is empty
               try {
                 const parsed = typeof existingContent === 'string' ? JSON.parse(existingContent) : existingContent;
                 if (!parsed || Object.keys(parsed).length === 0) {
                   localesToTranslate.push(targetLocale);
                 }
               } catch {
-                // Invalid JSON, treat as empty
                 localesToTranslate.push(targetLocale);
               }
             }
@@ -219,11 +194,9 @@ export class TranslationSettingsController {
             `Group ${group.resourceId} needs translation for: ${localesToTranslate.join(', ')}`
           );
 
-          // Map resource type
           const resourceType =
             group.resourceType === 'workflow' ? LocalizationResourceEnum.WORKFLOW : LocalizationResourceEnum.LAYOUT;
 
-          // Trigger translation for missing locales
           const result = await this.autoTranslate.execute({
             resourceId: group.resourceId,
             resourceInternalId: group._resourceInternalId,
@@ -247,112 +220,31 @@ export class TranslationSettingsController {
     }
   }
 
-  @Post('test')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: 'Test OpenAI connection',
-    description: 'Tests the OpenAI API connection using the configured API key.',
-  })
-  async testConnection(@UserSession() user: UserSessionData) {
-    this.logger.debug(`Testing OpenAI connection for org: ${user.organizationId}`);
-
-    const settings = await this.settingsRepository.findByOrganization(user.organizationId);
-
-    if (!settings) {
-      return {
-        success: false,
-        message: 'Translation settings not configured',
-        error: 'Please configure translation settings first',
-      };
-    }
-
-    if (!settings.openaiApiKey) {
-      return {
-        success: false,
-        message: 'API key not configured',
-        error: 'Please configure an OpenAI API key',
-      };
-    }
-
-    try {
-      const testResult = await this.openAITranslationService.testConnection(user.organizationId);
-
-      if (testResult.success) {
-        this.logger.log(`OpenAI connection test successful for org: ${user.organizationId}`);
-
-        return {
-          success: true,
-          message: 'Connection successful',
-          model: testResult.model,
-          latencyMs: testResult.latencyMs,
-        };
-      }
-
-      this.logger.warn(`OpenAI connection test failed for org: ${user.organizationId}: ${testResult.error}`);
-
-      return {
-        success: false,
-        message: 'Connection failed',
-        error: testResult.error,
-      };
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      this.logger.error(`OpenAI connection test error for org: ${user.organizationId}: ${errorMessage}`);
-
-      return {
-        success: false,
-        message: 'Connection test failed',
-        error: errorMessage,
-      };
-    }
-  }
-
   @Delete()
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
     summary: 'Delete translation settings',
-    description: 'Removes all translation settings for the organization.',
+    description: 'Removes locale settings for the organization.',
   })
   async clearSettings(@UserSession() user: UserSessionData): Promise<void> {
-    this.logger.log(`Deleting translation settings for org: ${user.organizationId}`);
-
     const deleted = await this.settingsRepository.deleteByOrganization(user.organizationId);
-
     if (!deleted) {
       this.logger.debug(`No translation settings found to delete for org: ${user.organizationId}`);
-    } else {
-      this.logger.log(`Translation settings deleted for org: ${user.organizationId}`);
     }
   }
 
   private mapToResponseDto(settings: {
     _id: string;
     _organizationId: string;
-    openaiApiKey?: string;
-    openaiModel: string;
     defaultLocale: string;
     targetLocales: string[];
     localeAliases?: Record<string, string>;
     createdAt: string;
     updatedAt: string;
   }) {
-    const hasApiKey = !!settings.openaiApiKey && settings.openaiApiKey.length > 0;
-    let apiKeyLast4: string | undefined;
-    if (hasApiKey && settings.openaiApiKey) {
-      apiKeyLast4 = settings.openaiApiKey.slice(-4);
-    }
-
-    const validModels = Object.values(OpenAIModelEnum) as string[];
-    const openaiModel = validModels.includes(settings.openaiModel)
-      ? settings.openaiModel
-      : OpenAIModelEnum.GPT_4O_MINI;
-
     return {
       _id: settings._id,
       _organizationId: settings._organizationId,
-      hasApiKey,
-      apiKeyLast4,
-      openaiModel,
       defaultLocale: settings.defaultLocale,
       targetLocales: settings.targetLocales,
       localeAliases: settings.localeAliases || {},
