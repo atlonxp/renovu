@@ -25,12 +25,12 @@ export function useSettingsCommands(_context: CommandExecutionContext): Command[
     },
     {
       id: 'settings-organization',
-      label: 'Organization Settings',
-      description: 'Manage organization settings and preferences',
+      label: 'Project Settings',
+      description: 'Manage project settings and preferences',
       category: 'settings',
       icon: <RiDatabase2Line />,
       priority: 'medium',
-      keywords: ['organization', 'org', 'settings'],
+      keywords: ['organization', 'org', 'project', 'settings'],
       execute: () => navigate(ROUTES.SETTINGS_ORGANIZATION),
     },
     {

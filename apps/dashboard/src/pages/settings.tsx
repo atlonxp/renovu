@@ -161,7 +161,7 @@ export function SettingsPage() {
             Account
           </TabsTrigger>
           <TabsTrigger variant="regular" value="organization" size="xl">
-            Organization
+            Project
           </TabsTrigger>
           <TabsTrigger variant="regular" value="team" size="xl">
             Team

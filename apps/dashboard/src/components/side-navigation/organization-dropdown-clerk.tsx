@@ -145,7 +145,7 @@ export function OrganizationDropdown() {
     } catch (error) {
       console.error('Failed to switch organization:', error);
       const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
-      showErrorToast(`Unable to switch organizations. ${errorMessage}`, 'Organization Switch Failed');
+      showErrorToast(`Unable to switch projects. ${errorMessage}`, 'Project Switch Failed');
     } finally {
       setIsSwitching(false);
       setSwitchingToId(null);
@@ -253,7 +253,7 @@ export function OrganizationDropdown() {
           }}
         >
           <RiAddCircleLine className="size-4 text-text-sub" />
-          <span className="text-text-sub">Create organization</span>
+          <span className="text-text-sub">Create project</span>
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

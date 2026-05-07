@@ -90,14 +90,14 @@ export function OrganizationProfile({ children, ...rest }: { children?: React.Re
   return (
     <div className="space-y-4">
       <div className="rounded-lg border border-neutral-200 bg-white p-4">
-        <h3 className="mb-3 text-sm font-medium text-gray-900">Organization Name</h3>
+        <h3 className="mb-3 text-sm font-medium text-gray-900">Project Name</h3>
         {isEditing ? (
           <form onSubmit={handleUpdateName} className="space-y-3">
             <Input
               type="text"
               value={orgName}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setOrgName(e.target.value)}
-              placeholder="Organization name"
+              placeholder="Project name"
               required
               disabled={isUpdating}
               className="h-10"
@@ -604,7 +604,7 @@ export function SignUp(_props?: { path?: string; signInUrl?: string; appearance?
     }
 
     if (!organizationName.trim()) {
-      setError('Organization name is required.');
+      setError('Project name is required.');
       setIsLoading(false);
       return;
     }
@@ -718,7 +718,7 @@ export function SignUp(_props?: { path?: string; signInUrl?: string; appearance?
         </div>
         <div>
           <label htmlFor="organizationName" className="mb-1 block text-sm font-medium text-gray-700">
-            Organization Name <span className="text-red-600">*</span>
+            Project Name <span className="text-red-600">*</span>
           </label>
           <Input
             type="text"

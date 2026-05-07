@@ -79,7 +79,7 @@ export function OrganizationSettings({ clerkAppearance }: { clerkAppearance: App
 
       {/* Organization Settings Section */}
       <div>
-        <h1 className="text-label-sm text-text-strong mb-3">Organization Settings</h1>
+        <h1 className="text-label-sm text-text-strong mb-3">Project Settings</h1>
         {EE_AUTH_PROVIDER === 'clerk' ? (
           <OrganizationProfile appearance={clerkAppearance}>
             <OrganizationProfile.Page label="members" />
