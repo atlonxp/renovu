@@ -1,4 +1,5 @@
 export { AuthModule } from './auth.module';
 export { AdminAuthGuard } from './admin-auth.guard';
 export { ApiKeyGuard } from './api-key.strategy';
+export { InstanceAdminGuard } from './instance-admin.guard';
 export { JwtStrategy } from './jwt.strategy';

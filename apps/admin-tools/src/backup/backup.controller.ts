@@ -19,6 +19,7 @@ import { diskStorage } from 'multer';
 import { Request, Response } from 'express';
 import * as fs from 'fs';
 import { AdminAuthGuard } from '../auth/admin-auth.guard';
+import { InstanceAdminGuard } from '../auth/instance-admin.guard';
 import { BackupService } from './backup.service';
 
 const MAX_UPLOAD_SIZE = process.env.ADMIN_TOOLS_MAX_UPLOAD_MB
@@ -36,7 +37,7 @@ function getOrgId(req: Request): string {
 }
 
 @Controller('api')
-@UseGuards(AdminAuthGuard)
+@UseGuards(AdminAuthGuard, InstanceAdminGuard)
 export class BackupController {
   private readonly logger = new Logger(BackupController.name);
 

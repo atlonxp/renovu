@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { RiAddLine, RiUploadLine } from 'react-icons/ri';
+import { RiAddLine, RiAlertLine, RiUploadLine } from 'react-icons/ri';
 import { Button } from '@/components/primitives/button';
 import { Separator } from '@/components/primitives/separator';
 import {
@@ -88,9 +88,20 @@ export function DataManagementSettings() {
       {/* ========== Backup & Restore Section ========== */}
       <section>
         <h2 className="text-label-sm text-text-strong mb-1">Backup & Restore</h2>
-        <p className="text-sm text-foreground-600 mb-4">
+        <p className="text-sm text-foreground-600 mb-3">
           Create full database backups or restore from a previous backup file.
         </p>
+
+        {/* Multi-project warning: backup is whole-instance, not per-project */}
+        <div className="mb-4 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2">
+          <RiAlertLine className="mt-0.5 size-4 shrink-0 text-amber-600" />
+          <div className="text-xs text-amber-900">
+            <strong>Backup includes the entire ReNOVU instance, not just this project.</strong> If
+            you're a member of multiple projects, the file you create here will contain every
+            project's subscribers, workflows, and messages. Only run this if you administer the
+            whole instance. Restore likewise overwrites all projects.
+          </div>
+        </div>
 
         {/* Create backup */}
         <div className="mb-4">
