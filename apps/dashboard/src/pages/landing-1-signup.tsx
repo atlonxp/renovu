@@ -62,7 +62,7 @@ export function Landing1SignUpPage() {
 
   return (
     <>
-      <PageMeta title="Sign up for Novu" />
+      <PageMeta title="Sign up for ReNOVU" />
       <Helmet>
         <meta name="robots" content="noindex, nofollow" />
       </Helmet>

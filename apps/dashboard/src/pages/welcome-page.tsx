@@ -90,7 +90,7 @@ export function WelcomePage(): ReactElement {
 
   return (
     <>
-      <PageMeta title="Get Started with Novu" />
+      <PageMeta title="Get Started with ReNOVU" />
       <DashboardLayout>
         <motion.div className="flex flex-col gap-6 p-4 pt-2 md:gap-8 md:p-9 md:pt-4" variants={pageVariants} initial="hidden" animate="show">
           <motion.div variants={sectionVariants}>

@@ -1,7 +1,7 @@
 import { Helmet } from 'react-helmet-async';
 
 const DEFAULT_DESCRIPTION =
-  'Novu is an open-source notification platform that empowers developers to create robust, multi-channel notifications for web and mobile apps. With powerful workflows, seamless integrations, and a flexible API-first approach, Novu enables product teams to manage notifications without breaking production.';
+  'ReNOVU is a self-hosted notification platform — a custom fork of NOVU with enterprise features unlocked, AI-powered translations, multi-project workspaces, and admin tooling tailored for self-hosted deployments.';
 
 type Props = {
   title?: string;
@@ -9,7 +9,7 @@ type Props = {
 };
 
 export function PageMeta({ title, description }: Props) {
-  const pageTitle = title ? `${title} | Novu` : 'Novu';
+  const pageTitle = title ? `${title} | ReNOVU` : 'ReNOVU';
   const pageDescription = description || DEFAULT_DESCRIPTION;
 
   return (

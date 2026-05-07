@@ -144,7 +144,7 @@ export function AgentsUsecasePage() {
 
   const leftContent = (
     <>
-      <PageMeta title="Experience a demo agent from Novu" />
+      <PageMeta title="Experience a demo agent from ReNOVU" />
       <button
         type="button"
         onClick={() => navigate(ROUTES.USECASE_SELECT)}
