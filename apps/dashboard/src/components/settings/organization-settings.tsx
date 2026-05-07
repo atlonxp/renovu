@@ -4,12 +4,13 @@ import type { Appearance } from '@/utils/self-hosted';
 import { PermissionsEnum } from '@novu/shared';
 import { RiInformation2Line } from 'react-icons/ri';
 import { Tooltip, TooltipContent, TooltipPortal, TooltipTrigger } from '@/components/primitives/tooltip';
-import { EE_AUTH_PROVIDER } from '@/config';
+import { CLERK_PUBLISHABLE_KEY, EE_AUTH_PROVIDER, IS_SELF_HOSTED } from '@/config';
 import { useFetchOrganizationSettings } from '@/hooks/use-fetch-organization-settings';
 import { useUpdateOrganizationSettings } from '@/hooks/use-update-organization-settings';
 import { OrganizationSettings as BetterAuthOrganizationSettings } from '@/utils/better-auth/components/organization-settings';
 import { Protect } from '@/utils/protect';
 import { NovuBrandingSwitch } from './novu-branding-switch';
+import { ProjectsManagementSelfHosted } from './projects-management-self-hosted';
 
 export function OrganizationSettings({ clerkAppearance }: { clerkAppearance: Appearance }) {
   const { data: organizationSettings, isLoading: isLoadingSettings } = useFetchOrganizationSettings();
@@ -23,6 +24,7 @@ export function OrganizationSettings({ clerkAppearance }: { clerkAppearance: App
 
   const removeNovuBranding = organizationSettings?.data?.removeNovuBranding;
   const isUpdating = updateOrganizationSettings.isPending;
+  const useSelfHostedAuth = IS_SELF_HOSTED && !CLERK_PUBLISHABLE_KEY && EE_AUTH_PROVIDER === 'clerk';
 
   return (
     <div className="space-y-8">
@@ -80,7 +82,9 @@ export function OrganizationSettings({ clerkAppearance }: { clerkAppearance: App
       {/* Organization Settings Section */}
       <div>
         <h1 className="text-label-sm text-text-strong mb-3">Project Settings</h1>
-        {EE_AUTH_PROVIDER === 'clerk' ? (
+        {useSelfHostedAuth ? (
+          <OrganizationProfile />
+        ) : EE_AUTH_PROVIDER === 'clerk' ? (
           <OrganizationProfile appearance={clerkAppearance}>
             <OrganizationProfile.Page label="members" />
           </OrganizationProfile>
@@ -88,6 +92,8 @@ export function OrganizationSettings({ clerkAppearance }: { clerkAppearance: App
           <BetterAuthOrganizationSettings />
         )}
       </div>
+
+      {useSelfHostedAuth && <ProjectsManagementSelfHosted />}
     </div>
   );
 }

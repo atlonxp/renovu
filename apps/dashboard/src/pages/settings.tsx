@@ -17,6 +17,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/primitive
 import { AiSettings } from '@/components/settings/ai-settings';
 import { DataManagementSettings } from '@/components/settings/data-management-settings';
 import { OrganizationSettings } from '@/components/settings/organization-settings';
+import { TeamSettingsSelfHosted } from '@/components/settings/team-settings-self-hosted';
 import { CLERK_PUBLISHABLE_KEY, EE_AUTH_PROVIDER, IS_SELF_HOSTED } from '@/config';
 import { useFeatureFlag } from '@/hooks/use-feature-flag';
 import { useHasPermission } from '@/hooks/use-has-permission';
@@ -250,7 +251,7 @@ export function SettingsPage() {
                     />
                   )}
                   {useSelfHostedAuth ? (
-                    <SelfHostedOrganizationProfile />
+                    <TeamSettingsSelfHosted />
                   ) : EE_AUTH_PROVIDER === 'clerk' ? (
                     <OrganizationProfile appearance={clerkAppearance}>
                       <OrganizationProfile.Page label="general" />

@@ -97,10 +97,6 @@ export default defineConfig(({ mode }) => {
         ...(isCommunitySelHosted
           ? {
               '@/context/region': path.resolve(__dirname, './src/context/region/index.self-hosted.ts'),
-              '@/components/side-navigation/organization-dropdown-clerk': path.resolve(
-                __dirname,
-                './src/utils/self-hosted/organization-switcher.tsx'
-              ),
             }
           : eeAuthProvider === 'better-auth'
             ? {

@@ -1,17 +1,19 @@
-import { Body, ClassSerializerInterceptor, Controller, Get, Patch, Post, Put, UseInterceptors } from '@nestjs/common';
-import { ApiExcludeController, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Body, ClassSerializerInterceptor, Controller, Delete, Get, Param, Patch, Post, Put, UseInterceptors } from '@nestjs/common';
+import { ApiExcludeController, ApiExcludeEndpoint, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
 import { OrganizationEntity } from '@novu/dal';
 import { ExternalApiAccessible, RequirePermissions } from '@novu/application-generic';
-import { PermissionsEnum, UserSessionData } from '@novu/shared';
+import { MemberRoleEnum, PermissionsEnum, UserSessionData } from '@novu/shared';
 import { RequireAuthentication } from '../auth/framework/auth.decorator';
 import { ApiCommonResponses, ApiResponse } from '../shared/framework/response.decorator';
 import { UserSession } from '../shared/framework/user.decorator';
 import { CreateOrganizationDto } from './dtos/create-organization.dto';
 import { IGetMyOrganizationDto } from './dtos/get-my-organization.dto';
 import { GetOrganizationSettingsDto } from './dtos/get-organization-settings.dto';
+import { MemberResponseDto } from './dtos/member-response.dto';
 import { OrganizationBrandingResponseDto, OrganizationResponseDto } from './dtos/organization-response.dto';
 import { RenameOrganizationDto } from './dtos/rename-organization.dto';
 import { UpdateBrandingDetailsDto } from './dtos/update-branding-details.dto';
+import { UpdateMemberRolesDto } from './dtos/update-member-roles.dto';
 import { UpdateOrganizationSettingsDto } from './dtos/update-organization-settings.dto';
 import { CreateOrganizationCommand } from './usecases/create-organization/create-organization.command';
 import { CreateOrganization } from './usecases/create-organization/create-organization.usecase';
@@ -21,6 +23,12 @@ import { GetOrganizationSettingsCommand } from './usecases/get-organization-sett
 import { GetOrganizationSettings } from './usecases/get-organization-settings/get-organization-settings.usecase';
 import { GetOrganizationsCommand } from './usecases/get-organizations/get-organizations.command';
 import { GetOrganizations } from './usecases/get-organizations/get-organizations.usecase';
+import { ChangeMemberRoleCommand } from './usecases/membership/change-member-role/change-member-role.command';
+import { ChangeMemberRole } from './usecases/membership/change-member-role/change-member-role.usecase';
+import { GetMembersCommand } from './usecases/membership/get-members/get-members.command';
+import { GetMembers } from './usecases/membership/get-members/get-members.usecase';
+import { RemoveMemberCommand } from './usecases/membership/remove-member/remove-member.command';
+import { RemoveMember } from './usecases/membership/remove-member/remove-member.usecase';
 import { RenameOrganization } from './usecases/rename-organization/rename-organization.usecase';
 import { RenameOrganizationCommand } from './usecases/rename-organization/rename-organization-command';
 import { UpdateBrandingDetailsCommand } from './usecases/update-branding-details/update-branding-details.command';
@@ -42,7 +50,10 @@ export class EEOrganizationController {
     private renameOrganizationUsecase: RenameOrganization,
     private getOrganizationSettingsUsecase: GetOrganizationSettings,
     private updateOrganizationSettingsUsecase: UpdateOrganizationSettings,
-    private getOrganizationsUsecase: GetOrganizations
+    private getOrganizationsUsecase: GetOrganizations,
+    private getMembersUsecase: GetMembers,
+    private removeMemberUsecase: RemoveMember,
+    private changeMemberRoleUsecase: ChangeMemberRole
   ) {}
 
   /**
@@ -173,6 +184,60 @@ export class EEOrganizationController {
         removeNovuBranding: body.removeNovuBranding,
         defaultLocale: body.defaultLocale,
         targetLocales: body.targetLocales,
+      })
+    );
+  }
+
+  @Get('/members')
+  @ExternalApiAccessible()
+  @ApiResponse(MemberResponseDto, 200, true)
+  @ApiOperation({ summary: 'Fetch all members of current organization' })
+  async listOrganizationMembers(@UserSession() user: UserSessionData) {
+    return await this.getMembersUsecase.execute(
+      GetMembersCommand.create({
+        user,
+        userId: user._id,
+        organizationId: user.organizationId,
+      })
+    );
+  }
+
+  @Delete('/members/:memberId')
+  @ExternalApiAccessible()
+  @ApiResponse(MemberResponseDto)
+  @ApiOperation({ summary: 'Remove a member from organization' })
+  @ApiParam({ name: 'memberId', type: String, required: true })
+  async removeMember(@UserSession() user: UserSessionData, @Param('memberId') memberId: string) {
+    return await this.removeMemberUsecase.execute(
+      RemoveMemberCommand.create({
+        userId: user._id,
+        organizationId: user.organizationId,
+        memberId,
+      })
+    );
+  }
+
+  @Put('/members/:memberId/roles')
+  @ExternalApiAccessible()
+  @ApiExcludeEndpoint()
+  @ApiResponse(MemberResponseDto)
+  @ApiOperation({ summary: 'Update a member role to admin' })
+  @ApiParam({ name: 'memberId', type: String, required: true })
+  async updateMemberRoles(
+    @UserSession() user: UserSessionData,
+    @Param('memberId') memberId: string,
+    @Body() body: UpdateMemberRolesDto
+  ) {
+    if (body.role !== MemberRoleEnum.OSS_ADMIN) {
+      throw new Error('Only admin role can be assigned to a member');
+    }
+
+    return await this.changeMemberRoleUsecase.execute(
+      ChangeMemberRoleCommand.create({
+        memberId,
+        role: MemberRoleEnum.OSS_ADMIN,
+        userId: user._id,
+        organizationId: user.organizationId,
       })
     );
   }

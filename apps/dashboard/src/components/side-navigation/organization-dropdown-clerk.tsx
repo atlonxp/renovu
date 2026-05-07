@@ -212,7 +212,7 @@ export function OrganizationDropdown() {
           <span className="min-w-0 flex-1 truncate text-left text-sm font-medium text-foreground-950">
             {currentOrganization.name}
           </span>
-          <RiArrowDownSLine className="ml-auto size-4 shrink-0 opacity-0 transition-opacity duration-300 group-hover:opacity-100 group-focus:opacity-100" />
+          <RiArrowDownSLine className="ml-auto size-4 shrink-0 text-foreground-400 opacity-60 transition-opacity duration-300 group-hover:opacity-100 group-focus:opacity-100" />
         </button>
       </DropdownMenuTrigger>
 
