@@ -13,6 +13,8 @@ import {
 
 import bodyParser from 'body-parser';
 import helmet from 'helmet';
+import { mongoose } from '@novu/dal';
+import { runPendingMigrations } from './migrations-runtime/run-pending-migrations';
 import { ResponseInterceptor } from './app/shared/framework/response.interceptor';
 import { setupSwagger } from './app/shared/framework/swagger/swagger.controller';
 
@@ -171,6 +173,27 @@ export async function bootstrap(
     });
     process.exit(1);
   });
+
+  if (process.env.SKIP_MIGRATIONS_ON_STARTUP !== 'true') {
+    const db = mongoose.connection.db;
+    if (db) {
+      try {
+        await runPendingMigrations(db, {
+          info: (msg) => logger.info(msg),
+          warn: (msg) => logger.warn(msg),
+          error: (msg) => logger.error(msg),
+        });
+      } catch (err) {
+        logger.fatal({ err, message: 'Pending migration failed — aborting startup' });
+        await app.close();
+        process.exit(1);
+      }
+    } else {
+      logger.warn('No active mongoose connection at bootstrap — skipping migration runner');
+    }
+  } else {
+    logger.info('SKIP_MIGRATIONS_ON_STARTUP=true — skipping migration runner');
+  }
 
   await app.listen(process.env.PORT || 3000);
 

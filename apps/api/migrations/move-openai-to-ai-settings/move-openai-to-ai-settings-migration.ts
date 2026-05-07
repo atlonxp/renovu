@@ -5,22 +5,14 @@ import { PinoLogger } from '@novu/application-generic';
 import { mongoose } from '@novu/dal';
 
 import { AppModule } from '../../src/app.module';
-
-interface LegacyTranslationSettingsDoc {
-  _id: mongoose.Types.ObjectId;
-  _organizationId: mongoose.Types.ObjectId;
-  openaiApiKey?: string;
-  openaiModel?: string;
-}
+import { moveOpenAiToAiSettingsCore } from '../../src/migrations-runtime/move-openai-to-ai-settings/core';
 
 /**
- * Moves `openaiApiKey` / `openaiModel` from `translationsettings` rows into
- * the new `aisettings` collection.
+ * CLI entrypoint — boots the full Nest app, runs the core, exits.
  *
- * - Idempotent: skips orgs that already have an `aisettings` row.
- * - Encrypted blobs are portable across collections (same `STORE_ENCRYPTION_KEY`).
- * - Source rows are unset on success so locale data is preserved but stale
- *   AI fields are removed.
+ * In production, the same migration runs automatically on API startup via
+ * `apps/api/src/migrations-runtime/run-pending-migrations.ts`. Use this CLI
+ * only for ad-hoc backfills or local dev runs.
  */
 export async function moveOpenAiToAiSettingsMigration() {
   const app = await NestFactory.create(AppModule, { logger: false });
@@ -35,56 +27,7 @@ export async function moveOpenAiToAiSettingsMigration() {
     throw new Error('No active mongoose connection');
   }
 
-  const translationSettingsCollection = db.collection<LegacyTranslationSettingsDoc>('translationsettings');
-  const aiSettingsCollection = db.collection<{
-    _organizationId: mongoose.Types.ObjectId;
-    provider: string;
-    apiKey: string;
-    model: string;
-    createdAt: Date;
-    updatedAt: Date;
-  }>('aisettings');
-
-  const sourceDocs = await translationSettingsCollection
-    .find({ openaiApiKey: { $exists: true, $ne: '' } })
-    .toArray();
-
-  let migrated = 0;
-  let skipped = 0;
-  const total = sourceDocs.length;
-
-  for (const doc of sourceDocs) {
-    const orgId = doc._organizationId;
-
-    const existing = await aiSettingsCollection.findOne({ _organizationId: orgId });
-    if (existing) {
-      logger.info(`org ${orgId.toString()} already has aisettings — skipping`);
-      skipped += 1;
-      await translationSettingsCollection.updateOne(
-        { _id: doc._id },
-        { $unset: { openaiApiKey: 1, openaiModel: 1 } }
-      );
-      continue;
-    }
-
-    const now = new Date();
-    await aiSettingsCollection.insertOne({
-      _organizationId: orgId,
-      provider: 'openai',
-      apiKey: doc.openaiApiKey ?? '',
-      model: doc.openaiModel || 'gpt-4o-mini',
-      createdAt: now,
-      updatedAt: now,
-    });
-
-    await translationSettingsCollection.updateOne(
-      { _id: doc._id },
-      { $unset: { openaiApiKey: 1, openaiModel: 1 } }
-    );
-
-    migrated += 1;
-    logger.info(`migrated org ${orgId.toString()}`);
-  }
+  const { migrated, skipped, total } = await moveOpenAiToAiSettingsCore(db, logger);
 
   logger.info(`done. migrated=${migrated} skipped=${skipped} total=${total}`);
 
