@@ -21,9 +21,17 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## CLAUDE ROLE
+
+You are senior software and full-stack engineer with deep expertise in TypeScript, Node.js, React, and monorepo architectures. You are a helpful and precise coding assistant for the ReNOVU notification infrastructure platform. You have deep knowledge of the codebase, architecture, and development practices. Your goal is to assist developers by providing accurate code examples, explanations, and guidance based on the project's conventions and structure.
+
+Your role must not assume any knowledge beyond what is contained in this repository. Always refer to the code, documentation, and comments within this project when generating responses. If a question cannot be answered with the information available in the codebase, respond with "I don't know" rather than making assumptions. When it comes to code generation, always follow the project's coding conventions and patterns as outlined in the documentation and existing code. When testing code, use headless testing frameworks and ensure that tests are deterministic and do not rely on external state or services while using headed browsers for E2E tests in cases where user interactions and UI rendering are involved.
+
 ## Project Overview
 
-Novu is a notification infrastructure platform built as a **monorepo using Nx** with **pnpm workspaces**. It provides a unified API for multi-channel notifications (email, SMS, push, in-app, chat) with an embeddable inbox component, workflow engine, and comprehensive provider ecosystem.
+ReNOVU is a notification infrastructure platform built as a **monorepo using Nx** with **pnpm workspaces**. It is a custom fork of the upstream NOVU notification platform, with enterprise features unlocked, AI translation, multi-project support, and admin tooling for self-hosted deployments. It provides a unified API for multi-channel notifications (email, SMS, push, in-app, chat) with an embeddable inbox component, workflow engine, and comprehensive provider ecosystem.
+
+For a full catalog of where ReNOVU diverges from upstream NOVU (file-by-file), see [`RENOVU_FEATURES.md`](./RENOVU_FEATURES.md). Read it before merging from upstream.
 
 ## Architecture
 
@@ -51,7 +59,7 @@ Novu is a notification infrastructure platform built as a **monorepo using Nx** 
 - `react` - React notification components (inbox, preferences)
 - `providers` - Channel integrations (email, SMS, push, chat providers)
 - `shared` - Common types, constants, utilities
-- `translation` - AI-powered translation services (ReNovu extension)
+- `translation` - AI-powered translation services (ReNOVU extension)
 
 ## Development Commands
 
@@ -186,27 +194,42 @@ pnpm typecheck      # Run TypeScript checks
 - Each user can be a member of multiple Organizations (= multiple Projects). They are isolated silos: separate envs, separate API keys, separate members per org.
 - Switching projects: `POST /v1/auth/organizations/:id/switch` returns a new JWT scoped to the target org. Dashboard stores the new JWT and hard-reloads to drop per-org caches.
 
-## ReNovu Extensions
+## ReNOVU Extensions
+
+For the full file-by-file catalog of how ReNOVU diverges from upstream NOVU, see [`RENOVU_FEATURES.md`](./RENOVU_FEATURES.md). The summaries below are quick references — that file is the source of truth.
+
+### AI Settings Module (`apps/api/src/app/ai-settings`)
+
+Provider-agnostic AI configuration with `{ provider, apiKey, model }` schema. Powers AI translation, AI workflow generation, AI layout generation, and AI step generation through a single module.
+
+**API Endpoints:**
+- `GET /v1/ai-settings` — fetch (key never returned, only `apiKeyLast4`)
+- `PUT /v1/ai-settings` — create/update
+- `POST /v1/ai-settings/test` — test connection
+
+**Configuration:** Dashboard → Settings → AI → enter OpenAI API key + pick a model. The same key powers all AI features.
 
 ### Translation Package (`packages/translation`)
 
-AI-powered translation feature for self-hosted deployments, replacing enterprise `@novu/ee-translation`.
+AI-powered translation feature for self-hosted deployments, replacing enterprise `@novu/ee-translation`. Reads its API key/model from the AI Settings module via DI token.
 
 **Key Features:**
-- OpenAI GPT integration (gpt-4o-mini, gpt-4o, gpt-4-turbo)
+- OpenAI GPT integration (gpt-4o-mini through gpt-5.5)
 - Variable tokenization to protect `{{variables}}` during translation
 - HTML validation for translated content
-- Organization-level API key management (AES-256 encrypted)
 - Async translation via Bull queue (optional)
 
 **API Endpoints:**
-- `GET/PUT/DELETE /v1/translation-settings` - Manage organization settings
-- `POST /v1/translation-settings/test` - Test OpenAI connection
-- `POST /v1/translations/auto-translate` - Trigger translation (sync or async)
+- `GET/PUT/DELETE /v1/translation-settings` — manage locale config
+- `POST /v1/translations/auto-translate` — trigger translation (sync or async)
 
-**Configuration:**
-1. Dashboard → Translations → Settings button
-2. Enter OpenAI API key
-3. Select model and configure locales
+### Multi-Project & Self-Hosted Team Management
 
-See `packages/translation/README.md` for detailed documentation.
+- One user, multiple Organizations (Projects). Switch via sidebar dropdown or `Settings → Project`
+- `POST /v1/auth/organizations/:id/switch` mints a JWT scoped to the target project
+- Self-hosted team management at `Settings → Team`: invite by email, members table, remove with confirmation
+- Member endpoints (`GET/DELETE /v1/organizations/members[/:id]`, `PUT .../roles`) live on `EEOrganizationController` since the OSS controller is excluded in self-hosted mode
+
+### Admin Tools (`apps/admin-tools/`)
+
+NestJS microservice exposing backup/restore (NDJSON streaming, audit collections excluded by default) and workflow export/import (full ID remapping, conflict strategies). Surfaced in the dashboard at `Settings → Data Management`.

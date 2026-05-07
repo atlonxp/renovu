@@ -1,22 +1,31 @@
-<h1 align="center">ReNovu</h1>
+<h1 align="center">ReNOVU</h1>
 
 <p align="center">
-  <strong>Re</strong>verse-Engineered <strong>Novu</strong> — Self-hosted notifications with enterprise features unlocked
+  <strong>Re</strong>verse-Engineered <strong>NOVU</strong> — Self-hosted notifications with enterprise features unlocked
 </p>
 
 <p align="center">
-  <em>Like <a href="https://github.com/ReVanced">ReVanced</a> for YouTube, but for <a href="https://novu.co">Novu</a> notifications</em>
+  <em>A custom fork of <a href="https://novu.co">NOVU</a> with better features and first-class self-hosting</em>
 </p>
 
 <p align="center">
   <a href="#quick-start">Quick Start</a> •
-  <a href="#whats-unlocked">What's Unlocked</a> •
+  <a href="#whats-different">What's Different</a> •
   <a href="#admin-tools">Admin Tools</a> •
   <a href="#ai-translation">AI Translation</a> •
+  <a href="#multi-project">Multi-Project</a> •
   <a href="#production-deployment">Production</a> •
   <a href="#testing">Testing</a> •
   <a href="#changelog">Changelog</a>
 </p>
+
+---
+
+## What is ReNOVU?
+
+ReNOVU is a customized fork of the upstream NOVU notification platform, rebuilt for self-hosted deployments. It removes enterprise-tier paywalls, adds first-class auth without Clerk, ships an AI translation system, multi-project support, and a backup/export tooling layer — all under a single open codebase.
+
+For a complete catalog of what differs from upstream NOVU (with file paths, useful when merging upstream commits), see [`RENOVU_FEATURES.md`](./RENOVU_FEATURES.md).
 
 ---
 
@@ -28,19 +37,22 @@
 
 ---
 
-## Why ReNovu?
+## What's Different
 
-Novu is an excellent open-source notification infrastructure, but many features are locked behind enterprise tiers. **ReNovu** reverse-engineers these restrictions to give self-hosters the full experience:
+NOVU is excellent open-source notification infrastructure, but many features are locked behind enterprise tiers and the dashboard hard-depends on Clerk. **ReNOVU** unlocks the lot for self-hosters and adds capabilities that don't exist upstream:
 
-| Feature | Novu Free | Novu Enterprise | ReNovu |
+| Feature | NOVU Free | NOVU Enterprise | ReNOVU |
 |---------|:---------:|:---------------:|:------:|
 | Unlimited workflows | Limited | Yes | **Yes** |
 | Custom layouts | 1 max | Unlimited | **Unlimited** |
 | Remove branding | No | Yes | **Yes** |
-| Multi-org support | No | Yes | **Yes** |
+| Multi-project per user | No | Limited | **Yes** |
 | AI Translation | No | $250+/mo | **Yes** |
+| AI Settings (provider-agnostic) | No | No | **Yes** |
+| Self-hosted Team management | No | No | **Yes** |
 | Backup & Restore | No | No | **Yes** |
 | Workflow Export/Import | No | No | **Yes** |
+| Drop-in self-hosted auth (no Clerk) | No | No | **Yes** |
 | Priority support | No | Yes | Community |
 
 ## Quick Start
@@ -89,72 +101,100 @@ Open [http://localhost:4000](http://localhost:4000) and create your first accoun
 
 **Services:**
 
-- **Dashboard** — React SPA (Vite) for managing workflows, layouts, and subscribers
-- **API** — NestJS REST API handling auth, workflows, and notification orchestration
+- **Dashboard** — React SPA (Vite) for managing workflows, layouts, subscribers, projects, and team members
+- **API** — NestJS REST API handling auth, workflows, AI settings, and notification orchestration
 - **Worker** — Background job processor for sending notifications across channels
 - **WebSocket** — Real-time notification delivery to connected clients
 - **Admin Tools** — NestJS service for backup/restore and workflow export/import
 - **MongoDB** — Primary data store
 - **Redis** — Queue broker, caching, and pub/sub
 
-## What's Unlocked
+## Naming convention: Organization vs Project
 
-### Tier System
-All organizations automatically receive **UNLIMITED** tier:
-- Unlimited workflows and notification templates
-- Unlimited team members
-- Unlimited API calls
-- All premium features enabled
+> **Code, DB, API, JWT all use "Organization". The dashboard UI says "Project".**
 
-### Email Layouts
-- No plan-based limits — create unlimited layouts
-- "Need more layouts? Contact Sales" paywall removed for self-hosted
+ReNOVU keeps the upstream identifier names intact for compatibility with NOVU SDKs, but the user-facing dashboard talks about "Projects":
 
-### Branding Freedom
-- "Powered by Novu" banners removed
-- Inbox component footer hidden
-- Full white-label capability
+- Backend (entities, repos, controllers, JWT claims, MongoDB collections): `OrganizationEntity`, `_organizationId`, `/v1/organizations/...`, `organizationId` claim. **Never rename.**
+- User-visible dashboard copy: "Project". Strings in JSX text, placeholders, button labels, page titles, toasts.
+- Each user can be a member of multiple Organizations (= multiple Projects). They are isolated silos: separate envs, separate API keys, separate members per org.
 
-### Self-Hosted Auth
-- No Clerk dependency
-- JWT-based authentication
-- Auto-organization creation on first login
+## Multi-Project
+
+Self-hosted ReNOVU supports multiple isolated projects per user (a feature only partially exposed upstream).
+
+- **Sidebar dropdown** — every page has a project switcher with hover affordance, showing all projects you're a member of plus a "Create project" link
+- **`/auth/organization-list`** — full project-list page lets you browse, create, and switch projects with a JWT swap + hard reload
+- **`POST /v1/auth/organizations/:id/switch`** — mints a fresh JWT scoped to the target project. Caller must be a member or 401
+- **Settings → Project** — list your projects, switch with one click, link to project creation
+- **Settings → Team** — invite teammates by email, see active members + pending invites, resend or revoke
+
+Tenant isolation is enforced via `_organizationId` filtering on all 36+ entities — there is no leakage path between projects.
+
+## Self-Hosted Auth
+
+ReNOVU replaces the upstream Clerk dependency with a JWT-based auth shim and email/password flow.
+
+- **No Clerk required** — the `apps/dashboard/src/utils/self-hosted/` shim re-implements `useAuth`, `useOrganization`, `useOrganizationList`, `useUser`, `useClerk` to draw from a JWT in localStorage
+- **Email + password registration** — `POST /v1/auth/register` returns a JWT
+- **Auto-organization on first signup** — first user becomes OSS_ADMIN of a default project
+- **Vite alias trick** — `@/context/region` is aliased to a self-hosted no-op when `VITE_SELF_HOSTED=true`, dropping Clerk-dependent cloud bundles entirely
+
+## AI Translation
+
+ReNOVU includes a fully working AI-powered translation system that replaces NOVU's enterprise-gated `@novu/ee-translation` package.
+
+### Features
+
+- **OpenAI GPT integration** — supports gpt-4o-mini through gpt-5.5 model lineup
+- **Variable protection** — `{{subscriber.firstName}}` and other Handlebars variables are tokenized before translation, preventing corruption
+- **HTML validation** — translated content is validated for structural integrity
+- **Organization-level settings** — API keys encrypted with AES-256, configurable per project
+- **Locale aliases** — map non-standard locale codes (e.g., `zh-hans` → `zh_CN`)
+- **Async translation** — optional Bull queue processing for large batches
+- **Dashboard UI** — full settings panel, translate button, and preview in the dashboard
+
+### Configuration
+
+Open Dashboard → **Settings → AI** (the new dedicated AI Settings tab, ReNOVU-only) → enter your OpenAI API key, choose a model, save. The same key powers AI translation, AI workflow generation, AI layout generation, and AI step generation.
+
+### API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/v1/ai-settings` | Get organization AI settings (key never returned, only `apiKeyLast4`) |
+| PUT | `/v1/ai-settings` | Create/update settings (provider, apiKey, model) |
+| POST | `/v1/ai-settings/test` | Test provider connection |
+| GET | `/v1/translation-settings` | Get locale config (defaultLocale, targetLocales, aliases) |
+| PUT | `/v1/translation-settings` | Update locale config |
+| POST | `/v1/translations/auto-translate` | Trigger translation |
 
 ## Admin Tools
 
-Admin Tools (`apps/admin-tools/`) is a NestJS microservice providing data management capabilities via the Dashboard's **Settings > Data Management** tab.
+Admin Tools (`apps/admin-tools/`) is a NestJS microservice providing data management capabilities via the Dashboard's **Settings → Data Management** tab.
 
 ### Backup & Restore
 
-- **Create Backup** — Full MongoDB dump as a `.tar.gz` archive (25 collections)
-- **List/Download/Delete** — Manage backup files (scoped per organization)
-- **Restore** — Upload a backup file to restore the database
+- **Create Backup** — full MongoDB dump as a `.tar.gz` archive (audit/activity collections excluded by default to keep size sane)
+- **List/Download/Delete** — manage backup files (scoped per organization)
+- **Restore** — upload a backup file to restore the database
   - Auto-creates a pre-restore backup before overwriting
   - Supports dry-run mode for previewing what would be restored
-- High-volume collections (jobs, notifications, messages) use cursor-based NDJSON streaming
+- High-volume collections (jobs, notifications, messages) use cursor-based NDJSON streaming to avoid V8 heap OOM
 - Batch inserts (5000 docs/batch) for efficient restore
 
 ### Workflow Export & Import
 
 Export workflows from one environment and import into another — enables migration between local, staging, and production.
 
-**Export** captures the full dependency graph:
-- Workflows with steps and variants
-- Message templates
-- Layouts (v1 and v2) with content (control values)
-- Notification groups and feeds
+**Export** captures the full dependency graph: workflows with steps and variants, message templates, layouts (v1 and v2) with content (control values), notification groups and feeds.
 
-**Import** with full ID remapping:
-- All internal references (`_templateId`, `_layoutId`, `_workflowId`, etc.) remapped to new IDs
-- Conflict strategies: `skip` existing or `overwrite` existing
-- Layout control values (v2 email content) properly transferred
-- Environment and organization IDs reassigned to the target
+**Import** with full ID remapping: all internal references (`_templateId`, `_layoutId`, `_workflowId`, etc.) remapped to new IDs. Conflict strategies: `skip` existing or `overwrite` existing. Layout control values (v2 email content) properly transferred. Environment and organization IDs reassigned to the target.
 
 ### Authentication
 
-Admin Tools supports two auth methods:
-- **JWT** — Same token from Dashboard login (automatic)
-- **API Key** — Set `ADMIN_API_KEY` env var for headless/CI usage
+- **JWT** — same token from Dashboard login (automatic)
+- **API Key** — set `ADMIN_API_KEY` env var for headless/CI usage
 
 ### CLI Scripts
 
@@ -165,38 +205,6 @@ node dist/cli/restore.js <file>  # Restore from file
 node dist/cli/export.js          # Export workflows
 node dist/cli/import.js <file>   # Import workflows
 ```
-
-## AI Translation
-
-ReNovu includes a fully working AI-powered translation system that replaces Novu's enterprise-gated `@novu/ee-translation` package.
-
-### Features
-
-- **OpenAI GPT Integration** — supports gpt-4o-mini, gpt-4o, gpt-4-turbo
-- **Variable Protection** — `{{subscriber.firstName}}` and other Handlebars variables are tokenized before translation, preventing corruption
-- **HTML Validation** — translated content is validated for structural integrity
-- **Organization-Level Settings** — API keys encrypted with AES-256, configurable per organization
-- **Locale Aliases** — map non-standard locale codes (e.g., `zh-hans` → `zh_CN`)
-- **Async Translation** — optional Bull queue processing for large batches
-- **Dashboard UI** — full settings panel, translate button, and preview in the dashboard
-
-### Configuration
-
-1. Open Dashboard → **Translations** → **Settings**
-2. Enter your OpenAI API key
-3. Select model and configure target locales
-4. Click **Auto-Translate** on any workflow
-
-### API Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/v1/translation-settings` | Get organization settings |
-| PUT | `/v1/translation-settings` | Create/update settings |
-| POST | `/v1/translation-settings/test` | Test OpenAI connection |
-| DELETE | `/v1/translation-settings` | Delete settings |
-| POST | `/v1/translations/auto-translate` | Trigger translation |
-| GET | `/v1/translations/status/:jobId` | Check async job status |
 
 ## Production Deployment
 
@@ -237,12 +245,13 @@ docker compose -f docker-compose.production.yml up -d
 |----------|-------------|
 | `JWT_SECRET` | JWT signing secret |
 | `STORE_ENCRYPTION_KEY` | 32-character encryption key |
-| `NOVU_SECRET_KEY` | Novu secret key |
+| `NOVU_SECRET_KEY` | NOVU secret key (kept as-is for SDK compatibility) |
 | `REDIS_PASSWORD` | Redis password |
-| `API_EXTERNAL_URL` | Browser-accessible API URL (e.g., `https://novu-api.example.com`) |
+| `API_EXTERNAL_URL` | Browser-accessible API URL (e.g., `https://renovu-api.example.com`) |
 | `WS_EXTERNAL_URL` | Browser-accessible WebSocket URL |
 | `DASHBOARD_EXTERNAL_URL` | Browser-accessible dashboard URL |
 | `ADMIN_TOOLS_EXTERNAL_URL` | Browser-accessible admin tools URL |
+| `VITE_SELF_HOSTED` | Set to `true` to enable the self-hosted dashboard auth shim |
 
 ### Coolify Deployment
 
@@ -251,94 +260,25 @@ Use `docker-compose.coolify.yml` for [Coolify](https://coolify.io) deployments:
 1. Create a new service in Coolify using Docker Compose
 2. Point to this repo's `docker-compose.coolify.yml` on the `release` branch
 3. Set the required environment variables in Coolify's UI
-4. Set `RENOVU_DATA_DIR` for persistent storage (e.g., `/home/arokago/renovu`)
+4. Set `RENOVU_DATA_DIR` for persistent storage (e.g., `/home/user/renovu`)
 5. Coolify handles Traefik routing, TLS, and networking automatically
 
 > **Important:** `docker-compose.coolify.yml` has no custom networks or host port bindings. Coolify creates a shared network for all services. Adding a second network causes Traefik to randomly pick the wrong one, resulting in 504 errors.
 
-### Configuration
-
-```bash
-# Security (CHANGE IN PRODUCTION!)
-JWT_SECRET=your-super-secret-jwt-key
-STORE_ENCRYPTION_KEY=32-character-encryption-key!!
-NOVU_SECRET_KEY=your-novu-secret-key
-
-# Database
-MONGO_USER=novu
-MONGO_PASSWORD=secure-password
-REDIS_PASSWORD=secure-redis-password
-
-# External URLs (for production with reverse proxy)
-API_EXTERNAL_URL=https://novu-api.example.com
-WS_EXTERNAL_URL=https://novu-ws.example.com
-DASHBOARD_EXTERNAL_URL=https://novu.example.com
-ADMIN_TOOLS_EXTERNAL_URL=https://novu-admin.example.com
-
-# Data directory (for persistent volumes in production)
-RENOVU_DATA_DIR=/home/user/renovu
-
-# Optional
-PM2_INSTANCES=max          # PM2 cluster mode (default: max = CPU cores)
-IMAGE_TAG=latest           # GHCR image tag
-ADMIN_API_KEY=your-key     # API key for headless admin-tools access
-```
-
 ## Providers
 
-ReNovu supports 50+ notification providers out of the box:
+ReNOVU supports 50+ notification providers out of the box (inherited from upstream NOVU):
 
 <details>
-<summary><strong>Email Providers</strong></summary>
+<summary><strong>Email / SMS / Push / Chat (collapsed)</strong></summary>
 
-- Sendgrid
-- Mailgun
-- Amazon SES
-- Postmark
-- SMTP (any)
-- Mailjet
-- Mandrill
-- Brevo (Sendinblue)
-- MailerSend
-- Resend
-- SparkPost
-- Outlook 365
+**Email:** Sendgrid, Mailgun, Amazon SES, Postmark, SMTP, Mailjet, Mandrill, Brevo (Sendinblue), MailerSend, Resend, SparkPost, Outlook 365.
 
-</details>
+**SMS:** Twilio, Plivo, Amazon SNS, Vonage (Nexmo), Telnyx, Termii, Gupshup, Clickatell, Infobip.
 
-<details>
-<summary><strong>SMS Providers</strong></summary>
+**Push:** Firebase Cloud Messaging (FCM), Expo, Apple Push Notification Service (APNS), OneSignal, Pushpad.
 
-- Twilio
-- Plivo
-- Amazon SNS
-- Vonage (Nexmo)
-- Telnyx
-- Termii
-- Gupshup
-- Clickatell
-- Infobip
-
-</details>
-
-<details>
-<summary><strong>Push Providers</strong></summary>
-
-- Firebase Cloud Messaging (FCM)
-- Expo
-- Apple Push Notification Service (APNS)
-- OneSignal
-- Pushpad
-
-</details>
-
-<details>
-<summary><strong>Chat Providers</strong></summary>
-
-- Slack
-- Discord
-- Microsoft Teams
-- Mattermost
+**Chat:** Slack, Discord, Microsoft Teams, Mattermost.
 
 </details>
 
@@ -347,65 +287,27 @@ ReNovu supports 50+ notification providers out of the box:
 ### API E2E Tests
 
 ```bash
-# Run full test suite (10 suites, 64 tests)
+# Run full test suite
 ./test-renovu-e2e.sh
-
-# Run specific suite
-./test-renovu-e2e.sh --suite health
-./test-renovu-e2e.sh --suite subscribers
 
 # Translation-specific tests
 ./test-translation-e2e.sh
 ```
 
-| Suite | Tests | Coverage |
-|-------|-------|----------|
-| health | 7 | API, WS, Dashboard, Worker, MongoDB, Redis |
-| subscribers | 13 | CRUD, locale, update, delete, list |
-| groups-workflows | 7 | Email, in-app, multi-channel workflows |
-| triggers | 8 | Single, bulk, broadcast, inline locale |
-| in-app | 4 | Feed, unseen count, mark-read |
-| locale | 4 | All 13 ArokaGO locales accepted |
-| preferences | 3 | Get/update subscriber preferences |
-| integrations | 5 | Active channels, provider status |
-| topics | 6 | CRUD, trigger-to-topic |
-| edge-cases | 8 | Error handling, auth validation |
-
 ### Playwright UI Tests
 
 ```bash
-cd tests/integration
-npm install && npx playwright install chromium
-
-# Run all UI tests
-npx playwright test
+cd apps/dashboard
+npx playwright install chromium
 
 # Headed mode (watch it run)
+npx tsx tests/multi-project-headed-v2.ts
+
+# Or via the standard Playwright runner
 npx playwright test --headed
-
-# Single test file
-npx playwright test tests/01-create-workflows.e2e.ts
 ```
 
-## Building Images
-
-```bash
-# Build all images locally
-docker compose build
-
-# Build and push multi-arch to GHCR
-docker buildx build --builder multiarch \
-  --platform linux/amd64,linux/arm64 \
-  -t ghcr.io/atlonxp/renovu-api:latest \
-  -f docker/Dockerfile.api --push .
-```
-
-Available Dockerfiles in `docker/`:
-- `Dockerfile.api` — API server
-- `Dockerfile.worker` — Background worker
-- `Dockerfile.ws` — WebSocket server
-- `Dockerfile.dashboard` — Dashboard SPA
-- `Dockerfile.admin-tools` — Admin tools service
+The headed test (`tests/multi-project-headed-v2.ts`) walks through the full multi-project flow with `slowMo` so every interaction is visible — useful for debugging UI regressions.
 
 ## Project Structure
 
@@ -413,10 +315,11 @@ Available Dockerfiles in `docker/`:
 renovu/
 ├── apps/
 │   ├── api/              # NestJS REST API
+│   │   └── src/app/ai-settings/   # ReNOVU: provider-agnostic AI settings
 │   ├── dashboard/        # React admin dashboard (Vite)
 │   ├── worker/           # Background job processor
 │   ├── ws/               # WebSocket server
-│   ├── admin-tools/      # Backup/restore + export/import service
+│   ├── admin-tools/      # ReNOVU: backup/restore + export/import service
 │   ├── inbound-mail/     # Inbound email processor
 │   └── webhook/          # Webhook delivery service
 ├── libs/
@@ -425,27 +328,24 @@ renovu/
 ├── packages/
 │   ├── shared/           # Shared types & constants
 │   ├── framework/        # Workflow framework
-│   ├── translation/      # AI translation (ReNovu extension)
+│   ├── translation/      # ReNOVU: AI translation
+│   ├── ee-auth/          # ReNOVU: self-hosted Clerk-replacement stub
 │   ├── js/               # JavaScript SDK
 │   ├── react/            # React components (Inbox)
 │   └── providers/        # Channel provider implementations
-├── docker/
-│   ├── Dockerfile.api
-│   ├── Dockerfile.worker
-│   ├── Dockerfile.ws
-│   ├── Dockerfile.dashboard
-│   └── Dockerfile.admin-tools
-├── tests/
-│   └── integration/      # Playwright UI E2E tests
-├── docker-compose.yml              # Local development (builds from source)
-├── docker-compose.production.yml   # Standalone production (GHCR images)
-├── docker-compose.coolify.yml      # Coolify deployment (no ports/networks)
-├── .env.example                    # Environment variable reference
-├── test-renovu-e2e.sh              # API E2E tests
-└── test-translation-e2e.sh         # Translation E2E tests
+├── docker/               # Production Dockerfiles
+├── docker-compose.yml              # Local development
+├── docker-compose.production.yml   # Standalone production
+├── docker-compose.coolify.yml      # Coolify deployment
+├── README.md                       # This file
+├── RENOVU_FEATURES.md              # ReNOVU vs upstream feature catalog (read this when merging)
+├── CLAUDE.md                       # AI agent instructions
+└── test-renovu-e2e.sh              # API E2E tests
 ```
 
 ## Syncing with Upstream
+
+When merging from upstream NOVU, **always check [`RENOVU_FEATURES.md`](./RENOVU_FEATURES.md) first** — it's the canonical catalog of files we've customized or added, with the rationale for each. That's the file that prevents you from accidentally clobbering ReNOVU features when resolving merge conflicts.
 
 ```bash
 # Add upstream remote (one-time)
@@ -454,170 +354,127 @@ git remote add upstream https://github.com/novuhq/novu.git
 # Fetch and merge
 git fetch upstream
 git merge upstream/next
-# Resolve conflicts (keep ReNovu customizations)
+# Resolve conflicts (keep ReNOVU customizations — see RENOVU_FEATURES.md)
 git push origin next
 ```
 
 ## Changelog
 
-### ReNovu v1.4.0 — 2026-03-01
+### ReNOVU v2.5.0 — 2026-05-08 (in development on `renovu-v2.5-dev`)
+
+**Multi-Project Support (Option A — Multiple Organizations per User)**
+- One user can now belong to multiple Organizations, each surfaced in the dashboard as a "Project"
+- New `POST /v1/auth/organizations/:id/switch` endpoint mints a JWT scoped to the target project
+- Sidebar project dropdown rewritten — rich `DropdownMenu` with avatar, name, hover-revealed chevron, list of memberships, and "Create project" footer item
+- Empty-name validation hardened on `POST /v1/organizations` (was 201 with zombie org, now 422)
+- Malformed `orgId` switch returns 401 (was crashing 500 on Mongo ObjectId cast)
+- Hard-reload pattern after switch — sidesteps any React Query cache key that forgot to include `orgId`
+
+**Self-Hosted Team Management**
+- New `Settings → Team` UI with invite form, members table, status badges (`Active`/`Pending invite`), Resend invite, Remove member with confirmation dialog
+- Members API endpoints (`GET/DELETE /v1/organizations/members[/:id]`, `PUT /v1/organizations/members/:id/roles`) added to `EEOrganizationController` so they're available in self-hosted mode (the OSS controller is excluded when self-hosted)
+
+**Self-Hosted Project Management**
+- New `Settings → Project` projects-management section listing all your projects with Switch buttons, "Currently active" pill, and "New project" link
+- Reuses the same `useClerk().setActive` hard-reload path as the sidebar dropdown
+
+**AI Settings — Generalized**
+- Moved OpenAI configuration out of Translation Settings into a new `aisettings` collection with `{ provider, apiKey, model }` schema (room for Anthropic/Gemini later)
+- New `Settings → AI` tab in the dashboard
+- One-time migration `move-openai-to-ai-settings` ports existing keys (encrypted blob is portable since both collections use the same `STORE_ENCRYPTION_KEY`)
+- AI translation, AI layout generation, AI workflow/step generation all funnel through the new module
+
+**OpenAI Model Lineup**
+- Added gpt-4o-mini through gpt-5.5 to the model picker; older obsolete models removed
+
+**Backup Service Hardening**
+- Audit/activity collections (`activity`, `activityfeed`, `notificationtemplates`) excluded from backups by default — these grow unbounded and are not recovery-critical
+- Large collections stream as NDJSON to avoid V8 heap OOM on 1M+ row exports
+
+**Branding Pass**
+- All user-visible branding standardized: lowercase `novu` → `renovu`, capitalized `Novu`/`NOVU` → `ReNOVU`. References to upstream remain `NOVU`. Internal identifiers (npm package names, class names, provider IDs, `_organizationId`) untouched.
+
+**Bug Fixes from Upstream Merge**
+- Fixed dashboard runtime breakage from upstream merge (commit `168ea3aef5`)
+- Broke circular dependency in translation package via runtime DI tokens
+- Regenerated `pnpm-lock.yaml` after upstream merge
+
+### ReNOVU v1.4.0 — 2026-03-01
 
 **Email Layout Fixes**
-- Fixed email layouts not being applied during rendering — default layout now correctly resolved using V2 layout lookup instead of V1 `findDefault()` which returned layouts invisible to V2 queries
-- Fixed preview crash when layout not found — preview mode now gracefully continues without layout instead of throwing `Layout not found for id novu-default-layout`
-- Per-step layout selection working: each email step can independently select a layout from the dropdown (null = no layout, undefined = default, specific ID = that layout)
+- Fixed email layouts not being applied during rendering — default layout now correctly resolved using V2 layout lookup
+- Fixed preview crash when layout not found
+- Per-step layout selection working
 
-**Upstream Sync — Novu v3.14.1 (8 commits)**
-- Merged 8 upstream commits from `novuhq/novu:next` with all ReNovu customizations preserved
-- Community Docker images bumped to v3.14.0
-- Standardized workflow step names (NV-7152)
-- AI sidekick UI polishing and granular workflow tools
-- Socket type explicit option for JS/React SDKs
-- API test tsconfig improvements
-- Worker workflow skip logic e2e tests
-- Monthly usage email polish (provider icons, layout refinements)
+**Upstream Sync — NOVU v3.14.1** (8 commits)
+- AI sidekick UI polishing, granular workflow tools, socket type explicit option for SDKs
 
 **Build & Infrastructure**
-- Added `check-ee.mjs` stubs for enterprise package builds — prevents build failures when enterprise source is absent
-- Made `STEP_RESOLVER_DISPATCH_URL` optional for self-hosted deployments
-- Removed outdated `docker-compose` configuration for Coolify deployment
+- `check-ee.mjs` stubs for enterprise package builds — prevents build failures when enterprise source is absent
+- `STEP_RESOLVER_DISPATCH_URL` made optional for self-hosted
 
-### ReNovu v1.3.0 — 2026-02-27
+### ReNOVU v1.3.0 — 2026-02-27
 
-**Upstream Sync — Novu v3.14.0 (30 commits)**
-- Merged 30 upstream commits from `novuhq/novu:next` with all ReNovu customizations preserved
-- SQS as an alternative queue backend (alongside BullMQ/Redis)
-- AI workflow generation from user prompts
-- React Email step editor (partial)
-- Cloudflare step resolver deployment & resolution
-- Worker digest lifecycle and channel skip fixes
-- Mongoose DAL consolidation (single instance)
-- Dashboard translation toggle fix for production environments
-- Debug log level adjustments, request log transaction IDs
+**Upstream Sync — NOVU v3.14.0** (30 commits)
+- SQS as alternative queue backend, AI workflow generation, React Email step editor (partial), Cloudflare step resolver
 
 **Enterprise Package Cleanup**
-- Removed `enterprise/packages/*` from `pnpm-workspace.yaml` — not needed for self-hosted
-- Removed `@novu/ee-billing`, `@novu/ee-shared-services`, `@novu/ee-translation`, `@novu/ee-api` from app dependencies
-- All enterprise imports use optional chaining (`require('...')?.X`) — gracefully absent at runtime
-- `@novu/ee-auth` remains as our self-hosted stub in `packages/ee-auth`
-- Smaller Docker images (no enterprise directory copied)
+- `enterprise/packages/*` removed from `pnpm-workspace.yaml`
+- All enterprise imports use optional chaining — gracefully absent at runtime
+- `@novu/ee-auth` remains as our self-hosted stub
 
-**Build Fixes**
-- Fixed `TranslationWorker` — `this.worker` → `this.bullMqWorker` (upstream base class API change)
-- Fixed strict null TypeScript error in `publish-translation-group.usecase.ts`
-- Regenerated `pnpm-lock.yaml` for updated workspace layout
-
-### ReNovu v1.2.0 — 2026-02-27
+### ReNOVU v1.2.0 — 2026-02-27
 
 **Coolify Deployment**
-- New `docker-compose.coolify.yml` — purpose-built for Coolify with Traefik. No custom networks (avoids 504 errors from Traefik network misrouting), no host port bindings, no container names. Coolify manages all routing and TLS.
-- Separate from `docker-compose.production.yml` (standalone with host ports) to avoid Coolify-specific gotchas leaking into general production usage
+- Purpose-built `docker-compose.coolify.yml` (no custom networks, no host port bindings)
 
 **Worker Crash Loop Fix**
-- Fixed worker infinite crash loop caused by MongoDB connection pool misconfiguration — `MONGO_MAX_POOL_SIZE: 10` was set but `MONGO_MIN_POOL_SIZE` was missing, causing the DAL default of `minPoolSize: 10` to conflict (min >= max). Worker never started successfully since initial deployment.
-- Added `MONGO_MIN_POOL_SIZE: 5` to worker across all compose files
-- Added `IS_V2_ENABLED: "true"` to worker for consistency with API
+- MongoDB connection pool misconfiguration (`MONGO_MAX_POOL_SIZE` set, `MONGO_MIN_POOL_SIZE` missing) — fixed across all compose files
 
-**Infrastructure Fixes**
-- Added `platform: linux/amd64` to all services in production compose for Coolify compatibility
-- Increased `start_period` to 240s for PM2 cluster startup (API, Worker, WS, Admin Tools)
-- Used default MongoDB password to avoid URI special character encoding issues
-- Fixed volume path parsing for Coolify bind mounts
-
-### ReNovu v1.1.0 — 2026-02-25
+### ReNOVU v1.1.0 — 2026-02-25
 
 **Admin Tools — Data Management** (`apps/admin-tools/`)
-- New NestJS microservice for data management operations
-- Full MongoDB backup/restore: 25 collections, cursor-based NDJSON streaming for high-volume collections, batch inserts (5,000 docs/batch)
-- Org-scoped backup storage — backups isolated per organization (multi-tenant safe), legacy flat backups auto-migrated on startup
-- Workflow export/import with complete dependency graph: workflows → steps → message templates → layouts → control values
-- Full ID remapping during import — all internal references (`_templateId`, `_layoutId`, `_workflowId`, etc.) remapped to target environment
-- Layout control values (v2 email content) included in export/import
-- Import conflict strategies: `skip` existing or `overwrite`
-- Pre-restore safety backup created automatically before any restore
-- Dry-run mode for previewing restore operations
-- CLI scripts (`dist/cli/backup.js`, `restore.js`, `export.js`, `import.js`) for headless/CI usage
-- Dual auth: JWT (from Dashboard) + API key (`ADMIN_API_KEY` env var) for automation
-
-**Dashboard — Data Management UI**
-- New **Settings > Data Management** tab with backup/restore and workflow export/import
-- Backup: create, list, download, delete — with file size and date display
-- Restore: upload `.tar.gz`, dry-run toggle, confirmation dialog
-- Export: select all or individual workflows, download as JSON
-- Import: upload JSON, select conflict strategy (skip/overwrite), progress feedback
+- New NestJS microservice with backup/restore (25 collections, NDJSON streaming, batch inserts)
+- Org-scoped backup storage
+- Workflow export/import with full ID remapping
 
 **Dashboard — Self-Hosted Fixes**
-- Email layouts paywall removed — "Need more layouts? Contact Sales" replaced with `IS_SELF_HOSTED` check
-- Comprehensive `VITE_SELF_HOSTED` type fixes across 20+ components
-- Vercel integration page stubbed out (not applicable for self-hosted)
-- Settings and Environments pages enabled for self-hosted mode
-- Settings page crash fix (null membership handling)
-- Backup date display format fix
+- Email layouts paywall removed
+- `VITE_SELF_HOSTED` type fixes across 20+ components
+- Settings & Environments pages enabled for self-hosted mode
 
-**Infrastructure**
-- Multi-arch Docker images (linux/amd64 + linux/arm64) published to GHCR
-- Production compose (`docker-compose.production.yml`) designed for Coolify with Traefik labels
-- Staging compose (`docker-compose.staging.yml`) with environment-specific configuration
-- PM2 cluster mode (`PM2_INSTANCES=max`) for API, Worker, and WebSocket services
-- MongoDB persistent volume with configurable `MONGO_DATA_PATH`
-- ARM64 Docker build fixes: QEMU timeout workaround for WebSocket service, PM2 binary symlinks
-
-**Testing**
-- Playwright integration test suite: 3 test files, 15 tests covering account creation, workflows, backup/restore, export/import
-- Sequential test execution with shared state across test files
-
-### ReNovu v1.0.0 — 2026-02-24
+### ReNOVU v1.0.0 — 2026-02-24
 
 **Self-Hosted Enterprise Unlock**
 - All enterprise tier restrictions removed for self-hosted deployments
-- `UNLIMITED` tier auto-assigned to all new organizations — unlimited workflows, team members, API calls
-- Removed `@clerk/clerk-react` dependency — replaced with self-hosted JWT authentication
-- Auto-organization creation on first user signup
-- `ee-auth` stub package created to satisfy build dependencies without Clerk
-- Self-hosted mode blank page after login fixed
-- React 18/19 type conflicts resolved in notifications package
+- `UNLIMITED` tier auto-assigned to all new organizations
+- Removed `@clerk/clerk-react` dependency — replaced with self-hosted JWT auth
+- `ee-auth` stub package created
 
 **AI Translation System** (replaces `@novu/ee-translation`)
-- New `packages/translation/` package — drop-in replacement for Novu's enterprise translation
-- OpenAI GPT integration with model selection (gpt-4o-mini, gpt-4o, gpt-4-turbo)
-- Handlebars variable protection — `{{subscriber.firstName}}` and other variables tokenized before translation, preventing corruption
-- HTML structural validation on translated content
-- Organization-level encrypted settings (AES-256) stored in MongoDB
-- Locale alias mapping for non-standard codes (e.g., `zh-hans` → `zh_CN`)
-- Async Bull queue processing for batch translations
-- Translation bridge in Worker for notification delivery with locale support
-- Dashboard UI: settings panel with API key management, translate button on workflows, preview hook
-- API endpoints: settings CRUD, connection test, auto-translate trigger, async job status
-
-**Docker & CI/CD**
-- 5 production Dockerfiles: `Dockerfile.api`, `Dockerfile.worker`, `Dockerfile.ws`, `Dockerfile.dashboard`, `Dockerfile.admin-tools`
-- GitHub Actions workflow for automated GHCR image publishing
-- Programmable Docker Compose files with environment variable overrides for all service images
-- Coolify deployment support with GHCR image directives
-- Nx circular dependency fix for local Docker builds
-
-**Testing**
-- `test-renovu-e2e.sh` — 10 API E2E suites, 64 tests (health, subscribers, workflows, triggers, in-app, locale, preferences, integrations, topics, edge-cases)
-- `test-translation-e2e.sh` — 6 translation-specific test phases
-- Self-hosted auth E2E suite: 7 tests, 11 assertions
+- New `packages/translation/` package
+- OpenAI GPT integration with model selection
+- Handlebars variable protection
+- Organization-level encrypted settings (AES-256)
+- Async Bull queue processing
 
 ### Sync Status
 
 | | Version | Branch | Last Synced |
 |---|---------|--------|-------------|
-| **ReNovu** | v1.4.0 | `next` → `release` | — |
-| **Upstream Novu** | v3.14.1 | `next` | 2026-03-01 |
+| **ReNOVU** | v2.5.0-dev | `renovu-v2.5-dev` | — |
+| **Upstream NOVU** | v3.14.1 | `next` | 2026-05-07 (merge/upstream-next-2026-05) |
 
 ## Disclaimer
 
-ReNovu is an independent project that modifies Novu for self-hosted use. It is not affiliated with, endorsed by, or supported by Novu Co. Use at your own discretion.
+ReNOVU is an independent project that modifies NOVU for self-hosted use. It is not affiliated with, endorsed by, or supported by Novu Co. Use at your own discretion.
 
 ## License
 
-Based on [Novu](https://github.com/novuhq/novu), licensed under MIT License.
+Based on [NOVU](https://github.com/novuhq/novu), licensed under the MIT License.
 
 ---
 
 <p align="center">
-  <strong>ReNovu</strong> — Your notifications, your infrastructure, your rules.
+  <strong>ReNOVU</strong> — Your notifications, your infrastructure, your rules.
 </p>
