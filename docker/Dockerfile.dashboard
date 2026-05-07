@@ -18,6 +18,7 @@ RUN npm install -g pnpm@10.16.1 --loglevel notice
 COPY .npmrc .
 COPY package.json .
 COPY pnpm-workspace.yaml .
+COPY patches ./patches
 COPY pnpm-lock.yaml .
 COPY tsconfig.json .
 COPY nx.json .
