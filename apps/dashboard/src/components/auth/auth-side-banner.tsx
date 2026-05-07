@@ -19,12 +19,12 @@ export function AuthSideBanner() {
           <div className="flex hidden flex-col items-start justify-start gap-4 md:block">
             <div className="flex flex-col items-start justify-start gap-1.5 self-stretch">
               <div className="text-2xl font-medium leading-8 text-neutral-950">
-                {IS_ENTERPRISE ? 'Welcome to Novu Enterprise' : 'Welcome to Novu Self-Hosted!'}
+                {IS_ENTERPRISE ? 'Welcome to ReNOVU Enterprise' : 'Welcome to ReNOVU!'}
               </div>
               <div className="text-sm leading-snug text-neutral-500">
                 {IS_ENTERPRISE
                   ? 'Enterprise-grade notification infrastructure with premium support and advanced features.'
-                  : 'Full control over your notification infrastructure. Backed by a vibrant community.'}
+                  : 'Self-hosted notification platform — a custom fork of NOVU with enterprise features unlocked. Full control over your infrastructure.'}
               </div>
             </div>
           </div>
@@ -54,7 +54,7 @@ export function AuthSideBanner() {
             description={
               IS_ENTERPRISE
                 ? 'Complete data residency control with enterprise-grade security, compliance certifications, and audit trails.'
-                : 'Host Novu on your own infrastructure, tailor it to your exact needs, and own your data.'
+                : 'Host ReNOVU on your own infrastructure, tailor it to your exact needs, and own your data.'
             }
           />
           <AuthFeatureRow
