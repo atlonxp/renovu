@@ -1,6 +1,8 @@
-import type { Db } from 'mongodb';
+import type { mongo } from 'mongoose';
 
 import { moveOpenAiToAiSettingsCore } from './move-openai-to-ai-settings/core';
+
+type Db = mongo.Db;
 
 interface MigrationLogger {
   info: (msg: string) => void;

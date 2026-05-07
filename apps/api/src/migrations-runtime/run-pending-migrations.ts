@@ -1,6 +1,9 @@
-import type { Db } from 'mongodb';
+import type { mongo } from 'mongoose';
 
 import { MIGRATION_REGISTRY, type RegisteredMigration } from './registry';
+
+type Db = mongo.Db;
+type MigrationCollection = mongo.Collection<MigrationDoc>;
 
 const TRACKING_COLLECTION = '_renovu_migrations';
 const LOCK_WAIT_TIMEOUT_MS = 5 * 60 * 1000;
@@ -46,7 +49,7 @@ export async function runPendingMigrations(
 }
 
 async function runOne(
-  col: ReturnType<Db['collection']>,
+  col: MigrationCollection,
   migration: RegisteredMigration,
   db: Db,
   logger: MigrationLogger
@@ -123,7 +126,7 @@ async function runOne(
 }
 
 async function waitForLeader(
-  col: ReturnType<Db['collection']>,
+  col: MigrationCollection,
   name: string,
   logger: MigrationLogger
 ): Promise<void> {

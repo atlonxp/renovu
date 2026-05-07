@@ -100,7 +100,14 @@ export function RegionProvider({ children }: RegionProviderProps) {
     if (targetOrgMembership && clerk) {
       try {
         await clerk.setActive({
-          organization: targetOrgMembership.organization as NonNullable<Parameters<typeof clerk.setActive>[0]>['organization'],
+          // Double-cast through unknown: at runtime targetOrgMembership.organization
+          // is the org object; clerk.setActive expects the org id string. This file
+          // is excluded from the self-hosted runtime via vite.config's
+          // excludeCloudFilesPlugin (replaced by region-context.self-hosted.tsx),
+          // but tsc still type-checks it.
+          organization: targetOrgMembership.organization as unknown as NonNullable<
+            Parameters<typeof clerk.setActive>[0]
+          >['organization'],
         });
 
         const newUrl = `${targetDashboardUrl}${currentPath}`;

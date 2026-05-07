@@ -1,5 +1,6 @@
-import type { Db } from 'mongodb';
-import type { Types } from 'mongoose';
+import type { mongo, Types } from 'mongoose';
+
+type Db = mongo.Db;
 
 interface LegacyTranslationSettingsDoc {
   _id: Types.ObjectId;
