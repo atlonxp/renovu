@@ -26,5 +26,7 @@ tsconfig.node.tsbuildinfo
 /playwright-report/
 /blob-report/
 /playwright/
+tests/test-results/
+tests/multi-project-report/
 .env.test
 .env.playwright
