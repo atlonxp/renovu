@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
 import { AnalyticsService } from '@novu/application-generic';
 import { OrganizationEntity, OrganizationRepository, UserRepository } from '@novu/dal';
 import { ApiServiceLevelEnum, EnvironmentEnum, JobTitleEnum, MemberRoleEnum } from '@novu/shared';
@@ -13,6 +13,8 @@ import { CreateOrganizationCommand } from './create-organization.command';
 
 @Injectable()
 export class CreateOrganization {
+  private readonly logger = new Logger(CreateOrganization.name);
+
   constructor(
     private readonly organizationRepository: OrganizationRepository,
     private readonly addMemberUsecase: AddMember,
@@ -41,36 +43,57 @@ export class CreateOrganization {
       removeNovuBranding: isSelfHosted ? true : undefined,
     });
 
-    if (command.jobTitle) {
-      await this.updateJobTitle(user, command.jobTitle);
+    /**
+     * Best-effort cleanup if env bootstrap fails. Mongo transactions across
+     * AddMember + CreateEnvironment would be cleaner but require threading a
+     * session through every repo call. For now: if anything below this point
+     * throws, delete the half-created org so the caller can retry without
+     * orphans piling up.
+     */
+    try {
+      if (command.jobTitle) {
+        await this.updateJobTitle(user, command.jobTitle);
+      }
+
+      await this.addMemberUsecase.execute(
+        AddMemberCommand.create({
+          roles: [MemberRoleEnum.OSS_ADMIN],
+          organizationId: createdOrganization._id,
+          userId: command.userId,
+        })
+      );
+
+      const devEnv = await this.createEnvironmentUsecase.execute(
+        CreateEnvironmentCommand.create({
+          userId: user._id,
+          name: EnvironmentEnum.DEVELOPMENT,
+          organizationId: createdOrganization._id,
+          system: true,
+        })
+      );
+
+      await this.createEnvironmentUsecase.execute(
+        CreateEnvironmentCommand.create({
+          userId: user._id,
+          name: EnvironmentEnum.PRODUCTION,
+          organizationId: createdOrganization._id,
+          parentEnvironmentId: devEnv._id,
+          system: true,
+        })
+      );
+    } catch (error) {
+      this.logger.error(
+        `Org bootstrap failed for org ${createdOrganization._id}; rolling back. Error: ${error instanceof Error ? error.message : String(error)}`
+      );
+      try {
+        await this.organizationRepository.delete({ _id: createdOrganization._id });
+      } catch (cleanupError) {
+        this.logger.error(
+          `Org rollback ALSO failed for ${createdOrganization._id}. Manual cleanup required. Error: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`
+        );
+      }
+      throw error;
     }
-
-    await this.addMemberUsecase.execute(
-      AddMemberCommand.create({
-        roles: [MemberRoleEnum.OSS_ADMIN],
-        organizationId: createdOrganization._id,
-        userId: command.userId,
-      })
-    );
-
-    const devEnv = await this.createEnvironmentUsecase.execute(
-      CreateEnvironmentCommand.create({
-        userId: user._id,
-        name: EnvironmentEnum.DEVELOPMENT,
-        organizationId: createdOrganization._id,
-        system: true,
-      })
-    );
-
-    await this.createEnvironmentUsecase.execute(
-      CreateEnvironmentCommand.create({
-        userId: user._id,
-        name: EnvironmentEnum.PRODUCTION,
-        organizationId: createdOrganization._id,
-        parentEnvironmentId: devEnv._id,
-        system: true,
-      })
-    );
 
     this.analyticsService.upsertGroup(createdOrganization._id, createdOrganization, user);
 

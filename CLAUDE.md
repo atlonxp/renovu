@@ -175,6 +175,17 @@ pnpm typecheck      # Run TypeScript checks
 
 - No need to run npm typecheck commands, as we will see it ourself
 
+## Naming convention: Organization vs Project
+
+**Code, DB, API, JWT, better-auth all use "Organization". The dashboard UI says "Project".**
+
+- Backend (entities, repos, controllers, JWT claims, MongoDB collections): `OrganizationEntity`, `_organizationId`, `/v1/organizations/...`, `organizationId` claim. **Never rename.**
+- Better-auth's `organization` plugin is third-party — it always says "organization" in its API and error messages. Acceptable leak.
+- User-visible dashboard copy: "Project". Strings in JSX text, placeholders, button labels, page titles, toasts.
+- TypeScript identifiers in dashboard code (`currentOrganization`, `OrganizationDropdown`): keep as "organization" so engineers see consistency with API/DB.
+- Each user can be a member of multiple Organizations (= multiple Projects). They are isolated silos: separate envs, separate API keys, separate members per org.
+- Switching projects: `POST /v1/auth/organizations/:id/switch` returns a new JWT scoped to the target org. Dashboard stores the new JWT and hard-reloads to drop per-org caches.
+
 ## ReNovu Extensions
 
 ### Translation Package (`packages/translation`)

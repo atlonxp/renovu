@@ -19,6 +19,8 @@ import { GetMyOrganizationCommand } from './usecases/get-my-organization/get-my-
 import { GetMyOrganization } from './usecases/get-my-organization/get-my-organization.usecase';
 import { GetOrganizationSettingsCommand } from './usecases/get-organization-settings/get-organization-settings.command';
 import { GetOrganizationSettings } from './usecases/get-organization-settings/get-organization-settings.usecase';
+import { GetOrganizationsCommand } from './usecases/get-organizations/get-organizations.command';
+import { GetOrganizations } from './usecases/get-organizations/get-organizations.usecase';
 import { RenameOrganization } from './usecases/rename-organization/rename-organization.usecase';
 import { RenameOrganizationCommand } from './usecases/rename-organization/rename-organization-command';
 import { UpdateBrandingDetailsCommand } from './usecases/update-branding-details/update-branding-details.command';
@@ -39,8 +41,26 @@ export class EEOrganizationController {
     private getMyOrganizationUsecase: GetMyOrganization,
     private renameOrganizationUsecase: RenameOrganization,
     private getOrganizationSettingsUsecase: GetOrganizationSettings,
-    private updateOrganizationSettingsUsecase: UpdateOrganizationSettings
+    private updateOrganizationSettingsUsecase: UpdateOrganizationSettings,
+    private getOrganizationsUsecase: GetOrganizations
   ) {}
+
+  /**
+   * List every organization the current user is an active member of.
+   * Used by the dashboard's project switcher to render the dropdown.
+   */
+  @Get('/')
+  @ApiResponse(OrganizationResponseDto, 200, true)
+  @ApiOperation({
+    summary: 'Fetch all organizations the current user is a member of',
+  })
+  async listMyOrganizations(@UserSession() user: UserSessionData): Promise<OrganizationEntity[]> {
+    return this.getOrganizationsUsecase.execute(
+      GetOrganizationsCommand.create({
+        userId: user._id,
+      })
+    );
+  }
 
   @Post('/')
   @ExternalApiAccessible()
