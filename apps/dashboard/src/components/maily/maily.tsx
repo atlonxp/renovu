@@ -3,7 +3,7 @@ import { BlockGroupItem } from '@novu/maily-core/blocks';
 import { Variable } from '@novu/maily-core/extensions';
 import type { Editor, NodeViewProps, Editor as TiptapEditor } from '@tiptap/core';
 import { Editor as TiptapEditorReact } from '@tiptap/react';
-import { ForwardRefExoticComponent, HTMLAttributes, useCallback, useMemo } from 'react';
+import { CSSProperties, ForwardRefExoticComponent, HTMLAttributes, useCallback, useMemo } from 'react';
 import { useDataRef } from '@/hooks/use-data-ref';
 import { useRemoveGrammarly } from '@/hooks/use-remove-grammarly';
 import { LocalizationResourceEnum, TranslationKey } from '@/types/translations';
@@ -48,6 +48,11 @@ type MailyProps = HTMLAttributes<HTMLDivElement> & {
     variables: LiquidVariable[],
     isAllowedVariable: IsAllowedVariable
   ) => (props: NodeViewProps) => JSX.Element;
+  /**
+   * Inline style applied to the editor canvas to mirror the email's container
+   * (max-width, padding, margins, background) so WYSIWYG matches the rendered email.
+   */
+  containerStyle?: CSSProperties;
 };
 
 /**
@@ -81,6 +86,7 @@ export const Maily = ({
   renderVariable = () => null,
   createVariableNodeView = defaultCreateVariableNodeView,
   translationValueInput,
+  containerStyle,
   ...rest
 }: MailyProps) => {
   const primitives = useMemo(
@@ -178,12 +184,18 @@ export const Maily = ({
   );
 
   return (
-    <div className="relative h-full flex-1 overflow-y-auto bg-neutral-50 px-16 pt-8">
+    <div
+      className="bg-bg-weak relative h-full flex-1 overflow-auto p-3"
+      style={{
+        backgroundImage: 'radial-gradient(circle, hsl(var(--neutral-alpha-100)) 1px, transparent 1px)',
+        backgroundSize: '20px 20px',
+      }}
+    >
       {overrideTippyBoxStyles()}
       <div
         ref={editorParentRef}
         className={cn(
-          `shadow-xs mx-auto flex min-h-full max-w-[${MAILY_EMAIL_WIDTH}px] flex-col items-start rounded-lg bg-white [&_a]:pointer-events-none`,
+          `shadow-xs mx-auto flex max-w-[${MAILY_EMAIL_WIDTH}px] flex-col items-start rounded-lg bg-white [&_a]:pointer-events-none`,
           className
         )}
         data-gramm={false}
@@ -195,6 +207,7 @@ export const Maily = ({
         autoCorrect="off"
         spellCheck={false}
         {...rest}
+        style={{ ...(rest.style || {}), ...containerStyle }}
       >
         <MailyEditor
           config={DEFAULT_EDITOR_CONFIG}

@@ -2,6 +2,7 @@ import { GetLayoutUseCase, GetLayoutUseCaseV0, LayoutVariablesSchemaUseCase } fr
 import { BuildLayoutIssuesUsecase } from './build-layout-issues/build-layout-issues.usecase';
 import { DeleteLayoutUseCase } from './delete-layout';
 import { DuplicateLayoutUseCase } from './duplicate-layout';
+import { GenerateLayoutUsecase } from './generate-layout';
 import { GetLayoutUsageUseCase } from './get-layout-usage';
 import { ListLayoutsUseCase } from './list-layouts';
 import { PreviewLayoutUsecase } from './preview-layout';
@@ -20,4 +21,5 @@ export const USE_CASES = [
   GetLayoutUsageUseCase,
   BuildLayoutIssuesUsecase,
   LayoutSyncToEnvironmentUseCase,
+  GenerateLayoutUsecase,
 ];

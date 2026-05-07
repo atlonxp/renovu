@@ -48,6 +48,10 @@ import { DeleteWorkflowUseCase } from '../workflows-v1/usecases/delete-workflow/
 import {
   CreateWorkflowDto,
   DuplicateWorkflowDto,
+  GenerateWorkflowRequestDto,
+  GenerateWorkflowResponseDto,
+  GenerateWorkflowStepRequestDto,
+  GenerateWorkflowStepResponseDto,
   GetListQueryParamsDto,
   ListWorkflowResponse,
   PatchWorkflowDto,
@@ -62,6 +66,9 @@ import {
   BuildWorkflowTestDataUseCase,
   DuplicateWorkflowCommand,
   DuplicateWorkflowUseCase,
+  GenerateWorkflowCommand,
+  GenerateWorkflowStepCommand,
+  GenerateWorkflowUsecase,
   ListWorkflowsCommand,
   ListWorkflowsUseCase,
   SyncToEnvironmentCommand,
@@ -90,8 +97,61 @@ export class WorkflowController {
     private buildStepDataUsecase: BuildStepDataUsecase,
     private patchWorkflowUsecase: PatchWorkflowUsecase,
     private duplicateWorkflowUseCase: DuplicateWorkflowUseCase,
-    private testHttpEndpointUsecase: TestHttpEndpointUsecase
+    private testHttpEndpointUsecase: TestHttpEndpointUsecase,
+    private generateWorkflowUsecase: GenerateWorkflowUsecase
   ) {}
+
+  @Post('generate')
+  @ExternalApiAccessible()
+  @ApiOperation({
+    summary: 'Generate a workflow with AI',
+    description:
+      'Generates a workflow skeleton (name, steps, control values) from a natural-language brief. Requires an OpenAI API key configured at the organization level.',
+  })
+  @ApiBody({ type: GenerateWorkflowRequestDto, description: 'AI generation brief' })
+  @ApiResponse(GenerateWorkflowResponseDto, 201)
+  @RequirePermissions(PermissionsEnum.WORKFLOW_WRITE)
+  @SdkMethodName('generate')
+  async generate(
+    @UserSession(ParseSlugEnvironmentIdPipe) user: UserSessionData,
+    @Body() body: GenerateWorkflowRequestDto
+  ): Promise<GenerateWorkflowResponseDto> {
+    return this.generateWorkflowUsecase.execute(
+      GenerateWorkflowCommand.create({
+        prompt: body.prompt,
+        channels: body.channels,
+        environmentId: user.environmentId,
+        organizationId: user.organizationId,
+        userId: user._id,
+      })
+    );
+  }
+
+  @Post('generate-step')
+  @ExternalApiAccessible()
+  @ApiOperation({
+    summary: 'Generate a single workflow step with AI',
+    description:
+      'Generates one step (channel or action) given a brief and step type. Used by the workflow editor to insert AI-generated steps.',
+  })
+  @ApiBody({ type: GenerateWorkflowStepRequestDto })
+  @ApiResponse(GenerateWorkflowStepResponseDto, 201)
+  @RequirePermissions(PermissionsEnum.WORKFLOW_WRITE)
+  @SdkMethodName('generateStep')
+  async generateStep(
+    @UserSession(ParseSlugEnvironmentIdPipe) user: UserSessionData,
+    @Body() body: GenerateWorkflowStepRequestDto
+  ): Promise<GenerateWorkflowStepResponseDto> {
+    return this.generateWorkflowUsecase.executeStep(
+      GenerateWorkflowStepCommand.create({
+        prompt: body.prompt,
+        type: body.type,
+        environmentId: user.environmentId,
+        organizationId: user.organizationId,
+        userId: user._id,
+      })
+    );
+  }
 
   @Post('')
   @ApiOperation({

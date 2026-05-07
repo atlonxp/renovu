@@ -129,3 +129,10 @@ demos/agent-chat-demo/.next
 demos/agent-chat-demo/.env.local
 demos/agent-chat-demo/tsconfig.tsbuildinfo
 demos/agent-chat-demo/next-env.d.ts
+.gstack/
+
+# Local / sensitive — never commit
+.env.production
+data-backups/
+docker-compose.override.yml
+renovu-config

@@ -14,8 +14,20 @@ import { Divider } from '../ui/divider';
 import { LinkInputPopover } from '../ui/link-input-popover';
 import { Select } from '../ui/select';
 import { TooltipProvider } from '../ui/tooltip';
-import { ImageSize } from './image-size';
+import { ImageSize, ImageSizeUnit } from './image-size';
 import { useImageState } from './use-image-state';
+
+const parseDimension = (raw?: string | null): { value: string; unit: ImageSizeUnit } => {
+  if (raw == null || raw === '' || raw === 'auto') return { value: '', unit: 'px' };
+  const str = String(raw).trim();
+  if (str.endsWith('%')) return { value: str.slice(0, -1), unit: '%' };
+  return { value: String(parseFloat(str) || ''), unit: 'px' };
+};
+
+const formatDimension = (value: string, unit: ImageSizeUnit): string => {
+  if (!value) return '';
+  return unit === '%' ? `${value}%` : value;
+};
 
 export function ImageBubbleMenu(props: EditorBubbleMenuProps) {
   const { editor, appendTo } = props;
@@ -159,69 +171,84 @@ export function ImageBubbleMenu(props: EditorBubbleMenuProps) {
             />
 
             <div className="mly-flex mly-space-x-0.5">
-              <ImageSize
-                dimension="width"
-                value={state?.width ?? ''}
-                onValueChange={(value) => {
-                  const width = Math.min(Number(value) || 0, IMAGE_MAX_WIDTH);
-                  const currentHeight = Number(state.height) || 0;
-                  const currentWidth = Number(state.width) || 0;
-                  const currentAspectRatio = state.aspectRatio || currentWidth / currentHeight || 1;
+              {(() => {
+                const wParsed = parseDimension(state?.width);
+                const hParsed = parseDimension(state?.height);
+                return (
+                  <>
+                    <ImageSize
+                      dimension="width"
+                      value={wParsed.value}
+                      unit={wParsed.unit}
+                      onUnitChange={(nextUnit) => {
+                        const formatted = formatDimension(wParsed.value, nextUnit);
+                        editor?.chain().updateImageAttributes({ width: formatted }).run();
+                      }}
+                      onValueChange={(value) => {
+                        if (wParsed.unit === '%') {
+                          const pct = Math.max(0, Math.min(100, Number(value) || 0));
+                          editor?.chain().updateImageAttributes({ width: pct ? `${pct}%` : '' }).run();
+                          return;
+                        }
+                        const width = Math.min(Number(value) || 0, IMAGE_MAX_WIDTH);
+                        const currentHeight = Number(hParsed.unit === 'px' ? hParsed.value : 0) || 0;
+                        const currentWidth = Number(wParsed.value) || 0;
+                        const currentAspectRatio = state.aspectRatio || currentWidth / currentHeight || 1;
+                        editor
+                          ?.chain()
+                          .updateImageAttributes({
+                            width: String(width),
+                            ...(lockAspectRatio && value && hParsed.unit === 'px'
+                              ? { height: String(getNewHeight(width, currentAspectRatio)) }
+                              : {}),
+                          })
+                          .run();
+                      }}
+                    />
+                    <ImageSize
+                      dimension="height"
+                      value={hParsed.value}
+                      unit={hParsed.unit}
+                      onUnitChange={(nextUnit) => {
+                        const formatted = formatDimension(hParsed.value, nextUnit);
+                        editor?.chain().updateImageAttributes({ height: formatted }).run();
+                      }}
+                      onValueChange={(value) => {
+                        if (hParsed.unit === '%') {
+                          const pct = Math.max(0, Math.min(100, Number(value) || 0));
+                          editor?.chain().updateImageAttributes({ height: pct ? `${pct}%` : '' }).run();
+                          return;
+                        }
+                        const height = Number(value) || 0;
+                        const currentHeight = Number(hParsed.value) || 0;
+                        const currentWidth = Number(wParsed.unit === 'px' ? wParsed.value : 0) || 0;
+                        const currentAspectRatio = state.aspectRatio || currentWidth / currentHeight || 1;
+                        editor
+                          ?.chain()
+                          .updateImageAttributes({
+                            height: String(height),
+                            ...(lockAspectRatio && value && wParsed.unit === 'px'
+                              ? { width: String(getNewWidth(height, currentAspectRatio)) }
+                              : {}),
+                          })
+                          .run();
+                      }}
+                    />
 
-                  editor
-                    ?.chain()
-                    .updateImageAttributes({
-                      width: String(width),
-                      ...(lockAspectRatio && value
-                        ? {
-                            height: String(getNewHeight(width, currentAspectRatio)),
-                          }
-                        : {}),
-                    })
-                    .run();
-                }}
-              />
-              <ImageSize
-                dimension="height"
-                value={state?.height ?? ''}
-                onValueChange={(value) => {
-                  const height = Number(value) || 0;
-                  const currentHeight = Number(state.height) || 0;
-                  const currentWidth = Number(state.width) || 0;
-                  const currentAspectRatio = state.aspectRatio || currentWidth / currentHeight || 1;
-
-                  editor
-                    ?.chain()
-                    .updateImageAttributes({
-                      height: String(height),
-                      ...(lockAspectRatio && value
-                        ? {
-                            width: String(getNewWidth(height, currentAspectRatio)),
-                          }
-                        : {}),
-                    })
-                    .run();
-                }}
-              />
-
-              <BubbleMenuButton
-                isActive={() => lockAspectRatio}
-                command={() => {
-                  const width = Number(state.width) || 0;
-                  const height = Number(state.height) || 0;
-                  const aspectRatio = width / height;
-
-                  editor
-                    ?.chain()
-                    .updateImageAttributes({
-                      lockAspectRatio: !lockAspectRatio,
-                      aspectRatio,
-                    })
-                    .run();
-                }}
-                icon={lockAspectRatio ? LockIcon : LockOpenIcon}
-                tooltip="Lock Aspect Ratio"
-              />
+                    <BubbleMenuButton
+                      isActive={() => lockAspectRatio}
+                      command={() => {
+                        const width = Number(wParsed.unit === 'px' ? wParsed.value : 0) || 0;
+                        const height = Number(hParsed.unit === 'px' ? hParsed.value : 0) || 0;
+                        const aspectRatio = width / height;
+                        editor?.chain().updateImageAttributes({ lockAspectRatio: !lockAspectRatio, aspectRatio }).run();
+                      }}
+                      icon={lockAspectRatio ? LockIcon : LockOpenIcon}
+                      tooltip="Lock Aspect Ratio"
+                    />
+                  </>
+                );
+              })()}
             </div>
           </>
         )}

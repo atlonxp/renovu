@@ -38,6 +38,7 @@ type SectionAttributes = {
   paddingLeft: number;
 
   showIfKey: string | null;
+  fullBleed: boolean;
 };
 
 declare module '@tiptap/core' {
@@ -45,6 +46,7 @@ declare module '@tiptap/core' {
     section: {
       setSection: () => ReturnType;
       updateSection: (attrs: Partial<SectionAttributes>) => ReturnType;
+      setFullBleed: (fullBleed: boolean) => ReturnType;
     };
   }
 }
@@ -257,6 +259,19 @@ export const SectionExtension = Node.create({
           };
         },
       },
+      fullBleed: {
+        default: false,
+        parseHTML: (element) => element.getAttribute('data-full-bleed') === 'true',
+        renderHTML: (attributes) => {
+          if (!attributes.fullBleed) {
+            return {};
+          }
+
+          return {
+            'data-full-bleed': 'true',
+          };
+        },
+      },
     };
   },
 
@@ -278,6 +293,7 @@ export const SectionExtension = Node.create({
           });
         },
       updateSection: (attrs) => updateAttributes(this.name, attrs),
+      setFullBleed: (fullBleed) => updateAttributes(this.name, { fullBleed }),
     };
   },
 

@@ -1,6 +1,6 @@
 /** biome-ignore-all lint/correctness/useHookAtTopLevel: needs to be fixed */
 import { BubbleMenu, findChildren } from '@tiptap/react';
-import { ChevronUp, Trash } from 'lucide-react';
+import { ChevronUp, Maximize2, Trash } from 'lucide-react';
 import { useCallback } from 'react';
 import { sticky } from 'tippy.js';
 import { getClosestNodeByName } from '@/editor/utils/columns';
@@ -251,6 +251,24 @@ export function SectionBubbleMenu(props: EditorBubbleMenuProps) {
             });
           }}
           editor={editor}
+        />
+
+        <Divider />
+
+        <BubbleMenuButton
+          icon={Maximize2}
+          tooltip={
+            editor.isActive('column')
+              ? 'Full bleed is only available on top-level sections'
+              : state.currentFullBleed
+                ? 'Disable full bleed'
+                : 'Full bleed (stretch to viewport edges)'
+          }
+          isActive={() => state.currentFullBleed}
+          disabled={editor.isActive('column')}
+          command={() => {
+            editor.commands.setFullBleed(!state.currentFullBleed);
+          }}
         />
 
         {state.isColumnsActive && (

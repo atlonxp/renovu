@@ -1,203 +1,293 @@
 import type {
-  CreateWorkflowDto,
-  DuplicateWorkflowDto,
-  IEnvironment,
-  ListWorkflowResponse,
-  PatchWorkflowDto,
-  SyncWorkflowDto,
-  UpdateWorkflowDto,
-  WorkflowResponseDto,
-  WorkflowTestDataResponseDto,
-} from '@novu/shared';
-import { delV2, getV2, patchV2, post, postV2, putV2 } from './api.client';
+	CreateWorkflowDto,
+	DuplicateWorkflowDto,
+	IEnvironment,
+	ListWorkflowResponse,
+	PatchWorkflowDto,
+	StepTypeEnum,
+	SyncWorkflowDto,
+	UpdateWorkflowDto,
+	WorkflowResponseDto,
+	WorkflowTestDataResponseDto,
+} from "@novu/shared";
+import { delV2, getV2, patchV2, post, postV2, putV2 } from "./api.client";
+
+export type GenerateWorkflowStep = {
+	name: string;
+	type: StepTypeEnum;
+	controlValues?: Record<string, unknown>;
+};
+
+export type GenerateWorkflowResponse = {
+	name: string;
+	description?: string;
+	tags?: string[];
+	steps: GenerateWorkflowStep[];
+};
+
+export type GenerateWorkflowStepResponse = {
+	name: string;
+	type: StepTypeEnum;
+	controlValues?: Record<string, unknown>;
+};
 
 export const getWorkflow = async ({
-  environment,
-  workflowSlug,
-  targetEnvironmentId,
+	environment,
+	workflowSlug,
+	targetEnvironmentId,
 }: {
-  environment: IEnvironment;
-  workflowSlug?: string;
-  targetEnvironmentId?: string;
+	environment: IEnvironment;
+	workflowSlug?: string;
+	targetEnvironmentId?: string;
 }): Promise<WorkflowResponseDto> => {
-  const { data } = await getV2<{ data: WorkflowResponseDto }>(
-    `/workflows/${workflowSlug}?${targetEnvironmentId ? `environmentId=${targetEnvironmentId}` : ''}`,
-    {
-      environment,
-    }
-  );
+	const { data } = await getV2<{ data: WorkflowResponseDto }>(
+		`/workflows/${workflowSlug}?${targetEnvironmentId ? `environmentId=${targetEnvironmentId}` : ""}`,
+		{
+			environment,
+		},
+	);
 
-  return data;
+	return data;
 };
 
 export const getWorkflows = async ({
-  environment,
-  limit,
-  query,
-  offset,
-  orderBy,
-  orderDirection,
-  tags,
-  status,
+	environment,
+	limit,
+	query,
+	offset,
+	orderBy,
+	orderDirection,
+	tags,
+	status,
 }: {
-  environment: IEnvironment;
-  limit: number;
-  offset: number;
-  query: string;
-  orderBy?: string;
-  orderDirection?: string;
-  tags?: string[];
-  status?: string[];
+	environment: IEnvironment;
+	limit: number;
+	offset: number;
+	query: string;
+	orderBy?: string;
+	orderDirection?: string;
+	tags?: string[];
+	status?: string[];
 }): Promise<ListWorkflowResponse> => {
-  const params = new URLSearchParams({
-    limit: limit.toString(),
-    offset: offset.toString(),
-    query,
-  });
+	const params = new URLSearchParams({
+		limit: limit.toString(),
+		offset: offset.toString(),
+		query,
+	});
 
-  if (orderBy) {
-    params.append('orderBy', orderBy);
-  }
+	if (orderBy) {
+		params.append("orderBy", orderBy);
+	}
 
-  if (orderDirection) {
-    params.append('orderDirection', orderDirection.toUpperCase());
-  }
+	if (orderDirection) {
+		params.append("orderDirection", orderDirection.toUpperCase());
+	}
 
-  if (tags && tags.length > 0) {
-    for (const tag of tags) {
-      params.append('tags[]', tag);
-    }
-  }
+	if (tags && tags.length > 0) {
+		for (const tag of tags) {
+			params.append("tags[]", tag);
+		}
+	}
 
-  if (status && status.length > 0) {
-    for (const s of status) {
-      params.append('status[]', s);
-    }
-  }
+	if (status && status.length > 0) {
+		for (const s of status) {
+			params.append("status[]", s);
+		}
+	}
 
-  const { data } = await getV2<{ data: ListWorkflowResponse }>(`/workflows?${params.toString()}`, { environment });
+	const { data } = await getV2<{ data: ListWorkflowResponse }>(
+		`/workflows?${params.toString()}`,
+		{ environment },
+	);
 
-  return data;
+	return data;
 };
 
 export const getWorkflowTestData = async ({
-  environment,
-  workflowSlug,
+	environment,
+	workflowSlug,
 }: {
-  environment: IEnvironment;
-  workflowSlug?: string;
+	environment: IEnvironment;
+	workflowSlug?: string;
 }): Promise<WorkflowTestDataResponseDto> => {
-  const { data } = await getV2<{ data: WorkflowTestDataResponseDto }>(`/workflows/${workflowSlug}/test-data`, {
-    environment,
-  });
+	const { data } = await getV2<{ data: WorkflowTestDataResponseDto }>(
+		`/workflows/${workflowSlug}/test-data`,
+		{
+			environment,
+		},
+	);
 
-  return data;
+	return data;
 };
 
 export async function triggerWorkflow({
-  environment,
-  name,
-  payload,
-  to,
-  context,
-  overrides,
+	environment,
+	name,
+	payload,
+	to,
+	context,
+	overrides,
 }: {
-  environment: IEnvironment;
-  name: string;
-  payload: unknown;
-  to: unknown;
-  context?: unknown;
-  overrides?: Record<string, unknown>;
+	environment: IEnvironment;
+	name: string;
+	payload: unknown;
+	to: unknown;
+	context?: unknown;
+	overrides?: Record<string, unknown>;
 }) {
-  return post<{ data: { transactionId?: string } }>(`/events/trigger`, {
-    environment,
-    body: {
-      name,
-      to,
-      payload: { ...(payload ?? {}), __source: (payload as any)?.__source ?? 'dashboard' },
-      context: context ?? undefined,
-      ...(overrides && Object.keys(overrides).length > 0 ? { overrides } : {}),
-    },
-  });
+	return post<{ data: { transactionId?: string } }>(`/events/trigger`, {
+		environment,
+		body: {
+			name,
+			to,
+			payload: {
+				...(payload ?? {}),
+				__source: (payload as any)?.__source ?? "dashboard",
+			},
+			context: context ?? undefined,
+			...(overrides && Object.keys(overrides).length > 0 ? { overrides } : {}),
+		},
+	});
 }
 
 export async function createWorkflow({
-  environment,
-  workflow,
+	environment,
+	workflow,
 }: {
-  environment: IEnvironment;
-  workflow: CreateWorkflowDto;
+	environment: IEnvironment;
+	workflow: CreateWorkflowDto;
 }) {
-  return postV2<{ data: WorkflowResponseDto }>(`/workflows`, { environment, body: workflow });
+	return postV2<{ data: WorkflowResponseDto }>(`/workflows`, {
+		environment,
+		body: workflow,
+	});
+}
+
+export async function generateWorkflow({
+	environment,
+	prompt,
+	channels,
+	signal,
+}: {
+	environment: IEnvironment;
+	prompt: string;
+	channels?: StepTypeEnum[];
+	signal?: AbortSignal;
+}): Promise<GenerateWorkflowResponse> {
+	const { data } = await postV2<{ data: GenerateWorkflowResponse }>(
+		`/workflows/generate`,
+		{
+			environment,
+			body: { prompt, channels },
+			signal,
+		},
+	);
+
+	return data;
+}
+
+export async function generateWorkflowStep({
+	environment,
+	prompt,
+	type,
+	signal,
+}: {
+	environment: IEnvironment;
+	prompt: string;
+	type: StepTypeEnum;
+	signal?: AbortSignal;
+}): Promise<GenerateWorkflowStepResponse> {
+	const { data } = await postV2<{ data: GenerateWorkflowStepResponse }>(
+		`/workflows/generate-step`,
+		{
+			environment,
+			body: { prompt, type },
+			signal,
+		},
+	);
+
+	return data;
 }
 
 export async function syncWorkflow({
-  environment,
-  workflowSlug,
-  payload,
+	environment,
+	workflowSlug,
+	payload,
 }: {
-  environment: IEnvironment;
-  workflowSlug: string;
-  payload: SyncWorkflowDto;
+	environment: IEnvironment;
+	workflowSlug: string;
+	payload: SyncWorkflowDto;
 }) {
-  return putV2<{ data: WorkflowResponseDto }>(`/workflows/${workflowSlug}/sync`, { environment, body: payload });
+	return putV2<{ data: WorkflowResponseDto }>(
+		`/workflows/${workflowSlug}/sync`,
+		{ environment, body: payload },
+	);
 }
 
 export const updateWorkflow = async ({
-  environment,
-  workflow,
-  workflowSlug,
+	environment,
+	workflow,
+	workflowSlug,
 }: {
-  environment: IEnvironment;
-  workflow: UpdateWorkflowDto;
-  workflowSlug: string;
+	environment: IEnvironment;
+	workflow: UpdateWorkflowDto;
+	workflowSlug: string;
 }): Promise<WorkflowResponseDto> => {
-  const { data } = await putV2<{ data: WorkflowResponseDto }>(`/workflows/${workflowSlug}`, {
-    environment,
-    body: workflow,
-  });
+	const { data } = await putV2<{ data: WorkflowResponseDto }>(
+		`/workflows/${workflowSlug}`,
+		{
+			environment,
+			body: workflow,
+		},
+	);
 
-  return data;
+	return data;
 };
 
 export const deleteWorkflow = async ({
-  environment,
-  workflowSlug,
+	environment,
+	workflowSlug,
 }: {
-  environment: IEnvironment;
-  workflowSlug: string;
+	environment: IEnvironment;
+	workflowSlug: string;
 }): Promise<void> => {
-  return delV2(`/workflows/${workflowSlug}`, { environment });
+	return delV2(`/workflows/${workflowSlug}`, { environment });
 };
 
 export const patchWorkflow = async ({
-  environment,
-  workflow,
-  workflowSlug,
+	environment,
+	workflow,
+	workflowSlug,
 }: {
-  environment: IEnvironment;
-  workflow: PatchWorkflowDto;
-  workflowSlug: string;
+	environment: IEnvironment;
+	workflow: PatchWorkflowDto;
+	workflowSlug: string;
 }): Promise<WorkflowResponseDto> => {
-  const res = await patchV2<{ data: WorkflowResponseDto }>(`/workflows/${workflowSlug}`, {
-    environment,
-    body: workflow,
-  });
+	const res = await patchV2<{ data: WorkflowResponseDto }>(
+		`/workflows/${workflowSlug}`,
+		{
+			environment,
+			body: workflow,
+		},
+	);
 
-  return res.data;
+	return res.data;
 };
 
 export const duplicateWorkflow = async ({
-  environment,
-  workflow,
-  workflowSlug,
+	environment,
+	workflow,
+	workflowSlug,
 }: {
-  environment: IEnvironment;
-  workflow: DuplicateWorkflowDto;
-  workflowSlug: string;
+	environment: IEnvironment;
+	workflow: DuplicateWorkflowDto;
+	workflowSlug: string;
 }) => {
-  return postV2<{ data: WorkflowResponseDto }>(`/workflows/${workflowSlug}/duplicate`, {
-    environment,
-    body: workflow,
-  });
+	return postV2<{ data: WorkflowResponseDto }>(
+		`/workflows/${workflowSlug}/duplicate`,
+		{
+			environment,
+			body: workflow,
+		},
+	);
 };

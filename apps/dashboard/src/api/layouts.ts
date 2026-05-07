@@ -1,132 +1,201 @@
-import {
-  CreateLayoutDto,
-  DuplicateLayoutDto,
-  GeneratePreviewResponseDto,
-  IEnvironment,
-  LayoutResponseDto,
-  ListLayoutsResponse,
-  UpdateLayoutDto,
-} from '@novu/shared';
-import { delV2, getV2, postV2, putV2 } from './api.client';
+import type {
+	CreateLayoutDto,
+	DuplicateLayoutDto,
+	GeneratePreviewResponseDto,
+	IEnvironment,
+	LayoutContainerConfig,
+	LayoutResponseDto,
+	ListLayoutsResponse,
+	UpdateLayoutDto,
+} from "@novu/shared";
+import { delV2, getV2, postV2, putV2 } from "./api.client";
+
+export type GenerateLayoutResponse = {
+	body: string;
+	container?: LayoutContainerConfig;
+};
 
 export type WorkflowInfo = {
-  name: string;
-  workflowId: string;
+	name: string;
+	workflowId: string;
 };
 
 export type GetLayoutUsageResponse = {
-  workflows: WorkflowInfo[];
+	workflows: WorkflowInfo[];
 };
 
 export const getLayouts = async ({
-  environment,
-  limit,
-  query,
-  offset,
-  orderBy,
-  orderDirection,
+	environment,
+	limit,
+	query,
+	offset,
+	orderBy,
+	orderDirection,
 }: {
-  environment: IEnvironment;
-  limit: number;
-  offset: number;
-  query: string;
-  orderBy?: string;
-  orderDirection?: string;
+	environment: IEnvironment;
+	limit: number;
+	offset: number;
+	query: string;
+	orderBy?: string;
+	orderDirection?: string;
 }): Promise<ListLayoutsResponse> => {
-  const params = new URLSearchParams({
-    limit: limit.toString(),
-    offset: offset.toString(),
-    query,
-  });
+	const params = new URLSearchParams({
+		limit: limit.toString(),
+		offset: offset.toString(),
+		query,
+	});
 
-  if (orderBy) {
-    params.append('orderBy', orderBy);
-  }
+	if (orderBy) {
+		params.append("orderBy", orderBy);
+	}
 
-  if (orderDirection) {
-    params.append('orderDirection', orderDirection.toUpperCase());
-  }
+	if (orderDirection) {
+		params.append("orderDirection", orderDirection.toUpperCase());
+	}
 
-  const { data } = await getV2<{ data: ListLayoutsResponse }>(`/layouts?${params.toString()}`, { environment });
+	const { data } = await getV2<{ data: ListLayoutsResponse }>(
+		`/layouts?${params.toString()}`,
+		{ environment },
+	);
 
-  return data;
+	return data;
 };
 
-export const createLayout = async ({ environment, layout }: { environment: IEnvironment; layout: CreateLayoutDto }) => {
-  const { data } = await postV2<{ data: LayoutResponseDto }>(`/layouts`, { environment, body: layout });
+export const createLayout = async ({
+	environment,
+	layout,
+}: {
+	environment: IEnvironment;
+	layout: CreateLayoutDto;
+}) => {
+	const { data } = await postV2<{ data: LayoutResponseDto }>(`/layouts`, {
+		environment,
+		body: layout,
+	});
 
-  return data;
+	return data;
 };
 
-export const getLayout = async ({ environment, layoutSlug }: { environment: IEnvironment; layoutSlug: string }) => {
-  const { data } = await getV2<{ data: LayoutResponseDto }>(`/layouts/${layoutSlug}`, { environment });
+export const getLayout = async ({
+	environment,
+	layoutSlug,
+}: {
+	environment: IEnvironment;
+	layoutSlug: string;
+}) => {
+	const { data } = await getV2<{ data: LayoutResponseDto }>(
+		`/layouts/${layoutSlug}`,
+		{ environment },
+	);
 
-  return data;
+	return data;
 };
 
 export const updateLayout = async ({
-  environment,
-  layout,
-  layoutSlug,
+	environment,
+	layout,
+	layoutSlug,
 }: {
-  environment: IEnvironment;
-  layout: UpdateLayoutDto;
-  layoutSlug: string;
+	environment: IEnvironment;
+	layout: UpdateLayoutDto;
+	layoutSlug: string;
 }) => {
-  const { data } = await putV2<{ data: LayoutResponseDto }>(`/layouts/${layoutSlug}`, { environment, body: layout });
+	const { data } = await putV2<{ data: LayoutResponseDto }>(
+		`/layouts/${layoutSlug}`,
+		{ environment, body: layout },
+	);
 
-  return data;
+	return data;
 };
 
-export const deleteLayout = async ({ environment, layoutSlug }: { environment: IEnvironment; layoutSlug: string }) => {
-  await delV2(`/layouts/${layoutSlug}`, { environment });
+export const deleteLayout = async ({
+	environment,
+	layoutSlug,
+}: {
+	environment: IEnvironment;
+	layoutSlug: string;
+}) => {
+	await delV2(`/layouts/${layoutSlug}`, { environment });
 };
 
 export const duplicateLayout = async ({
-  environment,
-  layoutSlug,
-  data,
+	environment,
+	layoutSlug,
+	data,
 }: {
-  environment: IEnvironment;
-  layoutSlug: string;
-  data: DuplicateLayoutDto;
+	environment: IEnvironment;
+	layoutSlug: string;
+	data: DuplicateLayoutDto;
 }) => {
-  const { data: result } = await postV2<{ data: LayoutResponseDto }>(`/layouts/${layoutSlug}/duplicate`, {
-    environment,
-    body: data,
-  });
+	const { data: result } = await postV2<{ data: LayoutResponseDto }>(
+		`/layouts/${layoutSlug}/duplicate`,
+		{
+			environment,
+			body: data,
+		},
+	);
 
-  return result;
+	return result;
 };
 
 export const getLayoutUsage = async ({
-  environment,
-  layoutSlug,
+	environment,
+	layoutSlug,
 }: {
-  environment: IEnvironment;
-  layoutSlug: string;
+	environment: IEnvironment;
+	layoutSlug: string;
 }): Promise<GetLayoutUsageResponse> => {
-  const { data } = await getV2<{ data: GetLayoutUsageResponse }>(`/layouts/${layoutSlug}/usage`, { environment });
+	const { data } = await getV2<{ data: GetLayoutUsageResponse }>(
+		`/layouts/${layoutSlug}/usage`,
+		{ environment },
+	);
 
-  return data;
+	return data;
+};
+
+export const generateLayout = async ({
+	environment,
+	prompt,
+	signal,
+}: {
+	environment: IEnvironment;
+	prompt: string;
+	signal?: AbortSignal;
+}): Promise<GenerateLayoutResponse> => {
+	const { data } = await postV2<{ data: GenerateLayoutResponse }>(
+		`/layouts/generate`,
+		{
+			environment,
+			body: { prompt },
+			signal,
+		},
+	);
+
+	return data;
 };
 
 export const previewLayout = async ({
-  environment,
-  layoutSlug,
-  previewData,
-  signal,
+	environment,
+	layoutSlug,
+	previewData,
+	signal,
 }: {
-  environment: IEnvironment;
-  layoutSlug: string;
-  previewData: { controlValues: Record<string, unknown>; previewPayload: Record<string, unknown> };
-  signal?: AbortSignal;
+	environment: IEnvironment;
+	layoutSlug: string;
+	previewData: {
+		controlValues: Record<string, unknown>;
+		previewPayload: Record<string, unknown>;
+	};
+	signal?: AbortSignal;
 }) => {
-  const { data } = await postV2<{ data: GeneratePreviewResponseDto }>(`/layouts/${layoutSlug}/preview`, {
-    environment,
-    body: previewData,
-    signal,
-  });
+	const { data } = await postV2<{ data: GeneratePreviewResponseDto }>(
+		`/layouts/${layoutSlug}/preview`,
+		{
+			environment,
+			body: previewData,
+			signal,
+		},
+	);
 
-  return data;
+	return data;
 };

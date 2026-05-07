@@ -105,6 +105,12 @@ const COLLECTION_REGISTRY: CollectionEntry[] = [
   // messagetemplates: per-step content (Maily JSON / HTML); largest
   //   single offender — caused OOM at 3400 docs / 257MB heap.
   // controls: layout + step control bodies, also large JSON payloads.
+  //   Note: layout-level controls.values.email may carry an optional
+  //   `container` object (maxWidth/align/padding/backgroundColor) added
+  //   by the email layout container feature. Ride-along — no schema
+  //   change to the backup registry; mongo accepts unknown fields.
+  // messagetemplates / controls: section nodes inside Maily JSON `body`
+  //   strings may carry an optional `fullBleed` boolean. Same: ride-along.
   // preferences, changes, subscribers, localizations: grow with usage.
   { name: 'notificationtemplates', highVolume: true },
   { name: 'messagetemplates', highVolume: true },

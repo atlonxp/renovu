@@ -115,6 +115,31 @@ export interface ThemeOptions {
   }>;
 }
 
+export interface ContainerConfig {
+  /**
+   * Maximum width of the email container. Examples: '600px', '800px', '100%'.
+   *
+   * Default: `'600px'`
+   */
+  maxWidth?: string;
+  /**
+   * Horizontal alignment of the container within the body.
+   *
+   * Default: `'center'`
+   */
+  align?: 'left' | 'center' | 'right';
+  /**
+   * CSS shorthand padding for the container, e.g. '1rem' or '16px 24px'.
+   *
+   * Default: `'1rem'`
+   */
+  padding?: string;
+  /**
+   * Background color of the container (hex).
+   */
+  backgroundColor?: string;
+}
+
 export interface MailyConfig {
   /**
    * The preview text is the snippet of text that is pulled into the inbox
@@ -123,6 +148,12 @@ export interface MailyConfig {
    * Default: `undefined`
    */
   preview?: string;
+  /**
+   * Container configuration for the email layout.
+   *
+   * Default: `{ maxWidth: '600px', align: 'center', padding: '1rem' }`
+   */
+  container?: ContainerConfig;
   /**
    * The theme object allows you to customize the colors and font sizes of the
    * rendered email.
@@ -170,6 +201,13 @@ const DEFAULT_RENDER_OPTIONS: RenderOptions = {
   pretty: false,
   plainText: false,
   noHtmlWrappingTags: false,
+};
+
+const DEFAULT_CONTAINER: Required<Pick<ContainerConfig, 'maxWidth' | 'align' | 'padding'>> &
+  Pick<ContainerConfig, 'backgroundColor'> = {
+  maxWidth: '600px',
+  align: 'center',
+  padding: '1rem',
 };
 
 const DEFAULT_THEME: ThemeOptions = {
@@ -335,6 +373,14 @@ export class Maily {
 
   setTheme(theme: Partial<ThemeOptions>) {
     this.config.theme = deepMerge(this.config.theme || DEFAULT_THEME, theme);
+  }
+
+  setContainer(container?: ContainerConfig) {
+    if (!container) {
+      return;
+    }
+
+    this.config.container = { ...this.config.container, ...container };
   }
 
   setVariableFormatter(formatter: VariableFormatter) {
@@ -511,24 +557,33 @@ export class Maily {
    */
   markup({ noHtmlWrappingTags }: Pick<RenderOptions, 'noHtmlWrappingTags'>) {
     const nodes = this.content.content || [];
-    const jsxNodes = nodes.map((node, index) => {
-      const nodeOptions: NodeOptions = {
-        prev: nodes[index - 1],
-        next: nodes[index + 1],
-        parent: node,
-      };
+    const renderNodes = (nodesToRender: JSONContent[]) =>
+      nodesToRender.map((node, index) => {
+        const nodeOptions: NodeOptions = {
+          prev: nodesToRender[index - 1],
+          next: nodesToRender[index + 1],
+          parent: node,
+        };
 
-      const component = this.renderNode(node, nodeOptions);
-      if (!component) {
-        return null;
-      }
+        const component = this.renderNode(node, nodeOptions);
+        if (!component) {
+          return null;
+        }
 
-      return <Fragment key={generateKey()}>{component}</Fragment>;
-    });
+        return <Fragment key={generateKey()}>{component}</Fragment>;
+      });
+
+    const jsxNodes = renderNodes(nodes);
+
+    const hasFullBleed = nodes.some((n) => n.type === 'section' && Boolean(n.attrs?.fullBleed));
 
     const { preview } = this.config;
     const tags = meta(this.meta);
     const htmlProps = this.htmlProps;
+
+    const bodyContent = hasFullBleed ? this.renderSegmentedBody(nodes, renderNodes) : (
+      <Container style={this.getContainerStyle()}>{jsxNodes}</Container>
+    );
 
     const markup = noHtmlWrappingTags ? (
       <Fragment>
@@ -562,18 +617,7 @@ export class Maily {
           }}
         >
           {preview ? <Preview id="__react-email-preview">{preview}</Preview> : null}
-          <Container
-            style={{
-              maxWidth: '600px',
-              minWidth: '300px',
-              width: '100%',
-              marginLeft: 'auto',
-              marginRight: 'auto',
-              padding: '1rem',
-            }}
-          >
-            {jsxNodes}
-          </Container>
+          {bodyContent}
           {this.openTrackingPixel ? (
             <Img
               alt=""
@@ -590,6 +634,82 @@ export class Maily {
     );
 
     return markup;
+  }
+
+  private renderSegmentedBody(
+    nodes: JSONContent[],
+    renderNodes: (nodesToRender: JSONContent[]) => Array<JSX.Element | null>
+  ): JSX.Element {
+    const containerStyle = this.getContainerStyle();
+    const segments: Array<{ kind: 'bounded' | 'bleed'; nodes: JSONContent[] }> = [];
+
+    nodes.forEach((node) => {
+      const isBleed = node.type === 'section' && Boolean(node.attrs?.fullBleed);
+      const last = segments[segments.length - 1];
+      if (isBleed) {
+        segments.push({ kind: 'bleed', nodes: [node] });
+      } else if (last?.kind === 'bounded') {
+        last.nodes.push(node);
+      } else {
+        segments.push({ kind: 'bounded', nodes: [node] });
+      }
+    });
+
+    return (
+      <Fragment>
+        {segments.map((segment) => {
+          if (segment.kind === 'bleed') {
+            return <Fragment key={generateKey()}>{renderNodes(segment.nodes)}</Fragment>;
+          }
+
+          return (
+            <Container key={generateKey()} style={containerStyle}>
+              {renderNodes(segment.nodes)}
+            </Container>
+          );
+        })}
+      </Fragment>
+    );
+  }
+
+  private getContainerStyle(): CSSProperties {
+    const container = this.config.container ?? {};
+    const maxWidth = container.maxWidth ?? DEFAULT_CONTAINER.maxWidth;
+    const align = container.align ?? DEFAULT_CONTAINER.align;
+    const padding = container.padding ?? DEFAULT_CONTAINER.padding;
+    const backgroundColor = container.backgroundColor;
+
+    let marginLeft: string;
+    let marginRight: string;
+    switch (align) {
+      case 'left':
+        marginLeft = '0';
+        marginRight = 'auto';
+        break;
+      case 'right':
+        marginLeft = 'auto';
+        marginRight = '0';
+        break;
+      default:
+        marginLeft = 'auto';
+        marginRight = 'auto';
+        break;
+    }
+
+    const style: CSSProperties = {
+      maxWidth,
+      minWidth: '300px',
+      width: '100%',
+      marginLeft,
+      marginRight,
+      padding,
+    };
+
+    if (backgroundColor) {
+      style.backgroundColor = backgroundColor;
+    }
+
+    return style;
   }
 
   private getMarginOverrideConditions(node: JSONContent, options?: NodeOptions) {
@@ -1221,13 +1341,23 @@ export class Maily {
     src = isSrcVariable ? this.variableUrlValue(src, options) : src;
     externalLink = isExternalLinkVariable ? this.variableUrlValue(externalLink, options) : externalLink;
 
-    // Handle width value
-    const imageWidth = width === 'auto' ? 'auto' : Number(width);
-    const widthStyle = imageWidth === 'auto' ? 'auto' : `${imageWidth}px`;
+    // Handle width value: supports 'auto', plain numbers (px), or strings ending in '%'
+    const widthStyle = (() => {
+      if (width === 'auto' || width === '' || width == null) return 'auto';
+      const str = String(width).trim();
+      if (str.endsWith('%')) return str;
+      const n = Number(str);
+      return Number.isFinite(n) && n > 0 ? `${n}px` : 'auto';
+    })();
 
     // Handle height value
-    const imageHeight = height === 'auto' ? 'auto' : Number(height);
-    const heightStyle = imageHeight === 'auto' ? 'auto' : `${imageHeight}px`;
+    const heightStyle = (() => {
+      if (height === 'auto' || height === '' || height == null) return 'auto';
+      const str = String(height).trim();
+      if (str.endsWith('%')) return str;
+      const n = Number(str);
+      return Number.isFinite(n) && n > 0 ? `${n}px` : 'auto';
+    })();
 
     const mainImage = (
       <Img
@@ -1519,6 +1649,7 @@ export class Maily {
       paddingLeft = DEFAULT_SECTION_PADDING_LEFT,
 
       textAlign = 'initial',
+      fullBleed = false,
     } = attrs || {};
 
     const { shouldRemoveBottomMargin } = this.getMarginOverrideConditions(node, options);
@@ -1526,6 +1657,44 @@ export class Maily {
     const shouldShow = this.shouldShow(node, options);
     if (!shouldShow) {
       return <></>;
+    }
+
+    if (fullBleed) {
+      return (
+        <Row
+          style={{
+            width: '100%',
+            margin: 0,
+            marginBottom: shouldRemoveBottomMargin ? 0 : marginBottom,
+          }}
+        >
+          <Column
+            align={align}
+            style={{
+              borderColor,
+              borderWidth,
+              borderStyle,
+
+              background,
+              backgroundColor,
+              borderRadius,
+
+              paddingTop,
+              paddingRight,
+              paddingBottom,
+              paddingLeft,
+
+              textAlign,
+              width: '100%',
+            }}
+          >
+            {this.getMappedContent(node, {
+              ...options,
+              parent: node,
+            })}
+          </Column>
+        </Row>
+      );
     }
 
     return (

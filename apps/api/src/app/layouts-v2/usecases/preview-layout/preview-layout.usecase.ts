@@ -24,6 +24,7 @@ import {
   EnvironmentSystemVariables,
   LAYOUT_PREVIEW_EMAIL_STEP,
   LAYOUT_PREVIEW_WORKFLOW_ID,
+  LayoutContainerConfig,
   ResourceOriginEnum,
 } from '@novu/shared';
 import { GenerateLayoutPreviewResponseDto } from '../../dtos/generate-layout-preview-response.dto';
@@ -134,6 +135,14 @@ export class PreviewLayoutUsecase {
 
       const { body: previewBody } = executeOutput.outputs as any;
 
+      // Use raw form-supplied container so unsaved edits show up in live preview.
+      // The sanitizer pipeline strips optional fields under some conditions; reading
+      // from the raw command payload guarantees the user's in-flight values reach here.
+      const rawContainer =
+        (command.layoutPreviewRequestDto.controlValues as { email?: { container?: LayoutContainerConfig } })?.email
+          ?.container ?? email?.container;
+      const wrappedBody = wrapWithLayoutContainer(previewBody, rawContainer);
+
       // Generate schema from the preview payload example
       const schema = {
         type: JsonSchemaTypeEnum.OBJECT,
@@ -145,7 +154,7 @@ export class PreviewLayoutUsecase {
 
       return {
         result: {
-          preview: { body: previewBody },
+          preview: { body: wrappedBody },
           type: ChannelTypeEnum.EMAIL,
         },
         previewPayloadExample: payloadExample,
@@ -165,4 +174,40 @@ export class PreviewLayoutUsecase {
       };
     }
   }
+}
+
+// Mirrors maily-render's getContainerStyle so the preview reflects the same
+// container chrome the recipient will see on a real send.
+function wrapWithLayoutContainer(body: string, container?: LayoutContainerConfig): string {
+  const maxWidth = container?.maxWidth ?? '600px';
+  const align = container?.align ?? 'center';
+  const padding = container?.padding ?? '1rem';
+  const backgroundColor = container?.backgroundColor;
+
+  let marginLeft = 'auto';
+  let marginRight = 'auto';
+  if (align === 'left') marginLeft = '0';
+  if (align === 'right') marginRight = '0';
+
+  // For pixel widths lock the canvas to that exact width so editor and preview
+  // render at the same size. For fluid widths (100% etc.) fill the pane truly
+  // so no whitespace is wasted; the recipient also sees the same fluid behavior.
+  const trimmed = maxWidth.trim();
+  const isFixedPxWidth = /\d+px$/.test(trimmed);
+
+  const widthParts = isFixedPxWidth
+    ? [`width:${trimmed}`, `max-width:${trimmed}`, 'flex-shrink:0']
+    : [`max-width:${trimmed}`, 'width:100%'];
+
+  const styleParts = [
+    ...widthParts,
+    'min-width:300px',
+    `margin-left:${marginLeft}`,
+    `margin-right:${marginRight}`,
+    `padding:${padding}`,
+    'box-sizing:border-box',
+    backgroundColor ? `background-color:${backgroundColor}` : '',
+  ].filter(Boolean);
+
+  return `<div style="${styleParts.join(';')}">${body}</div>`;
 }

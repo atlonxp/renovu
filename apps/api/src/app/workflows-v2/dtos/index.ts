@@ -2,6 +2,8 @@ export * from './control-schemas.dto';
 export * from './create-step.dto';
 export * from './create-workflow.dto';
 export * from './duplicate-workflow.dto';
+export * from './generate-workflow-request.dto';
+export * from './generate-workflow-response.dto';
 export * from './get-list-query-params';
 export * from './list-workflow.dto';
 export * from './patch-step-data.dto';

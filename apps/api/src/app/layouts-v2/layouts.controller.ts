@@ -31,6 +31,8 @@ import { ApiCommonResponses, ApiResponse } from '../shared/framework/response.de
 import { SdkMethodName } from '../shared/framework/swagger/sdk.decorators';
 import {
   DuplicateLayoutDto,
+  GenerateLayoutRequestDto,
+  GenerateLayoutResponseDto,
   GetLayoutListQueryParamsDto,
   GetLayoutUsageResponseDto,
   ListLayoutResponseDto,
@@ -39,6 +41,7 @@ import { GenerateLayoutPreviewResponseDto } from './dtos/generate-layout-preview
 import { LayoutPreviewRequestDto } from './dtos/layout-preview-request.dto';
 import { DeleteLayoutCommand, DeleteLayoutUseCase } from './usecases/delete-layout';
 import { DuplicateLayoutCommand, DuplicateLayoutUseCase } from './usecases/duplicate-layout';
+import { GenerateLayoutCommand, GenerateLayoutUsecase } from './usecases/generate-layout';
 import { GetLayoutUsageCommand, GetLayoutUsageUseCase } from './usecases/get-layout-usage';
 import { ListLayoutsCommand, ListLayoutsUseCase } from './usecases/list-layouts';
 import { PreviewLayoutCommand, PreviewLayoutUsecase } from './usecases/preview-layout';
@@ -59,7 +62,8 @@ export class LayoutsController {
     private duplicateLayoutUseCase: DuplicateLayoutUseCase,
     private listLayoutsUseCase: ListLayoutsUseCase,
     private previewLayoutUsecase: PreviewLayoutUsecase,
-    private getLayoutUsageUseCase: GetLayoutUsageUseCase
+    private getLayoutUsageUseCase: GetLayoutUsageUseCase,
+    private generateLayoutUsecase: GenerateLayoutUsecase
   ) {}
 
   @Post('')
@@ -75,14 +79,19 @@ export class LayoutsController {
     @UserSession(ParseSlugEnvironmentIdPipe) user: UserSessionData,
     @Body() createLayoutDto: CreateLayoutDto
   ): Promise<LayoutResponseDto> {
+    const initialEmail = createLayoutDto.initialControlValues?.email;
+    const initialContainer = initialEmail?.container;
+    const initialBody = initialEmail?.body;
+
     return this.upsertLayoutUseCase.execute(
       UpsertLayoutCommand.create({
         layoutDto: {
           ...createLayoutDto,
           controlValues: {
             email: {
-              body: JSON.stringify(EMPTY_LAYOUT),
+              body: initialBody ?? JSON.stringify(EMPTY_LAYOUT),
               editorType: 'block',
+              ...(initialContainer ? { container: initialContainer } : {}),
             },
           },
         },
@@ -236,6 +245,31 @@ export class LayoutsController {
         user,
         layoutIdOrInternalId,
         layoutPreviewRequestDto,
+      })
+    );
+  }
+
+  @Post('generate')
+  @ExternalApiAccessible()
+  @ApiOperation({
+    summary: 'Generate a layout with AI',
+    description:
+      'Generates a populated email layout body and recommended container from a natural-language brief. Requires an OpenAI API key configured at the organization level.',
+  })
+  @ApiBody({ type: GenerateLayoutRequestDto, description: 'AI generation brief' })
+  @ApiResponse(GenerateLayoutResponseDto, 201)
+  @RequirePermissions(PermissionsEnum.WORKFLOW_WRITE)
+  @SdkMethodName('generate')
+  async generate(
+    @UserSession(ParseSlugEnvironmentIdPipe) user: UserSessionData,
+    @Body() body: GenerateLayoutRequestDto
+  ): Promise<GenerateLayoutResponseDto> {
+    return this.generateLayoutUsecase.execute(
+      GenerateLayoutCommand.create({
+        prompt: body.prompt,
+        environmentId: user.environmentId,
+        organizationId: user.organizationId,
+        userId: user._id,
       })
     );
   }

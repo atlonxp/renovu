@@ -37,6 +37,7 @@ import { DeleteWorkflowUseCase } from '../workflows-v1/usecases/delete-workflow/
 
 import {
   BuildWorkflowTestDataUseCase,
+  GenerateWorkflowUsecase,
   ListWorkflowsUseCase,
   SyncToEnvironmentUseCase,
   TestHttpEndpointUsecase,
@@ -94,6 +95,7 @@ const MODULES = [
     MockDataGeneratorService,
     PreviewErrorHandler,
     TestHttpEndpointUsecase,
+    GenerateWorkflowUsecase,
   ],
   exports: [UpsertWorkflowUseCase, SyncToEnvironmentUseCase, GetWorkflowUseCase, DeleteWorkflowUseCase],
 })

@@ -25,16 +25,34 @@ export enum LayoutCreationSourceEnum {
   DASHBOARD = 'dashboard',
 }
 
+export type LayoutContainerConfig = {
+  maxWidth?: string;
+  align?: 'left' | 'center' | 'right';
+  padding?: string;
+  backgroundColor?: string;
+};
+
 export type CreateLayoutDto = {
   layoutId: string;
   name: string;
   isTranslationEnabled?: boolean;
   __source: LayoutCreationSourceEnum;
+  initialControlValues?: {
+    email?: {
+      /**
+       * Stringified Maily JSON document. When set, replaces the default empty body
+       * (e.g. used by AI-generated layouts to seed the editor with real content).
+       */
+      body?: string;
+      container?: LayoutContainerConfig;
+    };
+  };
 };
 
 export type EmailControlsDto = {
   body: string;
   editorType: 'html' | 'block';
+  container?: LayoutContainerConfig;
 };
 
 export type LayoutControlValuesDto = {

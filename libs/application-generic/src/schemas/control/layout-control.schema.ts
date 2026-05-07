@@ -4,12 +4,22 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { defaultOptions } from './shared';
 
+const containerSchema = z
+  .object({
+    maxWidth: z.string().optional(),
+    align: z.enum(['left', 'center', 'right']).optional(),
+    padding: z.string().optional(),
+    backgroundColor: z.string().optional(),
+  })
+  .optional();
+
 // email layout schema is a subset of the email control schema
 const layoutZodSchema = z.object({
   email: z
     .object({
       body: z.string().min(1),
       editorType: z.enum(['block', 'html']).optional().default('block'),
+      container: containerSchema,
     })
     .optional(),
 });

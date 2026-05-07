@@ -40,6 +40,7 @@ import {
   ExecutionDetailsStatusEnum,
   LAYOUT_CONTENT_VARIABLE,
   LAYOUT_PREVIEW_EMAIL_STEP,
+  LayoutContainerConfig,
 } from '@novu/shared';
 import { decodeHTML } from 'entities';
 import { Liquid } from 'liquidjs';
@@ -421,6 +422,7 @@ export class EmailOutputRendererUsecase extends BaseTranslationRendererUsecase {
      * @see packages/framework/src/client.ts - preprocessFilterTranslationArgs
      */
     const layoutBody = (layoutControlValues.email?.body ?? '').replace(/'t\.([\p{L}\p{N}_.-]+)'/gu, "'{{t.$1}}'");
+    const layoutContainer = layoutControlValues.email?.container;
 
     return this.processBodyContent({
       body: layoutBody,
@@ -433,6 +435,7 @@ export class EmailOutputRendererUsecase extends BaseTranslationRendererUsecase {
       resourceId: overriddenStepLayoutId ?? undefined,
       resourceType: LocalizationResourceEnum.LAYOUT,
       locale,
+      container: layoutContainer,
     });
   }
 
@@ -464,6 +467,7 @@ export class EmailOutputRendererUsecase extends BaseTranslationRendererUsecase {
     noHtmlWrappingTags,
     organization,
     translationContext,
+    container,
   }: {
     body: string;
     payload: FullPayloadForRender;
@@ -475,6 +479,7 @@ export class EmailOutputRendererUsecase extends BaseTranslationRendererUsecase {
     noHtmlWrappingTags?: boolean;
     organization?: OrganizationEntity;
     translationContext?: TranslationContext | null;
+    container?: LayoutContainerConfig;
   }): Promise<string> {
     if (typeof body === 'object' || (typeof body === 'string' && isJsonString(body))) {
       const unescapedPayload = this.deepUnescapeTranslationStrings(payload) as FullPayloadForRender;
@@ -493,7 +498,7 @@ export class EmailOutputRendererUsecase extends BaseTranslationRendererUsecase {
         translationContext,
       });
       const parsedMaily = await this.parseMailyContentByLiquid(translatedMaily, escapedPayloadForJson);
-      const renderedMaily = await mailyRender(parsedMaily, { noHtmlWrappingTags });
+      const renderedMaily = await mailyRender(parsedMaily, { noHtmlWrappingTags, container });
       return decodeHTML(renderedMaily);
     } else {
       const processedHtml = await this.processTextTranslations({

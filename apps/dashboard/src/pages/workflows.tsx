@@ -18,11 +18,13 @@ import {
   RiInformation2Line,
   RiLoader4Line,
   RiRouteFill,
+  RiSparkling2Fill,
 } from 'react-icons/ri';
 import { Link, Outlet, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { fetchWorkflowSuggestions } from '@/api/ai';
 import { Shimmer } from '@/components/ai-elements/shimmer';
 import { DashboardLayout } from '@/components/dashboard-layout';
+import { AiGenerateWorkflowDialog } from '@/components/workflow-editor/ai-generate-workflow-dialog';
 import { AiThinking } from '@/components/icons/ai-thinking';
 import { Broom } from '@/components/icons/broom';
 import { PageMeta } from '@/components/page-meta';
@@ -542,6 +544,7 @@ const CreateWorkflowButton = () => {
   const track = useTelemetry();
   const has = useHasPermission();
   const { currentEnvironment } = useEnvironment();
+  const [isAiDialogOpen, setIsAiDialogOpen] = useState(false);
 
   const handleCreateWorkflow = (event: Pick<Event, 'preventDefault' | 'stopPropagation'>) => {
     event.preventDefault();
@@ -558,6 +561,12 @@ const CreateWorkflowButton = () => {
         environmentSlug: environmentSlug || '',
       })}?source=create-workflow-dropdown`
     );
+  };
+
+  const openAiDialog = (event: Pick<Event, 'preventDefault' | 'stopPropagation'>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsAiDialogOpen(true);
   };
 
   const canCreateWorkflow = has({ permission: PermissionsEnum.WORKFLOW_WRITE });
@@ -629,9 +638,14 @@ const CreateWorkflowButton = () => {
               <RiFileMarkedLine />
               From Template
             </DropdownMenuItem>
+            <DropdownMenuItem className="cursor-pointer" onSelect={openAiDialog} data-testid="create-workflow-from-ai">
+              <RiSparkling2Fill className="text-primary-base" />
+              Generate with AI
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </ButtonGroupItem>
+      <AiGenerateWorkflowDialog open={isAiDialogOpen} onOpenChange={setIsAiDialogOpen} />
     </ButtonGroupRoot>
   );
 };

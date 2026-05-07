@@ -25,6 +25,7 @@ export const useSectionState = (editor: Editor | null) => {
           currentBorderRadius: DEFAULT_SECTION_BORDER_RADIUS,
           currentBackgroundColor: DEFAULT_SECTION_BACKGROUND_COLOR,
           currentBorderColor: DEFAULT_SECTION_BORDER_COLOR,
+          currentFullBleed: false,
         };
       }
 
@@ -52,6 +53,7 @@ export const useSectionState = (editor: Editor | null) => {
         isColumnsActive: ctx.editor.isActive('columns'),
 
         currentShowIfKey: ctx.editor.getAttributes('section')?.showIfKey || '',
+        currentFullBleed: Boolean(ctx.editor.getAttributes('section')?.fullBleed),
       };
     },
     equalityFn: deepEql,

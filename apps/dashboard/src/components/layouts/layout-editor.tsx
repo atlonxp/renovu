@@ -1,6 +1,14 @@
 import { EnvironmentTypeEnum } from '@novu/shared';
 import { useState } from 'react';
-import { RiArrowRightSLine, RiCodeBlock, RiEdit2Line, RiEyeLine, RiLockLine, RiSettings4Line } from 'react-icons/ri';
+import {
+  RiArrowRightSLine,
+  RiCodeBlock,
+  RiEdit2Line,
+  RiEyeLine,
+  RiLockLine,
+  RiSettings4Line,
+  RiSparkling2Fill,
+} from 'react-icons/ri';
 import { useNavigate } from 'react-router-dom';
 import { useEnvironment } from '@/context/environment/hooks';
 import { useIsTranslationEnabled } from '@/hooks/use-is-translation-enabled';
@@ -14,6 +22,7 @@ import { LocaleSelect } from '../primitives/locale-select';
 import { PanelHeader } from '../workflow-editor/steps/layout/panel-header';
 import { ResizableLayout } from '../workflow-editor/steps/layout/resizable-layout';
 import { TranslationStatus } from '../workflow-editor/translation-status';
+import { AiRegenerateLayoutDialog } from './ai-regenerate-layout-dialog';
 import { LayoutEditorFactory } from './layout-editor-factory';
 import { useLayoutEditor } from './layout-editor-provider';
 import { LayoutEditorSettingsDrawer } from './layout-editor-settings-drawer';
@@ -26,6 +35,7 @@ export const LayoutEditor = () => {
   const { layout, isPreviewPending, isPending, hasUnsavedChanges, isUpdating, selectedLocale, issues, onLocaleChange } =
     useLayoutEditor();
   const [isSettingsDrawerOpen, setIsSettingsDrawerOpen] = useState(false);
+  const [isAiDialogOpen, setIsAiDialogOpen] = useState(false);
   const isTranslationsEnabled = useIsTranslationEnabled({
     isTranslationEnabledOnResource: layout?.isTranslationEnabled ?? false,
   });
@@ -75,20 +85,34 @@ export const LayoutEditor = () => {
               <ResizableLayout.EditorPanel>
                 <div className="flex items-center justify-between">
                   <PanelHeader icon={() => <RiEdit2Line />} title="Layout Editor" className="flex-1">
-                    <TranslationStatus
-                      resourceId={layout?.layoutId ?? ''}
-                      resourceType={LocalizationResourceEnum.LAYOUT}
-                      isTranslationEnabled={isTranslationsEnabled}
-                      className="h-7 text-xs"
-                    />
-                    <CompactButton
-                      size="md"
-                      variant="ghost"
-                      type="button"
-                      icon={RiSettings4Line}
-                      onClick={() => setIsSettingsDrawerOpen(true)}
-                      className="ml-2 [&>svg]:size-4"
-                    />
+                    <div className="flex items-center gap-1">
+                      <TranslationStatus
+                        resourceId={layout?.layoutId ?? ''}
+                        resourceType={LocalizationResourceEnum.LAYOUT}
+                        isTranslationEnabled={isTranslationsEnabled}
+                        className="h-7 text-xs"
+                      />
+                      {currentEnvironment?.type === EnvironmentTypeEnum.DEV && (
+                        <CompactButton
+                          size="md"
+                          variant="ghost"
+                          type="button"
+                          icon={RiSparkling2Fill}
+                          onClick={() => setIsAiDialogOpen(true)}
+                          className="text-primary-base [&>svg]:size-4"
+                          data-testid="layout-editor-ai-regenerate"
+                          title="Regenerate with AI"
+                        />
+                      )}
+                      <CompactButton
+                        size="md"
+                        variant="ghost"
+                        type="button"
+                        icon={RiSettings4Line}
+                        onClick={() => setIsSettingsDrawerOpen(true)}
+                        className="[&>svg]:size-4"
+                      />
+                    </div>
                   </PanelHeader>
                 </div>
                 <div className="flex-1 overflow-y-auto">
@@ -177,6 +201,7 @@ export const LayoutEditor = () => {
       </ResizableLayout>
 
       <LayoutEditorSettingsDrawer isOpen={isSettingsDrawerOpen} onOpenChange={setIsSettingsDrawerOpen} />
+      <AiRegenerateLayoutDialog open={isAiDialogOpen} onOpenChange={setIsAiDialogOpen} />
     </div>
   );
 };

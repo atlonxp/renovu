@@ -47,6 +47,7 @@ import TruncatedText from '../truncated-text';
 import { TranslationToggleSection } from '../workflow-editor/translation-toggle-section';
 import { DeleteLayoutDialog } from './delete-layout-dialog';
 import { useLayoutEditor } from './layout-editor-provider';
+import { LayoutContainerSection } from './layout-container-section';
 import { layoutSchema } from './schema';
 
 type LayoutSettingsFormData = z.infer<typeof layoutSchema>;
@@ -325,6 +326,10 @@ export const LayoutEditorSettingsDrawer = forwardRef<HTMLDivElement, LayoutEdito
                       />
                     )}
                   />
+
+                  <Separator />
+
+                  <LayoutContainerSection />
                 </SheetMain>
                 <Separator />
                 <span className="text-label-xs text-text-soft mx-4 my-1">{`Last updated ${formatDistanceToNow(layout.updatedAt, { addSuffix: true })}`}</span>

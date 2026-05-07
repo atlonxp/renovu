@@ -12,7 +12,7 @@ import {
   SubscriberDto,
 } from '@novu/shared';
 import { createContext, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, UseFormReturn } from 'react-hook-form';
 import { useBlocker, useLocation } from 'react-router-dom';
 import { ExternalToast } from 'sonner';
 import { NovuApiError } from '@/api/api.client';
@@ -140,6 +140,7 @@ export type LayoutContextType = {
   hasUnsavedChanges: boolean;
   clearPersistedSubscriber: () => void;
   clearPersistedContext: () => void;
+  form: UseFormReturn<Record<string, unknown>>;
 };
 
 export const LayoutEditorContext = createContext<LayoutContextType>({} as LayoutContextType);
@@ -351,6 +352,7 @@ export const LayoutEditorProvider = ({
       hasUnsavedChanges,
       clearPersistedSubscriber,
       clearPersistedContext,
+      form,
     }),
     [
       layout,
@@ -372,6 +374,7 @@ export const LayoutEditorProvider = ({
       hasUnsavedChanges,
       clearPersistedSubscriber,
       clearPersistedContext,
+      form,
     ]
   );
 

@@ -1,8 +1,8 @@
 import { Variable } from '@novu/maily-core/extensions';
-import { FeatureFlagsKeysEnum } from '@novu/shared';
+import { FeatureFlagsKeysEnum, LayoutContainerConfig } from '@novu/shared';
 import { Editor } from '@tiptap/core';
 import { EditorView } from '@uiw/react-codemirror';
-import React, { useCallback, useMemo, useRef } from 'react';
+import React, { CSSProperties, useCallback, useMemo, useRef } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { HtmlEditor } from '@/components/html-editor';
 import { Maily } from '@/components/maily/maily';
@@ -121,6 +121,49 @@ export const LayoutEmailBody = () => {
   });
 
   const isTranslationEnabled = shouldEnableTranslations && !isTranslationKeysLoading;
+  const container = useWatch({ name: 'container', control }) as LayoutContainerConfig | undefined;
+  const editorContainerStyle = useMemo<CSSProperties | undefined>(() => {
+    if (!container || (!container.maxWidth && !container.align && !container.padding && !container.backgroundColor)) {
+      return undefined;
+    }
+
+    let marginLeft: string | undefined;
+    let marginRight: string | undefined;
+    switch (container.align) {
+      case 'left':
+        marginLeft = '0';
+        marginRight = 'auto';
+        break;
+      case 'right':
+        marginLeft = 'auto';
+        marginRight = '0';
+        break;
+      case 'center':
+        marginLeft = 'auto';
+        marginRight = 'auto';
+        break;
+      default:
+        break;
+    }
+
+    // Pixel widths lock the canvas to that exact width so editor and preview
+    // show the same size. Fluid widths (100% etc.) fill the pane truly so
+    // no white space is wasted; both panes fill their own width identically.
+    const trimmed = container.maxWidth?.trim();
+    const isFixedPxWidth = !!trimmed && /\d+px$/.test(trimmed);
+
+    return {
+      ...(isFixedPxWidth
+        ? { width: trimmed, maxWidth: trimmed, flexShrink: 0 }
+        : { maxWidth: container.maxWidth, width: '100%' }),
+      padding: container.padding,
+      backgroundColor: container.backgroundColor,
+      marginLeft,
+      marginRight,
+      boxSizing: 'border-box',
+    };
+  }, [container]);
+
   const editorKey = useMemo(() => {
     const variableNames = [...parsedVariables.primitives, ...parsedVariables.arrays, ...parsedVariables.namespaces]
       .map((v) => v.name)
@@ -190,6 +233,7 @@ export const LayoutEmailBody = () => {
             key={editorKey}
             value={isMaily ? field.value : ''}
             onChange={field.onChange}
+            containerStyle={editorContainerStyle}
             variables={parsedVariables}
             blocks={blocks}
             addDigestVariables={false}

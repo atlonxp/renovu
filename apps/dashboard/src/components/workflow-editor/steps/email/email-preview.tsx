@@ -2,7 +2,6 @@ import { ResourceOriginEnum } from '@novu/shared';
 import { HTMLAttributes, useCallback, useEffect, useRef } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { RiArrowDownSFill, RiEdit2Line } from 'react-icons/ri';
-import { MAILY_EMAIL_WIDTH } from '@/components/maily/maily-config';
 import { Avatar, AvatarImage } from '@/components/primitives/avatar';
 import { Skeleton } from '@/components/primitives/skeleton';
 import { usePrimaryEmailIntegration } from '@/hooks/use-primary-email-integration';
@@ -150,10 +149,7 @@ export const EmailPreviewBody = (props: EmailPreviewBodyProps) => {
   }, [processBody, body]);
 
   return (
-    <div
-      {...rest}
-      className={cn(`bg-background mx-auto flex w-full flex-col max-w-[${MAILY_EMAIL_WIDTH}px]`, className)}
-    >
+    <div {...rest} className={cn(`bg-background mx-auto flex w-full flex-col`, className)}>
       <div
         className={cn(`shadow-xs min-h-80 w-full overflow-auto p-0`)}
         ref={(node) => {
