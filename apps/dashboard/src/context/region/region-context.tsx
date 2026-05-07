@@ -100,7 +100,7 @@ export function RegionProvider({ children }: RegionProviderProps) {
     if (targetOrgMembership && clerk) {
       try {
         await clerk.setActive({
-          organization: targetOrgMembership.organization as Parameters<typeof clerk.setActive>[0]['organization'],
+          organization: targetOrgMembership.organization as NonNullable<Parameters<typeof clerk.setActive>[0]>['organization'],
         });
 
         const newUrl = `${targetDashboardUrl}${currentPath}`;

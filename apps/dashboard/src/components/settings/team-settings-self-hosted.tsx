@@ -119,7 +119,7 @@ export function TeamSettingsSelfHosted() {
       <div>
         <h2 className="text-label-sm text-text-strong mb-3">Members ({members.length})</h2>
         <div className="rounded-lg border border-neutral-100 overflow-hidden">
-          <Table>
+          <Table isLoading={isLoading} loadingRowsCount={3}>
             <TableHeader>
               <TableRow>
                 <TableHead>Member</TableHead>
@@ -128,7 +128,7 @@ export function TeamSettingsSelfHosted() {
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
-            <TableBody isLoading={isLoading} loadingRowsCount={3}>
+            <TableBody>
               {members.map((m) => (
                 <TableRow key={m._id}>
                   <TableCell>

@@ -128,7 +128,7 @@ export const TranslationSettingsDrawer = forwardRef<HTMLDivElement, TranslationS
                 <div className="mb-6">
                   {aiKeyConfigured ? (
                     <InlineToast
-                      variant="information"
+                      variant="info"
                       title="AI provider configured"
                       description={
                         <span>

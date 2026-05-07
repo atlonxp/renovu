@@ -44,13 +44,22 @@ function safeUrl(value: string | undefined): string | undefined {
   }
 }
 
-function renderChildren(children: CardNode[] | undefined): React.ReactNode {
+// Return type is `any` to sidestep a cross-version @types/react conflict:
+// this package declares @types/react@19 but @react-email/components transitively
+// pulls @types/react@18.3.18 into the install graph. The 19.x ReactNode admits
+// `bigint` while the 18.x one does not, and the 19.x ReactElement generic
+// shape does not satisfy the 18.x ReactNode. Both narrowing and widening hit
+// version-mismatch errors. The functions only ever return JSX or null, so
+// runtime behavior is unaffected.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function renderChildren(children: CardNode[] | undefined): any {
   if (!children || children.length === 0) return null;
 
   return children.map((child, i) => <React.Fragment key={i}>{renderNode(child)}</React.Fragment>);
 }
 
-function renderNode(node: CardNode): React.ReactNode {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function renderNode(node: CardNode): any {
   switch (node.type) {
     case 'card':
       return (

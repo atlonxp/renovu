@@ -1,7 +1,7 @@
 import { ApiServiceLevelEnum, FeatureNameEnum, getFeatureForTierAsBoolean } from '@novu/shared';
 import { IS_SELF_HOSTED } from '@/config';
 import { useFetchSubscription } from '@/hooks/use-fetch-subscription';
-import { useTranslationSettings } from '@/hooks/use-translation-settings';
+import { useAiSettings } from '@/hooks/use-ai-settings';
 
 /**
  * Hook to check if translation feature is enabled
@@ -21,10 +21,10 @@ export const useIsTranslationEnabled = ({
   isTranslationEnabledOnResource?: boolean;
 } = {}) => {
   const { subscription } = useFetchSubscription();
-  const { data: translationSettings } = useTranslationSettings();
+  const { data: aiSettings } = useAiSettings();
 
-  // For self-hosted (ReNovu): check if OpenAI API key is configured
-  const hasOpenAIKeyConfigured = translationSettings?.hasApiKey ?? false;
+  // For self-hosted (ReNOVU): check if AI provider key is configured
+  const hasOpenAIKeyConfigured = aiSettings?.hasApiKey ?? false;
 
   // For cloud (Novu): check tier/subscription features
   const hasCloudFeatureAccess = getFeatureForTierAsBoolean(

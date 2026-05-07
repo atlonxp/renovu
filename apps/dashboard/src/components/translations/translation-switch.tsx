@@ -3,7 +3,7 @@ import { Switch } from '@/components/primitives/switch';
 import { UpgradeCTATooltip } from '@/components/upgrade-cta-tooltip';
 import { IS_ENTERPRISE, IS_SELF_HOSTED } from '@/config';
 import { useFetchSubscription } from '@/hooks/use-fetch-subscription';
-import { useTranslationSettings } from '@/hooks/use-translation-settings';
+import { useAiSettings } from '@/hooks/use-ai-settings';
 import { PermissionSwitch } from '../primitives/permission-switch';
 
 type TranslationSwitchProps = {
@@ -15,10 +15,10 @@ type TranslationSwitchProps = {
 
 export function TranslationSwitch({ id, value, onChange, isReadOnly }: TranslationSwitchProps) {
   const { subscription, isLoading } = useFetchSubscription();
-  const { data: translationSettings } = useTranslationSettings();
+  const { data: aiSettings } = useAiSettings();
 
-  // For self-hosted (ReNovu): check if OpenAI API key is configured
-  const hasOpenAIKeyConfigured = translationSettings?.hasApiKey ?? false;
+  // For self-hosted (ReNOVU): check if AI provider key is configured
+  const hasOpenAIKeyConfigured = aiSettings?.hasApiKey ?? false;
 
   // For cloud (Novu): check tier/subscription features
   const hasCloudFeatureAccess =

@@ -115,7 +115,7 @@ export const useOrganizationList = (..._args: any[]) => {
     organization: {
       ...org,
       id: org._id,
-      imageUrl: org.logo ?? '',
+      imageUrl: org.branding?.logo ?? '',
       publicMetadata: ((org as { publicMetadata?: Record<string, unknown> }).publicMetadata ?? {}) as Record<
         string,
         unknown

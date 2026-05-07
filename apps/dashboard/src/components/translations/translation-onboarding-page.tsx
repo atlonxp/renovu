@@ -12,7 +12,7 @@ import { TimelineContainer, TimelineStep } from '@/components/primitives/timelin
 import { IS_SELF_HOSTED } from '@/config';
 import { useFetchOrganizationSettings } from '@/hooks/use-fetch-organization-settings';
 import { useHasPermission } from '@/hooks/use-has-permission';
-import { useTranslationSettings } from '@/hooks/use-translation-settings';
+import { useAiSettings } from '@/hooks/use-ai-settings';
 import { useUpdateOrganizationSettings } from '@/hooks/use-update-organization-settings';
 import { buildRoute, ROUTES } from '@/utils/routes';
 import { EmptyTranslationsIllustration } from './empty-translations-illustration';
@@ -25,14 +25,14 @@ type TranslationOnboardingFormData = {
 export const TranslationOnboardingPage = () => {
   const { environmentSlug } = useParams<{ environmentSlug: string }>();
   const { data: organizationSettings, isLoading } = useFetchOrganizationSettings();
-  const { data: translationSettings } = useTranslationSettings();
+  const { data: aiSettings } = useAiSettings();
   const updateOrganizationSettings = useUpdateOrganizationSettings();
   const has = useHasPermission();
   const canWrite = has({ permission: PermissionsEnum.WORKFLOW_WRITE });
   const navigate = useNavigate();
 
-  // For self-hosted (ReNovu): check if OpenAI API key is configured
-  const hasOpenAIKeyConfigured = translationSettings?.hasApiKey ?? false;
+  // For self-hosted (ReNOVU): check if AI provider key is configured
+  const hasOpenAIKeyConfigured = aiSettings?.hasApiKey ?? false;
   const needsApiKeyConfiguration = IS_SELF_HOSTED && !hasOpenAIKeyConfigured;
 
   const form = useForm<TranslationOnboardingFormData>({

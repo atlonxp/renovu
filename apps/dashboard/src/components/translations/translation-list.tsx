@@ -17,7 +17,7 @@ import { IS_SELF_HOSTED } from '@/config';
 import { useEnvironment } from '@/context/environment/hooks';
 import { useFetchOrganizationSettings } from '@/hooks/use-fetch-organization-settings';
 import { useFetchSubscription } from '@/hooks/use-fetch-subscription';
-import { useTranslationSettings } from '@/hooks/use-translation-settings';
+import { useAiSettings } from '@/hooks/use-ai-settings';
 import { buildRoute, ROUTES } from '@/utils/routes';
 import { cn } from '@/utils/ui';
 import { ListNoResults } from '../list-no-results';
@@ -188,10 +188,10 @@ export function TranslationList(props: TranslationListProps) {
   const { currentEnvironment } = useEnvironment();
   const { data: organizationSettings } = useFetchOrganizationSettings();
   const { subscription } = useFetchSubscription();
-  const { data: translationSettings } = useTranslationSettings();
+  const { data: aiSettings } = useAiSettings();
 
-  // For self-hosted (ReNovu): check if OpenAI API key is configured
-  const hasOpenAIKeyConfigured = translationSettings?.hasApiKey ?? false;
+  // For self-hosted (ReNOVU): check if AI provider key is configured
+  const hasOpenAIKeyConfigured = aiSettings?.hasApiKey ?? false;
 
   // For cloud (Novu): check tier/subscription features
   const hasCloudFeatureAccess = getFeatureForTierAsBoolean(
