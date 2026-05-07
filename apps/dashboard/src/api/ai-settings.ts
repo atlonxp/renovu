@@ -74,23 +74,12 @@ export const AI_PROVIDER_MODELS: Record<AiProviderEnum, { value: string; label: 
   [AiProviderEnum.OPENAI]: [
     // GPT-5 family
     { value: 'gpt-5.5', label: 'GPT-5.5' },
-    { value: 'gpt-5.5-mini', label: 'GPT-5.5 Mini' },
-    { value: 'gpt-5.1', label: 'GPT-5.1' },
-    { value: 'gpt-5.1-mini', label: 'GPT-5.1 Mini' },
-    { value: 'gpt-5', label: 'GPT-5' },
+    { value: 'gpt-5.4', label: 'GPT-5.4' },
     { value: 'gpt-5-mini', label: 'GPT-5 Mini' },
     { value: 'gpt-5-nano', label: 'GPT-5 Nano' },
-    // GPT-4.5
-    { value: 'gpt-4.5-preview', label: 'GPT-4.5 Preview' },
-    // GPT-4.1 family
-    { value: 'gpt-4.1', label: 'GPT-4.1' },
-    { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini' },
-    { value: 'gpt-4.1-nano', label: 'GPT-4.1 Nano' },
     // GPT-4o family
     { value: 'gpt-4o', label: 'GPT-4o' },
     { value: 'gpt-4o-mini', label: 'GPT-4o Mini (Cost-effective)' },
-    // Legacy
-    { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
   ],
 };
 
