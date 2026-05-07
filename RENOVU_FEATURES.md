@@ -304,9 +304,20 @@ The migration tracking row stays in `_renovu_migrations` — that's harmless und
 2. `git fetch upstream && git merge upstream/next`
 3. Open this file. Check the catalog against `git diff --name-only HEAD upstream/next`
 4. Resolve conflicts; lean toward keeping ReNOVU side for `[CUSTOM]` files
-5. Run `pnpm typecheck && ./test-renovu-e2e.sh` and the headed Playwright drive-through
-6. Merge into `next`, then tag a new `renovu-v{x.y}-{date}` snapshot
-7. Update the "Last reviewed" date at the top of this file
+5. **Run `pnpm typecheck` IMMEDIATELY after the merge resolves** — before any other work. Both the dashboard's Vite dev server (esbuild) and the API's `nest start --watch` (swc) **strip TypeScript types without checking them**. Errors only surface in the production tsc compile inside Docker, which can be 30-60 minutes into a build. Catching them upfront via `pnpm typecheck` saves hours. Real bugs caught this way during the 2026-05 merge: missing `IS_ENTERPRISE` import in `side-navigation.tsx`, `TableBody isLoading` prop mismatch, `translationSettings.hasApiKey` after AI-Settings refactor, `org.logo` field removal, `variant="information"` enum typo, cross-version `@types/react` collision in `chat-adapter-email`.
+6. **Strict-build trip-wire check** (recurring upstream gotcha): grep for new uses of `IS_ENTERPRISE` and `IS_SELF_HOSTED` and verify each consumer file imports them from `@/config`:
+   ```bash
+   # Find every file that REFERENCES the flag
+   git grep -l '\bIS_ENTERPRISE\b' apps/dashboard/src
+   # For each, verify it has the import — anything missing will pass `pnpm dev` but fail `pnpm build:dashboard` with TS2304
+   for f in $(git grep -l '\bIS_ENTERPRISE\b' apps/dashboard/src); do
+     grep -q "import.*IS_ENTERPRISE" "$f" || echo "MISSING import in: $f"
+   done
+   ```
+   This catches the upstream pattern of "add new flag-gated UI without ensuring all build-path branches import the flag." (See: 2026-05 upstream merge breakage at `side-navigation.tsx:289`.)
+7. Run `./test-renovu-e2e.sh` and the headed Playwright drive-through
+8. Merge into `next`, then tag a new `renovu-v{x.y}-{date}` snapshot
+9. Update the "Last reviewed" date at the top of this file
 
 ---
 
@@ -319,3 +330,26 @@ When you ship a feature that diverges from upstream:
 - [ ] Note the **why** in plain English — six months from now you won't remember
 - [ ] If applicable, add a "Conflict signature" line so future merges know what to watch for
 - [ ] Add a changelog entry to `README.md`
+
+---
+
+## Backlog (next ReNOVU release)
+
+### Continuous typecheck during dev (priority: high)
+
+**Problem:** Vite (esbuild) and `nest start --watch` (swc) both transform TypeScript by erasing types — neither type-checks. Errors only surface in the production `tsc` compile, which on docker amd64-via-emulation is 30-60 min into a build. The 2026-05 upstream merge wasted ~2 hours of build time on bugs that `tsc --noEmit` would have caught instantly.
+
+**Plan for v2.6:**
+1. **Dashboard**: add `vite-plugin-checker` to `apps/dashboard/vite.config.ts`. Runs `tsc --noEmit` in a worker thread; surfaces errors as a browser overlay + terminal output. Keeps dev server fast (worker doesn't block) but makes type errors un-ignorable.
+2. **API**: add a `pnpm typecheck:watch` root script that runs `tsc --noEmit --watch` for `apps/api/tsconfig.build.json`. Run alongside `pnpm start:api:dev` in the dev workflow.
+3. **CI gate**: add `.github/workflows/typecheck.yml` running `pnpm typecheck` (whole-monorepo) on every PR before the build-push workflow can fire. Catches cross-package version conflicts that per-file checks miss (the kind of thing that bit `chat-adapter-email`'s `@types/react` 18↔19 collision).
+
+**Why all three layers**: vite-plugin-checker only runs while dev is open. CI is the only thing that catches what nobody opened. Pre-commit hooks (husky) are intentionally NOT on this list — they slow every commit and don't catch cross-package conflicts.
+
+### Per-org backup/restore (priority: medium)
+
+The current backup is whole-instance. Mitigation in v2.5: UI banner + `BACKUP_REQUIRES_INSTANCE_ADMIN` env gate. Real fix is filtering every collection's `find({})` by `_organizationId` and handling the cross-cutting collections (users, environments, notificationgroups). See `apps/admin-tools/src/backup/backup.service.ts:581,599`.
+
+### Add admin-tools to the GHA build matrix (priority: low)
+
+Currently `.github/workflows/build-push.yml` builds 4 services (api/worker/ws/dashboard). Admin-tools is published to GHCR via local manual builds only. Add it to the matrix or accept it as a manual artifact.
