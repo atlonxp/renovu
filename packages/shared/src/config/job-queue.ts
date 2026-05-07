@@ -24,6 +24,7 @@ export enum ObservabilityBackgroundTransactionEnum {
   CRON_JOB_QUEUE = 'cron-job-queue',
   TRANSLATION_QUEUE = 'translation-queue',
   CLICKHOUSE_BATCH_FLUSH = 'clickhouse-batch-flush',
+  INBOUND_MAIL_PROCESSING = 'inbound-mail-processing',
 }
 
 export enum JobCronNameEnum {
