@@ -133,6 +133,8 @@ demos/agent-chat-demo/next-env.d.ts
 
 # Local / sensitive — never commit
 .env.production
+.env.smoketest
 data-backups/
 docker-compose.override.yml
+docker-compose.smoketest.yml
 renovu-config
