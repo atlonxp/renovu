@@ -1,7 +1,7 @@
 # =============================================================================
-# ReNovu - Build and Push Docker Images to GHCR
+# ReNOVU - Build and Push Docker Images to GHCR
 # =============================================================================
-# Builds all ReNovu service images and pushes to GitHub Container Registry.
+# Builds all ReNOVU service images and pushes to GitHub Container Registry.
 #
 # Triggers:
 #   - Push to release branch (for controlled Docker builds)
@@ -13,6 +13,7 @@
 #   - ghcr.io/atlonxp/renovu-worker:latest
 #   - ghcr.io/atlonxp/renovu-ws:latest
 #   - ghcr.io/atlonxp/renovu-dashboard:latest
+#   - ghcr.io/atlonxp/renovu-admin-tools:latest
 # =============================================================================
 
 name: Build and Push to GHCR
@@ -33,7 +34,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Image tag (e.g., v3.12.0)'
+        description: 'Image tag (e.g., v2.5.0)'
         required: false
         default: 'latest'
 
@@ -59,6 +60,8 @@ jobs:
             dockerfile: docker/Dockerfile.ws
           - name: dashboard
             dockerfile: docker/Dockerfile.dashboard
+          - name: admin-tools
+            dockerfile: docker/Dockerfile.admin-tools
 
     steps:
       - name: Checkout repository
@@ -95,7 +98,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
 
   summary:
     needs: build-and-push
@@ -106,7 +109,7 @@ jobs:
         env:
           IMAGE_PREFIX: ghcr.io/atlonxp/renovu
         run: |
-          echo "## ReNovu Docker Images Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## ReNOVU Docker Images Build Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Service | Image |" >> $GITHUB_STEP_SUMMARY
           echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
@@ -114,3 +117,4 @@ jobs:
           echo "| Worker | \`${IMAGE_PREFIX}-worker:latest\` |" >> $GITHUB_STEP_SUMMARY
           echo "| WebSocket | \`${IMAGE_PREFIX}-ws:latest\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Dashboard | \`${IMAGE_PREFIX}-dashboard:latest\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Admin Tools | \`${IMAGE_PREFIX}-admin-tools:latest\` |" >> $GITHUB_STEP_SUMMARY

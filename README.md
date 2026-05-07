@@ -16,7 +16,8 @@
   <a href="#multi-project">Multi-Project</a> •
   <a href="#production-deployment">Production</a> •
   <a href="#testing">Testing</a> •
-  <a href="#changelog">Changelog</a>
+  <a href="#changelog">Changelog</a> •
+  <a href="#roadmap">Roadmap</a>
 </p>
 
 ---
@@ -210,7 +211,7 @@ node dist/cli/import.js <file>   # Import workflows
 
 ### Pre-built Images
 
-All images are published to GHCR (linux/amd64 + linux/arm64):
+All images are published to GHCR (linux/amd64 — production target is x86_64 Linux; on Apple Silicon they run via Rosetta under OrbStack):
 
 ```
 ghcr.io/atlonxp/renovu-api:latest
@@ -403,6 +404,25 @@ git push origin next
 - Broke circular dependency in translation package via runtime DI tokens
 - Regenerated `pnpm-lock.yaml` after upstream merge
 
+**Production Image Stability**
+- MongoDB pinned to `mongo:8.0.15` (was bare `mongo:8.0`) — bare tag was pre-fix release that crashes on Linux kernel 6.19+ with the SERVER-121912 kernel-version-check bug. 8.0.5+ patches have the fix.
+- `mongoose` declared as direct dep in `apps/api/package.json` — pnpm only hoists declared deps in production builds, so the bootstrap-eager `@Global()` AI Settings module crashed on container start with `Cannot find module 'mongoose'`. Other apps/api files import mongoose too (contexts, agents, channel-endpoints, switch-organization) and would have hit the same wall lazily.
+- Production Dockerfiles cleaned up: removed obsolete `COPY patches ./patches` step (upstream removed `patches/` and the `smtp-server` patched dep)
+- `apps/api/tsconfig.build.json` now excludes `**/e2e/**` — prevents upstream's `apps/api/src/app/agents/e2e/mock-agent-handler.ts` TS errors from blocking production builds
+- GHA `.github/workflows/build-push.yml` rebranded to ReNOVU, includes `admin-tools` in the build matrix, and pins to `linux/amd64` (production target is x86_64 Linux)
+
+**Upstream Sync — NOVU `next` (17 commits, 2026-05-07)**
+- Security: `basic-ftp` 5.2.2 → 5.3.0 (NV-7554), removed obsolete `smtp-server` patchedDependencies
+- `apps/inbound-mail` deps refreshed for Node 22 compatibility (NV-7401)
+- Inbound-mail New Relic custom tracing (NV-7019)
+- Agent framework DX improvements + starter template (NV-7451)
+- Provider instances nested in agent and outbound pickers (#11005)
+- Onboarding welcome DM + bridge-connected follow-up (NV-7450)
+- `ctx.metadata.delete()`/`clear()`/`get()`/`current` (NV-7501)
+- Dashboard: Activity Feed nav highlight on conversations page (NV-7546), Bridge URL warning tooltip (NV-7547), webhook URL input width on agent details (NV-7402)
+- API: Azure setup OAuth reads/writes scoped by `_environmentId`, Slack reaction events in app manifest (NV-7478)
+- CI: aggregator gate for PR pipeline (#11023)
+
 ### ReNOVU v1.4.0 — 2026-03-01
 
 **Email Layout Fixes**
@@ -466,8 +486,35 @@ git push origin next
 
 | | Version | Branch | Last Synced |
 |---|---------|--------|-------------|
-| **ReNOVU** | v2.5.0-dev | `renovu-v2.5-dev` | — |
-| **Upstream NOVU** | v3.14.1 | `next` | 2026-05-07 (merge/upstream-next-2026-05) |
+| **ReNOVU** | v2.5.0-dev | `renovu-v2.5-dev` | 2026-05-08 |
+| **Upstream NOVU** | v3.15.0 | `next` | 2026-05-08 (merged via `merge/upstream-next-2026-05`) |
+
+## Roadmap
+
+ReNOVU is built incrementally — each version pulls in upstream NOVU and layers self-host-friendly extensions. Items below are tracked in [`RENOVU_FEATURES.md`](./RENOVU_FEATURES.md) under the **Backlog** section. No fixed dates — features ship when they're ready.
+
+### Near-term (v2.6 candidates)
+
+- **Continuous typecheck during dev** — surface TS errors in real time as you edit, instead of only on build/CI
+- **Per-organization backup/restore policies** — schedule + retention + offsite mirror, configurable per project
+- **Admin-tools image in upstream-equivalent GHA** — currently only built in our `build-push.yml`; mirror it into any upstream pipeline we adopt
+- **Anthropic + Gemini AI providers** — `aisettings.provider` enum already has room (currently OpenAI-only); add provider switch in `services/ai-provider.service.ts`
+- **Workflow Export/Import — UI polish** — current implementation is API-first; surface diff preview and conflict picker in the dashboard
+
+### Mid-term
+
+- **Inbound email — self-hosted-friendly setup** — currently inherits upstream Cloud's Domain Connect manifest; document a reverse-proxy + DNS pattern that doesn't depend on `domainconnect.novu.co`
+- **Bring back arm64 native images** — once base images stabilize, restore `linux/arm64` to the GHA matrix (currently amd64-only because production targets are x86_64 Linux)
+- **Self-hosted SSO** — email/password works today; add OIDC/SAML for enterprise self-hosters
+- **Audit log retention controls** — backup excludes `activity`/`activityfeed`/`notificationtemplates` by default to keep dumps sane; add UI controls for retention windows and on-demand purge
+
+### Out of scope (intentionally)
+
+- **Cloud-tier billing/metering** — the upstream paywall stack stays excluded by design
+- **`novu.co` Domain Connect submission** — the `domain-connect/` manifest was removed in v2.5; that's upstream Novu Cloud's surface, not ours
+- **Clerk parity** — we replaced Clerk with a JWT shim; no plans to re-add a SaaS auth dependency
+
+If you want something prioritized, open an issue with the use case.
 
 ## Disclaimer
 
