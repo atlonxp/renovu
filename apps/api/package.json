@@ -114,6 +114,7 @@
     "liquidjs": "^10.25.7",
     "lodash": "^4.18.0",
     "lru-cache": "^11.2.4",
+    "mongoose": "^8.9.5",
     "nanoid": "^3.1.20",
     "nest-raven": "10.1.0",
     "newrelic": "13.19.2",

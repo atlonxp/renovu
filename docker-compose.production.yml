@@ -62,7 +62,7 @@ services:
   # Infrastructure - MongoDB (own instance, isolated from ArokaGO)
   # ---------------------------------------------------------------------------
   mongodb:
-    image: mongo:8.0
+    image: mongo:8.0.15
     container_name: renovu-mongodb
     restart: unless-stopped
     environment:
