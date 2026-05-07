@@ -253,6 +253,10 @@ docker compose -f docker-compose.production.yml up -d
 | `ADMIN_TOOLS_EXTERNAL_URL` | Browser-accessible admin tools URL |
 | `VITE_SELF_HOSTED` | Set to `true` to enable the self-hosted dashboard auth shim |
 
+### Auto-applied data migrations
+
+The API runs pending data migrations automatically on every boot via `apps/api/src/migrations-runtime/`. Cross-replica safe (Mongo lock), idempotent, recorded in `_renovu_migrations`. **No manual `pnpm migration ...` step is needed on deploy.** See [`RENOVU_FEATURES.md → Deploy Runbook`](./RENOVU_FEATURES.md#deploy-runbook) for the full procedure and rollback.
+
 ### Coolify Deployment
 
 Use `docker-compose.coolify.yml` for [Coolify](https://coolify.io) deployments:

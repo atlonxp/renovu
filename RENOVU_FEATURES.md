@@ -218,6 +218,76 @@ When upstream evolves any of these, double-check the fix is still needed.
 
 ---
 
+## Deploy Runbook
+
+### Auto-applied migrations on startup
+
+Pending migrations are run automatically by the API on every boot:
+
+- Registry: `apps/api/src/migrations-runtime/registry.ts`
+- Runner: `apps/api/src/migrations-runtime/run-pending-migrations.ts`
+- Tracking collection: `_renovu_migrations` (Mongo). One row per migration: `{ _id, status: 'applied', startedAt, appliedAt, hostname }`
+- Cross-replica safe: leader inserts a `running` row; others detect the row and poll until status flips to `applied`. Stale `running` rows older than 10 minutes are reclaimed
+- Failure mode: API logs fatal and exits non-zero — Coolify/PM2 will restart, replica picks up the failed entry, retries
+- Each migration is **idempotent** — re-running must be a no-op
+
+To **skip** the runner (unit tests only): `SKIP_MIGRATIONS_ON_STARTUP=true`.
+
+To run a migration manually (ad-hoc backfill): `pnpm migration migrations/<name>/<name>-migration.ts`.
+
+### Adding a new migration
+
+1. Create `apps/api/migrations/<name>/<name>-migration.ts`
+   - Pure logic exported as `<name>Core(db: Db, logger: MigrationLogger)`
+   - CLI wrapper that boots Nest and calls the core (template: `move-openai-to-ai-settings`)
+2. **Also create `apps/api/src/migrations-runtime/<name>/core.ts`** with the core logic — this is what the runtime registry imports (the `migrations/` folder is not in the build output)
+3. Append to `apps/api/src/migrations-runtime/registry.ts`. Never reorder or rename existing entries — that re-runs an already-applied migration
+4. Update this file with a one-line entry under the relevant feature section
+
+### Production deploy steps for v2.5
+
+```bash
+# 1. (Optional but recommended) Take a backup BEFORE deploying so a rollback path exists.
+docker compose exec admin-tools node dist/cli/backup.js
+
+# 2. Pull v2.5 images and bring up the new stack.
+docker compose -f docker-compose.production.yml pull
+docker compose -f docker-compose.production.yml up -d
+
+# 3. The API runs pending migrations on its first boot — no manual step needed.
+#    Verify by inspecting tracking collection:
+docker exec renovu-mongodb sh -c \
+  'mongosh -u $MONGO_USER -p $MONGO_PASSWORD --authenticationDatabase admin renovu-db --eval "use renovu-db" --eval "db.getCollection(\"_renovu_migrations\").find().toArray()"'
+
+# 4. (Multi-project deployments only) Lock the dashboard backup button down to instance admins:
+echo 'BACKUP_REQUIRES_INSTANCE_ADMIN=true' >> .env
+echo 'ADMIN_API_KEY=<random-32-char-secret>' >> .env
+docker compose -f docker-compose.production.yml up -d   # restart admin-tools
+
+# 5. Smoke-test:
+#    - GET /v1/health-check returns 200
+#    - Open dashboard, verify sidebar dropdown opens, project switch works
+#    - /settings/team renders members list, /settings/ai renders the new tab
+#    - If BACKUP_REQUIRES_INSTANCE_ADMIN=true, dashboard "Create Backup" returns 403 (expected) — use CLI instead
+```
+
+### Rollback
+
+If v2.5 misbehaves:
+
+```bash
+# Revert image tag, restart
+echo 'IMAGE_TAG=v1.4' > .env.override
+docker compose -f docker-compose.production.yml --env-file .env --env-file .env.override up -d
+
+# Restore the pre-deploy backup (downloads via dashboard or use the CLI)
+docker compose exec admin-tools node dist/cli/restore.js /path/to/pre-v2.5-backup.tar.gz
+```
+
+The migration tracking row stays in `_renovu_migrations` — that's harmless under v1.4 (which doesn't read the collection). When you re-deploy v2.5, the runner sees `status: applied` and skips.
+
+---
+
 ## Branch & Sync Convention
 
 | Branch | Purpose |
