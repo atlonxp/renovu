@@ -108,6 +108,10 @@ pnpm lint           # Lint entire codebase
 pnpm typecheck      # Run TypeScript checks
 ```
 
+## Production Deployment and Debug
+- ReNOVU is designed for self-hosted deployment on user infrastructure (cloud VM, Docker Compose)
+- use `ssh arokago@arokago.com` to access production server; no password, key-based auth only
+
 ## Code Conventions
 
 **From .cursor/rules/novu.mdc:**
