@@ -5,7 +5,7 @@
 # pre-generated Nx build artifacts.
 # =============================================================================
 
-FROM node:20-alpine3.20 AS builder
+FROM node:22-alpine3.20 AS builder
 
 RUN apk add --no-cache g++ make py3-pip bash
 ENV NX_DAEMON=false
@@ -44,7 +44,7 @@ RUN cp src/.env.production dist/.env.production || true
 # =============================================================================
 # Production Stage
 # =============================================================================
-FROM node:20-alpine3.20
+FROM node:22-alpine3.20
 
 RUN apk add --no-cache g++ make py3-pip
 RUN npm install -g pnpm@10.16.1 pm2 --loglevel notice

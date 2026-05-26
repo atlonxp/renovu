@@ -1,6 +1,7 @@
 import { DynamicModule, Logger, Module, OnApplicationShutdown, Provider, Type } from '@nestjs/common';
 import { ForwardReference } from '@nestjs/common/interfaces/modules/forward-reference.interface';
 import {
+  AttachmentRehydrator,
   BulkCreateExecutionDetails,
   CalculateLimitNovuIntegration,
   CompileEmailTemplate,
@@ -34,13 +35,18 @@ import {
   WorkflowInMemoryProviderService,
 } from '@novu/application-generic';
 import {
+  AgentIntegrationRepository,
+  AgentRepository,
   ChannelConnectionRepository,
   ChannelEndpointRepository,
   CommunityOrganizationRepository,
   CommunityUserRepository,
   ContextRepository,
+  ConversationActivityRepository,
+  ConversationRepository,
   DomainRepository,
   DomainRouteRepository,
+  IntegrationRepository,
   JobRepository,
   LocalizationGroupRepository,
   LocalizationRepository,
@@ -106,8 +112,13 @@ const enterpriseImports = (): Array<Type | DynamicModule | Promise<DynamicModule
 };
 
 const REPOSITORIES = [
+  AgentRepository,
+  AgentIntegrationRepository,
+  ConversationActivityRepository,
+  ConversationRepository,
   DomainRepository,
   DomainRouteRepository,
+  IntegrationRepository,
   JobRepository,
   CommunityOrganizationRepository,
   PreferencesRepository,
@@ -204,6 +215,7 @@ const USE_CASES = [
   TriggerMulticast,
   CompileInAppTemplate,
   InboundEmailParse,
+  AttachmentRehydrator,
   InboundDomainRouteDelivery,
   ReplyToStrategy,
   DomainRouteStrategy,

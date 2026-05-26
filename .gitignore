@@ -130,6 +130,7 @@ demos/agent-chat-demo/.env.local
 demos/agent-chat-demo/tsconfig.tsbuildinfo
 demos/agent-chat-demo/next-env.d.ts
 .gstack/
+.claude/worktrees
 
 # Local / sensitive — never commit
 .env.production

@@ -2,10 +2,9 @@ import { MAX_DESCRIPTION_LENGTH, PermissionsEnum } from '@novu/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { formatDistanceToNow } from 'date-fns';
 import { AnimatePresence, motion } from 'motion/react';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { RiAlertFill } from 'react-icons/ri';
-import { useNavigate } from 'react-router-dom';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/primitives/tooltip';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { RiAlertFill, RiBarChartBoxLine, RiInformationFill } from 'react-icons/ri';
+import { Link, useNavigate } from 'react-router-dom';
 import type { AgentResponse, UpdateAgentBody } from '@/api/agents';
 import { getAgentDetailQueryKey, updateAgent } from '@/api/agents';
 import { NovuApiError } from '@/api/api.client';
@@ -17,15 +16,21 @@ import {
   ExpandableDetailsTextarea,
 } from '@/components/details-sidebar';
 import { AnimatedBadgeDot, Badge } from '@/components/primitives/badge';
+import { Button } from '@/components/primitives/button';
 import { InlineToast } from '@/components/primitives/inline-toast';
 import { Input } from '@/components/primitives/input';
 import { showErrorToast, showSuccessToast } from '@/components/primitives/sonner-helpers';
 import { Switch } from '@/components/primitives/switch';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/primitives/tooltip';
 import { TimeDisplayHoverCard } from '@/components/time-display-hover-card';
 import { requireEnvironment, useEnvironment } from '@/context/environment/hooks';
+import { useAgentRoutes } from '@/hooks/use-agent-routes';
+import { useCurrentApp } from '@/hooks/use-current-app';
 import { useHasPermission } from '@/hooks/use-has-permission';
+import { APP_IDS } from '@/utils/apps';
 import { buildRoute, ROUTES } from '@/utils/routes';
 import { cn } from '@/utils/ui';
+import { ConnectorSection } from './connector-section';
 
 type AgentSidebarWidgetProps = {
   agent: AgentResponse;
@@ -98,8 +103,7 @@ function BridgeUrlSection({ agent, canWrite, isUpdatePending, onUpdate, readOnly
                 </span>
               </TooltipTrigger>
               <TooltipContent>
-                Set the public URL of your deployed agent server so it can receive messages outside of local
-                mode
+                Set the public URL of your deployed agent server so it can receive messages outside of local mode
               </TooltipContent>
             </Tooltip>
           )}
@@ -169,7 +173,28 @@ function BridgeUrlSection({ agent, canWrite, isUpdatePending, onUpdate, readOnly
         </div>
       </div>
       {!readOnly && (
-        <DetailsSidebarRow label="Bridge">
+        <DetailsSidebarRow
+          label={
+            <>
+              Bridge
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="What is Bridge?"
+                    className="text-foreground-400 inline-flex cursor-help rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <RiInformationFill className="size-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs">
+                  The bridge connects Novu to your hosted agent handler. Switch to Local to route messages to a tunnel
+                  on your machine.
+                </TooltipContent>
+              </Tooltip>
+            </>
+          }
+        >
           <div className="flex items-center gap-1.5">
             <Badge variant="lighter" color={!agent.devBridgeActive ? 'green' : 'gray'} size="sm">
               DEVELOPMENT
@@ -198,6 +223,8 @@ export function AgentSidebarWidget({ agent }: AgentSidebarWidgetProps) {
   const has = useHasPermission();
   const canWrite = has({ permission: PermissionsEnum.AGENT_WRITE });
   const canEditFields = canWrite && !readOnly;
+  const agentRoutes = useAgentRoutes();
+  const currentApp = useCurrentApp();
 
   const [isDeactivateModalOpen, setIsDeactivateModalOpen] = useState(false);
 
@@ -207,6 +234,15 @@ export function AgentSidebarWidget({ agent }: AgentSidebarWidgetProps) {
 
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false);
   const [description, setDescription] = useState(agent.description ?? '');
+
+  const viewActivityHref = useMemo(() => {
+    if (!currentEnvironment?.slug) return undefined;
+
+    const route = currentApp === APP_IDS.CONNECT ? ROUTES.CONNECT_CONVERSATIONS : ROUTES.ACTIVITY_CONVERSATIONS;
+    const path = buildRoute(route, { environmentSlug: currentEnvironment.slug });
+
+    return `${path}?agentId=${encodeURIComponent(agent.identifier)}`;
+  }, [currentEnvironment?.slug, agent.identifier, currentApp]);
 
   const { isPending: isUpdatePending, mutateAsync: updateAgentAsync } = useMutation({
     mutationFn: (body: UpdateAgentBody) =>
@@ -280,7 +316,7 @@ export function AgentSidebarWidget({ agent }: AgentSidebarWidgetProps) {
   }, [agent.name, isEditingName]);
 
   return (
-    <DetailsSidebar>
+    <DetailsSidebar className="w-full md:sticky md:top-0 md:w-[300px]">
       {readOnly && (
         <InlineToast
           variant="soft-warning"
@@ -289,7 +325,7 @@ export function AgentSidebarWidget({ agent }: AgentSidebarWidgetProps) {
           onCtaClick={() => {
             if (!oppositeEnvironment?.slug) return;
             navigate(
-              buildRoute(ROUTES.AGENT_DETAILS, {
+              buildRoute(agentRoutes.details, {
                 environmentSlug: oppositeEnvironment.slug,
                 agentIdentifier: encodeURIComponent(agent.identifier),
               })
@@ -435,19 +471,36 @@ export function AgentSidebarWidget({ agent }: AgentSidebarWidgetProps) {
       </DetailsSidebarCard>
 
       <DetailsSidebarCard>
-        <BridgeUrlSection
-          agent={agent}
-          canWrite={canWrite}
-          isUpdatePending={isUpdatePending}
-          onUpdate={updateAgentAsync}
-          readOnly={readOnly}
-        />
+        {agent.runtime === 'managed' ? (
+          <ConnectorSection agent={agent} />
+        ) : (
+          <BridgeUrlSection
+            agent={agent}
+            canWrite={canWrite}
+            isUpdatePending={isUpdatePending}
+            onUpdate={updateAgentAsync}
+            readOnly={readOnly}
+          />
+        )}
       </DetailsSidebarCard>
 
-      <p className="text-label-xs font-medium">
+      <p className="text-label-xs font-medium border-b border-stroke-weak pb-3">
         <span className="text-text-soft">Last updated </span>
         <span className="text-text-sub">{formatDistanceToNow(new Date(agent.updatedAt), { addSuffix: true })}</span>
       </p>
+
+      {viewActivityHref && (
+        <div className="flex flex-col items-start gap-2 py-3">
+          <span className="text-text-soft text-label-xs font-medium">Quick actions</span>
+          <div className="flex flex-wrap items-start gap-2">
+            <Link to={viewActivityHref}>
+              <Button variant="secondary" mode="outline" size="2xs" leadingIcon={RiBarChartBoxLine}>
+                View activity
+              </Button>
+            </Link>
+          </div>
+        </div>
+      )}
 
       <ConfirmationModal
         open={isDeactivateModalOpen}

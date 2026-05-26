@@ -142,11 +142,18 @@ export class UpdateWorkflowV0 {
       existingTemplate._id
     );
 
+    const allowedTemplateIds = this.buildAllowedTemplateIds(existingTemplate.steps);
+
     const workflowUpdate = async (session?: ClientSession | null) => {
       if (command.steps) {
         updatePayload = this.updateTriggers(updatePayload, command.steps);
 
-        updatePayload.steps = await this.updateMessageTemplates(command.steps, command, parentChangeId);
+        updatePayload.steps = await this.updateMessageTemplates(
+          command.steps,
+          command,
+          parentChangeId,
+          allowedTemplateIds
+        );
 
         await this.deleteRemovedSteps(existingTemplate.steps, command, parentChangeId);
       }
@@ -457,11 +464,45 @@ export class UpdateWorkflowV0 {
     }
   }
 
+  /**
+   * Build the set of template IDs that belong to the workflow being updated, including
+   * variant template IDs. The set is later used to reject client payloads that point a
+   * step (or variant) at a `_templateId` belonging to a different workflow, which would
+   * otherwise allow cross-workflow data corruption via `UpdateMessageTemplate`.
+   */
+  private buildAllowedTemplateIds(
+    existingSteps: NotificationStepEntity[] | NotificationStepData[] | undefined
+  ): Set<string> {
+    const allowed = new Set<string>();
+    for (const step of existingSteps || []) {
+      if (step._templateId) {
+        allowed.add(step._templateId.toString());
+      }
+      const variants = (step as NotificationStepEntity).variants || [];
+      for (const variant of variants) {
+        if (variant._templateId) {
+          allowed.add(variant._templateId.toString());
+        }
+      }
+    }
+
+    return allowed;
+  }
+
+  private assertTemplateBelongsToWorkflow(templateId: string | undefined, allowedTemplateIds: Set<string>) {
+    if (!templateId) return;
+
+    if (!allowedTemplateIds.has(templateId.toString())) {
+      throw new BadRequestException(`Template ${templateId} does not belong to this workflow`);
+    }
+  }
+
   @Instrument()
   private async updateMessageTemplates(
     steps: NotificationStep[],
     command: UpdateWorkflowCommandV0,
-    parentChangeId: string
+    parentChangeId: string,
+    allowedTemplateIds: Set<string>
   ) {
     let parentStepId: string | null = null;
     const templateMessages: NotificationStepEntity[] = [];
@@ -473,7 +514,7 @@ export class UpdateWorkflowV0 {
         throw new BadRequestException(`Something un-expected happened, template couldn't be found`);
       }
 
-      const updatedVariants = await this.updateVariants(message.variants, command, parentChangeId!);
+      const updatedVariants = await this.updateVariants(message.variants, command, parentChangeId!, allowedTemplateIds);
 
       const messageTemplatePayload: CreateMessageTemplateCommand | UpdateMessageTemplateCommand = {
         type: message.template.type,
@@ -499,6 +540,8 @@ export class UpdateWorkflowV0 {
         workflowType: command.type,
       };
 
+      this.assertTemplateBelongsToWorkflow(message._templateId, allowedTemplateIds);
+
       let messageTemplateExist = message._templateId;
 
       if (!messageTemplateExist && isBridgeWorkflow(command.type)) {
@@ -513,7 +556,7 @@ export class UpdateWorkflowV0 {
       const updatedTemplate = messageTemplateExist
         ? await this.updateMessageTemplate.execute(
             UpdateMessageTemplateCommand.create({
-              templateId: message._templateId!,
+              templateId: messageTemplateExist,
               ...messageTemplatePayload,
             })
           )
@@ -673,7 +716,8 @@ export class UpdateWorkflowV0 {
   private async updateVariants(
     variants: NotificationStepVariantCommand[] | undefined,
     command: UpdateWorkflowCommandV0,
-    parentChangeId: string
+    parentChangeId: string,
+    allowedTemplateIds: Set<string>
   ): Promise<NotificationStepData[]> {
     if (!variants?.length) return [];
 
@@ -704,11 +748,13 @@ export class UpdateWorkflowV0 {
         workflowType: command.type,
       };
 
+      this.assertTemplateBelongsToWorkflow(variant._templateId, allowedTemplateIds);
+
       const messageTemplateExist = variant._templateId;
       const updatedVariant = messageTemplateExist
         ? await this.updateMessageTemplate.execute(
             UpdateMessageTemplateCommand.create({
-              templateId: variant._templateId!,
+              templateId: messageTemplateExist,
               ...messageTemplatePayload,
             })
           )

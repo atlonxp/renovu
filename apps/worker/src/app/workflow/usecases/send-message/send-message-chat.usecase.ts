@@ -755,7 +755,7 @@ export class SendMessageChat extends SendMessageBase {
 
   private buildMessageOverrides(command: SendMessageChannelCommand, integration: IntegrationEntity) {
     return {
-      ...(command.overrides[integration?.channel] || {}),
+      ...(integration?.channel ? command.overrides[integration.channel] || {} : {}),
       ...(command.overrides[integration?.providerId] || {}),
     };
   }

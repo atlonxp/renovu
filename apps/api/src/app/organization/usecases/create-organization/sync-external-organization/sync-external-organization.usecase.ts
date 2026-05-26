@@ -2,7 +2,12 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { AnalyticsService, PinoLogger } from '@novu/application-generic';
 import { OrganizationEntity, OrganizationRepository } from '@novu/dal';
-import { ApiAuthSchemeEnum, MemberRoleEnum } from '@novu/shared';
+import {
+  ApiAuthSchemeEnum,
+  MemberRoleEnum,
+  NOVU_PRODUCT_TYPE_HEADER_LOWERCASE,
+  OrganizationProductTypeEnum,
+} from '@novu/shared';
 import { CreateEnvironmentCommand } from '../../../../environments-v1/usecases/create-environment/create-environment.command';
 import { CreateEnvironment } from '../../../../environments-v1/usecases/create-environment/create-environment.usecase';
 import { CreateNovuIntegrationsCommand } from '../../../../integrations/usecases/create-novu-integrations/create-novu-integrations.command';
@@ -45,8 +50,10 @@ export class SyncExternalOrganization {
     const organization = await this.organizationRepository.create(
       {
         externalId: command.externalId,
+        // ReNovu: self-hosted gets unlimited without requiring enterprise
         apiServiceLevel: isSelfHosted ? 'unlimited' : undefined,
         removeNovuBranding: isSelfHosted ? true : undefined,
+        productType: this.resolveProductType(command.headers),
       },
       { headers: command.headers }
     );
@@ -66,6 +73,7 @@ export class SyncExternalOrganization {
         organizationId: devEnv._organizationId,
         userId: command.userId,
         name: devEnv.name,
+        environmentType: devEnv.type,
       })
     );
 
@@ -102,6 +110,7 @@ export class SyncExternalOrganization {
         organizationId: prodEnv._organizationId,
         userId: command.userId,
         name: prodEnv.name,
+        environmentType: prodEnv.type,
       })
     );
 
@@ -135,7 +144,7 @@ export class SyncExternalOrganization {
       })
     );
 
-    if (organizationAfterChanges !== null) {
+    if (organizationAfterChanges) {
       await this.createCustomer(command.email, organizationAfterChanges._id);
     }
 
@@ -154,6 +163,22 @@ export class SyncExternalOrganization {
     if (parts.length !== 2) return null;
 
     return parts[1];
+  }
+
+  /**
+   * Pull the product context from the request header so the EE repository can mirror it onto
+   * Clerk and Mongo. Missing or unknown values resolve to `platform` to keep existing tenants
+   * working without backfill.
+   */
+  private resolveProductType(headers?: Record<string, string | string[] | undefined>): OrganizationProductTypeEnum {
+    const raw = headers?.[NOVU_PRODUCT_TYPE_HEADER_LOWERCASE];
+    const value = Array.isArray(raw) ? raw[0] : raw;
+
+    if (value === OrganizationProductTypeEnum.CONNECT) {
+      return OrganizationProductTypeEnum.CONNECT;
+    }
+
+    return OrganizationProductTypeEnum.PLATFORM;
   }
 
   private async triggerBrandEnrichment(

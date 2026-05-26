@@ -2,7 +2,7 @@
 # ReNovu WebSocket Server - Self-Hosted Build
 # =============================================================================
 
-FROM node:20-alpine3.20 AS builder
+FROM node:22-alpine3.20 AS builder
 
 RUN apk add --no-cache g++ make py3-pip bash
 ENV NX_DAEMON=false
@@ -34,7 +34,7 @@ RUN NODE_ENV=production pnpm build:ws --skip-nx-cache
 # =============================================================================
 # Production Stage
 # =============================================================================
-FROM node:20-alpine3.20
+FROM node:22-alpine3.20
 
 RUN apk add --no-cache g++ make py3-pip
 

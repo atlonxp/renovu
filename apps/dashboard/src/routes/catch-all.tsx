@@ -1,5 +1,6 @@
 import { RiLoader4Line } from 'react-icons/ri';
 import { Navigate, useLocation } from 'react-router-dom';
+import { buildAppHomeRoute, getCurrentAppId } from '@/utils/apps';
 import { buildRoute, ROUTES } from '@/utils/routes';
 import { useAuth } from '../context/auth/hooks';
 import { useEnvironment } from '../context/environment/hooks';
@@ -63,15 +64,7 @@ export const CatchAllRoute = () => {
     }
   }
 
-  return (
-    <Navigate
-      to={
-        currentEnvironment?.slug
-          ? buildRoute(ROUTES.WORKFLOWS, {
-              environmentSlug: currentEnvironment.slug,
-            })
-          : ROUTES.ENV
-      }
-    />
-  );
+  const homePath = buildAppHomeRoute(getCurrentAppId(location.pathname), currentEnvironment.slug);
+
+  return <Navigate to={homePath ?? ROUTES.ENV} />;
 };

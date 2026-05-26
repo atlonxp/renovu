@@ -97,10 +97,15 @@ export default defineConfig(({ mode }) => {
         ...(isCommunitySelHosted
           ? {
               '@/context/region': path.resolve(__dirname, './src/context/region/index.self-hosted.ts'),
+              '@clerk/react': path.resolve(__dirname, './src/utils/self-hosted/index.tsx'),
+              '@/components/side-navigation/organization-dropdown-clerk': path.resolve(
+                __dirname,
+                './src/utils/self-hosted/organization-switcher.tsx'
+              ),
             }
           : eeAuthProvider === 'better-auth'
             ? {
-                '@clerk/clerk-react': path.resolve(__dirname, './src/utils/better-auth/index.tsx'),
+                '@clerk/react': path.resolve(__dirname, './src/utils/better-auth/index.tsx'),
                 '@/context/region': path.resolve(__dirname, './src/context/region/index.self-hosted.ts'),
                 '@/components/side-navigation/organization-dropdown-clerk': path.resolve(
                   __dirname,
@@ -123,6 +128,9 @@ export default defineConfig(({ mode }) => {
       port: 4000,
       headers: {
         'Document-Policy': 'js-profiling',
+      },
+      watch: {
+        ignored: ['**/.env'],
       },
     },
     optimizeDeps: {
