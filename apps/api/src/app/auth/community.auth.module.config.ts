@@ -1,7 +1,7 @@
 import { MiddlewareConsumer, ModuleMetadata, Provider, RequestMethod } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
-import { FeatureFlagsService } from '@novu/application-generic';
+import { featureFlagsService, FeatureFlagsService } from '@novu/application-generic';
 import { CommunityMemberRepository, CommunityOrganizationRepository, CommunityUserRepository } from '@novu/dal';
 import { AuthProviderEnum, PassportStrategyEnum } from '@novu/shared';
 import passport from 'passport';
@@ -37,7 +37,11 @@ export function getCommunityAuthModuleConfig(): ModuleMetadata {
     }),
   ];
 
-  const baseProviders = [...AUTH_STRATEGIES, AuthService, RootEnvironmentGuard];
+  // ReNovu: self-hosted boot. Upstream's community auth module exports
+  // FeatureFlagsService without providing it (only the EE path provides the
+  // `featureFlagsService` value), which crash-loops the API under IS_SELF_HOSTED.
+  // Provide it here, mirroring ee.auth.module.config.ts.
+  const baseProviders = [...AUTH_STRATEGIES, AuthService, RootEnvironmentGuard, featureFlagsService];
 
   // Wherever is the string token used, override it with the provider
   const injectableProviders = [
