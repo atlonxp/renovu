@@ -112,7 +112,13 @@ async function resolveActionUrls(card: CardNode, action: ActionContext): Promise
   return new Map(entries);
 }
 
-function renderChildren(children: CardNode[] | undefined, ctx: RenderContext): React.ReactNode {
+// ReNovu: Return type is `any` to sidestep a cross-version @types/react conflict.
+// This package declares @types/react@19 but @react-email/components transitively
+// pulls @types/react@18.3.18 into the production install graph; the 19.x ReactNode
+// does not satisfy the 18.x one. The functions only return JSX or null, so runtime
+// behavior is unaffected. (Re-applied after the upstream merge took theirs.)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function renderChildren(children: CardNode[] | undefined, ctx: RenderContext): any {
   if (!children || children.length === 0) return null;
 
   return children.map((child, i) => <React.Fragment key={i}>{renderNode(child, ctx)}</React.Fragment>);
@@ -128,7 +134,9 @@ const BUTTON_STYLE = {
   textDecoration: 'none',
 } as const;
 
-function renderNode(node: CardNode, ctx: RenderContext): React.ReactNode {
+// ReNovu: `any` return — see renderChildren above (cross-version @types/react workaround).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function renderNode(node: CardNode, ctx: RenderContext): any {
   switch (node.type) {
     case 'card':
       return (
