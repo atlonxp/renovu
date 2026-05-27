@@ -783,3 +783,9 @@ export function SignedOut({ children }: { children: any }) {
 
   return <>{children}</>;
 }
+
+// Self-hosted has no async Clerk bootstrap, so the SDK is always "loaded".
+// Render children immediately. (Clerk's ClerkLoaded gates on SDK readiness.)
+export function ClerkLoaded({ children }: { children: any }) {
+  return <>{children}</>;
+}

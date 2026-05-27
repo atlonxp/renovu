@@ -5,6 +5,7 @@ import { getOrganizations, switchOrganization } from '@/api/organization';
 import { QueryKeys } from '@/utils/query-keys';
 import { AuthContextProvider, useAuth } from './auth.resource';
 import {
+  ClerkLoaded,
   OrganizationList,
   OrganizationProfile,
   RedirectToSignIn,
@@ -30,7 +31,7 @@ export type {
 } from './types';
 
 export {
-  AuthContextProvider, OrganizationContextProvider, OrganizationList,
+  AuthContextProvider, ClerkLoaded, OrganizationContextProvider, OrganizationList,
   OrganizationProfile, OrganizationSwitcher, RedirectToSignIn,
   SignedIn,
   SignedOut, SignIn,
