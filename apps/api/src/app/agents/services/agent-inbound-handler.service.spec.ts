@@ -40,6 +40,7 @@ describe('AgentInboundHandler', () => {
       startCodeConsume?: sinon.SinonStub;
       findTelegramEndpointByIdentity?: sinon.SinonStub;
       agentFindOne?: sinon.SinonStub;
+      managedAgentSetupHandleInbound?: sinon.SinonStub;
     } = {}
   ) {
     const logger = makeLogger();
@@ -63,7 +64,9 @@ describe('AgentInboundHandler', () => {
     };
     const managedAgentService = {
       dispatch: sinon.stub().resolves(undefined),
-      confirmToolApproval: sinon.stub().resolves(undefined),
+    };
+    const confirmToolApproval = {
+      execute: sinon.stub().resolves(undefined),
     };
     const chatSdkService = {
       registerInboundCallbacks: sinon.stub(),
@@ -91,12 +94,17 @@ describe('AgentInboundHandler', () => {
     const channelEndpointRepository = {
       findByPlatformIdentity: overrides.findTelegramEndpointByIdentity ?? sinon.stub().resolves(null),
     };
+    const handleManagedAgentSetupInbound = {
+      execute: overrides.managedAgentSetupHandleInbound ?? sinon.stub().resolves(false),
+    };
     const handler = new AgentInboundHandler(
       logger as any,
       subscriberResolver as any,
       conversationService as any,
       bridgeExecutor as any,
       managedAgentService as any,
+      confirmToolApproval as any,
+      handleManagedAgentSetupInbound as any,
       chatSdkService as any,
       agentRepository as any,
       subscriberRepository as any,
@@ -117,6 +125,10 @@ describe('AgentInboundHandler', () => {
       subscriberResolver,
       startCodeService,
       channelEndpointRepository,
+      handleManagedAgentSetupInbound,
+      managedAgentService,
+      agentRepository,
+      subscriberRepository,
     };
   }
 
@@ -281,6 +293,61 @@ describe('AgentInboundHandler', () => {
         ],
       });
       expect(bridgeExecutor.execute.firstCall.args[0].storedAttachments).to.deep.equal(storedAttachments);
+    });
+
+    it('should show typing before managed-agent setup gate when acknowledgeOnReceived is enabled', async () => {
+      const setupInbound = sinon.stub().resolves(true);
+      const logger = makeLogger();
+      const subscriberResolver = { resolve: sinon.stub().resolves('sub-1') };
+      const conversationService = {
+        createOrGetConversation: sinon.stub().resolves(conversation),
+        getPrimaryChannel: sinon.stub().callsFake((conv) => conv.channels[0]),
+        persistInboundMessage: sinon.stub().resolves({ _id: 'activity1' }),
+        persistAgentMessage: sinon.stub().resolves({ _id: 'agent-activity1' }),
+        setFirstPlatformMessageId: sinon.stub().resolves(undefined),
+        findByPlatformThread: sinon.stub().resolves(conversation),
+        getHistory: sinon.stub().resolves([]),
+      };
+      const managedAgentService = { dispatch: sinon.stub().resolves(undefined) };
+      const handleManagedAgentSetupInbound = { execute: setupInbound };
+      const subscriberRepository = {
+        findBySubscriberId: sinon.stub().resolves({ subscriberId: 'sub-1' }),
+      };
+      const agentRepository = {
+        findOne: sinon.stub().resolves({
+          _id: 'agent1',
+          runtime: 'managed',
+          managedRuntime: { providerId: 'anthropic', _integrationId: 'int1', externalAgentId: 'ext1' },
+        }),
+      };
+      const handler = new AgentInboundHandler(
+        logger as any,
+        subscriberResolver as any,
+        conversationService as any,
+        { execute: sinon.stub().resolves(undefined) } as any,
+        managedAgentService as any,
+        { execute: sinon.stub().resolves(undefined) } as any,
+        handleManagedAgentSetupInbound as any,
+        { registerInboundCallbacks: sinon.stub() } as any,
+        agentRepository as any,
+        subscriberRepository as any,
+        { findOne: sinon.stub().resolves(null) } as any,
+        { track: sinon.stub() } as any,
+        { storeInbound: sinon.stub().resolves([]) } as any,
+        { consumeIfMatches: sinon.stub().resolves({ status: 'missing' }) } as any,
+        { findByPlatformIdentity: sinon.stub().resolves(null) } as any,
+        { execute: sinon.stub().resolves({ created: true }) } as any
+      );
+
+      const thread = makeSlackDmThread();
+      const message = makeSlackDmMessage();
+      const slackConfig = { ...config, acknowledgeOnReceived: true };
+
+      await handler.handle('agent1', slackConfig as any, thread as any, message as any, AgentEventEnum.ON_MESSAGE);
+
+      expect(thread.startTyping.calledOnceWith('Thinking...')).to.equal(true);
+      expect(setupInbound.calledOnce).to.equal(true);
+      expect(managedAgentService.dispatch.called).to.equal(false);
     });
   });
 
