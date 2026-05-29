@@ -50,6 +50,10 @@ jobs:
       packages: write
 
     strategy:
+      # ReNovu: don't let one image's push failure (e.g. a GHCR package the
+      # Actions token can't write yet) cancel the others. Each service builds
+      # and pushes independently.
+      fail-fast: false
       matrix:
         service:
           - name: api
