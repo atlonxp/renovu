@@ -1,6 +1,6 @@
 import { decryptApiKey, type IAiSettingsLookup } from '@novu/application-generic';
+import { mongoose } from '@novu/dal';
 import { plainToInstance } from 'class-transformer';
-import { type Model, Types } from 'mongoose';
 
 import { type AiSettingsDBModel, AiSettingsEntity } from './ai-settings.entity';
 import { AiSettings } from './ai-settings.schema';
@@ -8,18 +8,22 @@ import { AiSettings } from './ai-settings.schema';
 // ReNovu: worker-local, read-only mirror of apps/api's AiSettingsRepository.
 // Implements the IAiSettingsLookup contract from @novu/application-generic so
 // @novu/translation's OpenAITranslationService can resolve AI_SETTINGS_REPOSITORY
-// in the worker (the api app provides the full read/write repository). Only the
-// read path (findByOrganization) is needed here — translation jobs read the
-// org's AI provider config to call OpenAI.
+// in the worker. Only the read path (findByOrganization) is needed here.
+//
+// IMPORTANT: the worker's pruned production node_modules does NOT resolve a
+// direct `mongoose` import (unlike apps/api), so mongoose is taken from
+// @novu/dal — which the worker already depends on and which re-exports it.
+// decryptApiKey (@novu/application-generic) and class-transformer both resolve
+// in the worker, so they are safe to import directly.
 export class AiSettingsRepository implements IAiSettingsLookup {
-  private readonly model: Model<AiSettingsDBModel>;
+  private readonly model: mongoose.Model<AiSettingsDBModel>;
 
   constructor() {
     this.model = AiSettings;
   }
 
-  private toObjectId(value: string): Types.ObjectId {
-    return new Types.ObjectId(value);
+  private toObjectId(value: string): mongoose.Types.ObjectId {
+    return new mongoose.Types.ObjectId(value);
   }
 
   private mapEntity(data: AiSettingsDBModel | null): AiSettingsEntity | null {
