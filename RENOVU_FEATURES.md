@@ -231,13 +231,16 @@ When upstream evolves any of these, double-check the fix is still needed.
 | Layout container | `LayoutContainerConfig` (shared), `wrapWithLayoutContainer` (preview-layout), `maily.tsx` `containerStyle`, maily-core `fullBleed`, maily-render `setContainer` | |
 | Self-hosted unlocks | `main.tsx` Settings routes (`<SettingsPage />`), sidebar Settings link, `pages/environments.tsx`, `use-fetch-organization-settings.ts`, translation gating on AI key (`use-is-translation-enabled.ts`, `translation-list.tsx`, `translation-switch.tsx`) | Upstream gates these on `!IS_SELF_HOSTED_CE`; ReNOVU builds as CE |
 | Clerk shim additions | `utils/self-hosted/use-auth.ts` returns `currentUser`; `useClerk().setActive` performs the real project switch; `signOut` clears the JWT | Every name imported from `@clerk/react` must be exported by `utils/self-hosted/index.tsx` |
-| Agents product neutralised | `bootstrap.ts` 404s public agent/connect/web-chat/copilot-bridge routes; `app.module.ts` loads Human/NovuContext/WellKnown modules only when not self-hosted | Opt back in with `RENOVU_AGENTS_ENABLED=true` |
+| Agents product neutralised | `bootstrap.ts` 404s public agent/connect/web-chat/copilot-bridge routes; `app.module.ts` loads Human/NovuContext/WellKnown modules only when not self-hosted; dashboard `main.tsx` redirects agent/connect pages home (`withoutAgentsOnSelfHosted`); welcome page hides the Novu demo/Agents links | API opt-in: `RENOVU_AGENTS_ENABLED=true` |
+| More self-hosted unlocks | Environment Variables page (`variable-list.tsx`), command-palette Translations, no environment-variable/domain limits (`resource-validator.service.ts`) | |
+| Runtime migration `recreate-agent-inbox-routing-key-index` | `apps/api/src/migrations-runtime/recreate-agent-inbox-routing-key-index/core.ts` | Port of upstream's manual migration; avoids IndexOptionsConflict on every boot |
 | Hardening | `api.client.ts` 401 → `clearAuth`; LD-less boot; base-sync continue-on-error; mongo 8.0.15 + `MONGO_MIN_POOL_SIZE` in compose | |
 
 ### Upstream-merge hazards (seen 2026-10)
 - Upstream adds exhaustive `never` switches / `Record<Enum, …>` maps. Fork enum values (`JobTopicNameEnum.TRANSLATION`) and new upstream values (`StepTypeEnum.TOOL`) break compile/boot with **no git conflict**.
 - The dashboard `build` script no longer runs tsc (Vite 8). Run `pnpm --filter @novu/dashboard typecheck` explicitly.
 - The vite alias `organization-dropdown-clerk → self-hosted/organization-switcher.tsx` keeps coming back through merges and hides the project dropdown.
+- Dockerfiles install with `--filter "<service>..." --filter "."` (pnpm 11 frozen install fails on a partial workspace). Add any project nx builds from source imports without a package.json dependency (api: chat-sdk-adapter, nextjs).
 - `admin-tools` backup registry (`backup.service.ts`) is a static whitelist: it does not include `aisettings`, `translationsettings`, `topicsubscribers`, `environmentvariables`, `_renovu_migrations` or upstream's new collections. Use `mongodump` for pre-deploy backups until fixed.
 
 ## Deploy Runbook
