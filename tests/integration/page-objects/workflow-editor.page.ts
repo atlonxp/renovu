@@ -28,8 +28,9 @@ export class WorkflowEditorPage {
     // Dismiss any overlay dialog first
     await this.dismissActionsDialog();
 
-    // Click the "+" drop zone button to open the add-step menu
-    await this.page.getByRole('button', { name: 'Drop here' }).click();
+    // Click the "+" button of the last add-node (the React Flow node box is taller than the "+",
+    // so clicking the node centre misses the menu trigger)
+    await this.page.getByTestId('add-step-menu-button').last().click();
 
     // The menu appears as a dialog with channel/action items as clickable divs
     const menuDialog = this.page.getByRole('dialog').last();

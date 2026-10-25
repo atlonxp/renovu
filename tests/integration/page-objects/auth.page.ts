@@ -38,9 +38,8 @@ export class AuthPage {
 
   async signOut() {
     // Click the user avatar/menu trigger in the sidebar
-    const avatarButton = this.page.locator('[data-testid="user-profile-button"]')
-      .or(this.page.locator('button').filter({ has: this.page.locator('span.relative.flex.shrink-0') }))
-      .first();
+    // The header user menu; the sidebar project dropdown also renders an avatar, so match by test id.
+    const avatarButton = this.page.getByTestId('user-profile-button').first();
     await avatarButton.click();
     await this.page.getByText('Logout').click();
     await this.page.waitForURL('**/auth/sign-in', { timeout: 15_000 });

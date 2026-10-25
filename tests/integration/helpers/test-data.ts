@@ -5,7 +5,8 @@ export function generateTestEmail(prefix = 'test'): string {
 }
 
 export function generatePassword(): string {
-  return `Test@${Date.now().toString(36).toUpperCase()}!`;
+  // The base36 timestamp may contain no digit; the sign-up form requires one.
+  return `Test@1${Date.now().toString(36).toUpperCase()}!`;
 }
 
 export function generateOrgName(prefix = 'TestOrg'): string {
