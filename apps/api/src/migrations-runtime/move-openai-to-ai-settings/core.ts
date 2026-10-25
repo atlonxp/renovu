@@ -65,7 +65,7 @@ export async function moveOpenAiToAiSettingsCore(
       _organizationId: orgId,
       provider: 'openai',
       apiKey: doc.openaiApiKey ?? '',
-      model: doc.openaiModel || 'gpt-4o-mini',
+      model: doc.openaiModel || 'gpt-6-luna',
       createdAt: now,
       updatedAt: now,
     });

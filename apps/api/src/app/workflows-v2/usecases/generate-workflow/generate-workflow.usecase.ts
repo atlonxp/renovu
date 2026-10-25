@@ -4,7 +4,13 @@ import {
   Injectable,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { InstrumentUsecase, isStringifiedMailyJSONContent, PinoLogger } from '@novu/application-generic';
+import {
+  buildOpenAiChatOptions,
+  DEFAULT_OPENAI_MODEL,
+  InstrumentUsecase,
+  isStringifiedMailyJSONContent,
+  PinoLogger,
+} from '@novu/application-generic';
 import { StepTypeEnum } from '@novu/shared';
 import OpenAI from 'openai';
 import { AiProviderEnum } from '../../../ai-settings/dal/ai-settings.entity';
@@ -24,7 +30,7 @@ import {
   SYSTEM_PROMPT_WORKFLOW,
 } from './generate-workflow.prompt';
 
-const DEFAULT_MODEL = 'gpt-4o-mini';
+const DEFAULT_MODEL = DEFAULT_OPENAI_MODEL;
 const TEMPERATURE = 0.4;
 const MAX_TOKENS = 4096;
 const MAX_VALIDATION_RETRIES = 2;
@@ -236,8 +242,7 @@ export class GenerateWorkflowUsecase {
         return await openai.chat.completions.create({
           model,
           messages,
-          temperature: TEMPERATURE,
-          max_tokens: MAX_TOKENS,
+          ...buildOpenAiChatOptions(model, { maxTokens: MAX_TOKENS, temperature: TEMPERATURE }),
           response_format: { type: 'json_object' },
         });
       } catch (error) {

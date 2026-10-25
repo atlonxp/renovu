@@ -1,5 +1,11 @@
 import { BadRequestException, HttpException, Injectable, ServiceUnavailableException } from '@nestjs/common';
-import { InstrumentUsecase, isStringifiedMailyJSONContent, PinoLogger } from '@novu/application-generic';
+import {
+  buildOpenAiChatOptions,
+  DEFAULT_OPENAI_MODEL,
+  InstrumentUsecase,
+  isStringifiedMailyJSONContent,
+  PinoLogger,
+} from '@novu/application-generic';
 import { LAYOUT_CONTENT_VARIABLE, LayoutContainerConfig } from '@novu/shared';
 import OpenAI from 'openai';
 import { AiProviderEnum } from '../../../ai-settings/dal/ai-settings.entity';
@@ -8,7 +14,7 @@ import { GenerateLayoutResponseDto } from '../../dtos/generate-layout-response.d
 import { GenerateLayoutCommand } from './generate-layout.command';
 import { buildRetryPrompt, buildUserPrompt, SYSTEM_PROMPT } from './generate-layout.prompt';
 
-const DEFAULT_MODEL = 'gpt-4o-mini';
+const DEFAULT_MODEL = DEFAULT_OPENAI_MODEL;
 const TEMPERATURE = 0.4;
 const MAX_TOKENS = 4096;
 const MAX_RETRIES = 2;
@@ -160,8 +166,7 @@ export class GenerateLayoutUsecase {
         return await openai.chat.completions.create({
           model,
           messages,
-          temperature: TEMPERATURE,
-          max_tokens: MAX_TOKENS,
+          ...buildOpenAiChatOptions(model, { maxTokens: MAX_TOKENS, temperature: TEMPERATURE }),
           response_format: { type: 'json_object' },
         });
       } catch (error) {

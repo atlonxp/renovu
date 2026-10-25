@@ -7,7 +7,7 @@ export class ConnectionTestResponseDto {
   @ApiProperty({ description: 'Status message describing the result' })
   message: string;
 
-  @ApiPropertyOptional({ description: 'Model used for the test', example: 'gpt-4o-mini' })
+  @ApiPropertyOptional({ description: 'Model used for the test', example: 'gpt-6-luna' })
   model?: string;
 
   @ApiPropertyOptional({ description: 'Response latency in milliseconds', example: 245 })

@@ -31,7 +31,7 @@ import { showSuccessToast } from '@/components/primitives/sonner-helpers';
 import { useAiSettings, useUpdateAiSettings } from '@/hooks/use-ai-settings';
 import { useTestAiConnection } from '@/hooks/use-test-ai-connection';
 
-const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
+const DEFAULT_OPENAI_MODEL = 'gpt-6-luna';
 
 interface AiSettingsFormData {
   provider: AiProviderEnum;
@@ -125,7 +125,13 @@ export function AiSettings() {
     }
   }, [form, testConnection, updateSettings, refetch]);
 
-  const modelOptions = AI_PROVIDER_MODELS[currentProvider] ?? [];
+  const selectedModel = form.watch('model');
+  const providerModels = AI_PROVIDER_MODELS[currentProvider] ?? [];
+  // ReNOVU: keep a previously saved model selectable after it is dropped from the offered list.
+  const modelOptions =
+    selectedModel && !providerModels.some((option) => option.value === selectedModel)
+      ? [...providerModels, { value: selectedModel, label: `${selectedModel} (legacy)` }]
+      : providerModels;
 
   return (
     <div className="space-y-6">

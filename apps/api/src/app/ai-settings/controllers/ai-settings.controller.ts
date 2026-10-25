@@ -12,7 +12,7 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { UserSession } from '@novu/application-generic';
+import { DEFAULT_OPENAI_MODEL, UserSession } from '@novu/application-generic';
 import type { UserSessionData } from '@novu/shared';
 
 import { RequireAuthentication } from '../../auth/framework/auth.decorator';
@@ -25,7 +25,6 @@ import {
 } from '../dtos';
 import { AiProviderService } from '../services/ai-provider.service';
 
-const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
 
 @Controller('ai-settings')
 @ApiTags('AI Settings')

@@ -72,14 +72,10 @@ export async function deleteAiSettings({ environment }: { environment: IEnvironm
  */
 export const AI_PROVIDER_MODELS: Record<AiProviderEnum, { value: string; label: string }[]> = {
   [AiProviderEnum.OPENAI]: [
-    // GPT-5 family
-    { value: 'gpt-5.5', label: 'GPT-5.5' },
-    { value: 'gpt-5.4', label: 'GPT-5.4' },
-    { value: 'gpt-5-mini', label: 'GPT-5 Mini' },
-    { value: 'gpt-5-nano', label: 'GPT-5 Nano' },
-    // GPT-4o family
-    { value: 'gpt-4o', label: 'GPT-4o' },
-    { value: 'gpt-4o-mini', label: 'GPT-4o Mini (Cost-effective)' },
+    // GPT-6 family
+    { value: 'gpt-6-luna', label: 'GPT-6 Luna (Fast, cost-effective)' },
+    { value: 'gpt-6.1-sol', label: 'GPT-6.1 Sol (Most capable)' },
+    { value: 'gpt-6-sol', label: 'GPT-6 Sol' },
   ],
 };
 

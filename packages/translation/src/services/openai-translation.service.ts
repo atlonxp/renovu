@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from "@nestjs/common";
 import { AI_SETTINGS_REPOSITORY, type IAiSettingsLookup } from "@novu/application-generic";
 import OpenAI from "openai";
 
+import { buildOpenAiChatOptions } from "@novu/application-generic";
 import { OpenAIModelEnum } from "../dal";
 import {
 	ApiKeyNotConfiguredError,
@@ -22,7 +23,7 @@ import { VariableTokenizerService } from "./variable-tokenizer.service";
  */
 const DEFAULT_CONFIG = {
 	/** Default model if not configured */
-	MODEL: OpenAIModelEnum.GPT_4O_MINI,
+	MODEL: OpenAIModelEnum.GPT_6_LUNA,
 	/** Maximum retries for failed API calls */
 	MAX_RETRIES: 3,
 	/** Base delay for exponential backoff (ms) */
@@ -188,8 +189,10 @@ export class OpenAITranslationService {
 							content: prompt,
 						},
 					],
-					temperature: DEFAULT_CONFIG.TEMPERATURE,
-					max_tokens: DEFAULT_CONFIG.MAX_TOKENS,
+					...buildOpenAiChatOptions(model, {
+						maxTokens: DEFAULT_CONFIG.MAX_TOKENS,
+						temperature: DEFAULT_CONFIG.TEMPERATURE,
+					}),
 				}),
 			);
 
@@ -366,7 +369,7 @@ export class OpenAITranslationService {
 						content: 'Respond with "OK" to confirm the connection works.',
 					},
 				],
-				max_tokens: 10,
+				...buildOpenAiChatOptions(model, { maxTokens: 10 }),
 			});
 
 			const response = completion.choices[0]?.message?.content;

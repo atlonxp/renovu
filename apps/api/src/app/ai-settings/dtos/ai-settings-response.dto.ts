@@ -18,7 +18,7 @@ export class AiSettingsResponseDto {
   @ApiProperty({ description: 'AI provider', enum: AiProviderEnum, example: AiProviderEnum.OPENAI })
   provider: AiProviderEnum;
 
-  @ApiProperty({ description: 'AI model identifier (free-form per provider)', example: 'gpt-4o-mini' })
+  @ApiProperty({ description: 'AI model identifier (free-form per provider)', example: 'gpt-6-luna' })
   model: string;
 
   @ApiProperty({ description: 'When the settings were created' })

@@ -10,6 +10,7 @@ export * from './buildBridgeEndpointUrl';
 export * from './card-button-issues';
 export * from './compute-workflow-status';
 export * from './constants';
+export * from './openai-chat-options';
 export * from './create-schema';
 export * from './deepmerge';
 export * from './digest';

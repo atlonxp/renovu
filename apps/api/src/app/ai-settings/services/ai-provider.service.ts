@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { buildOpenAiChatOptions } from '@novu/application-generic';
 import OpenAI from 'openai';
 
 import { AiProviderEnum, type AiSettingsEntity } from '../dal/ai-settings.entity';
@@ -47,7 +48,7 @@ export class AiProviderService {
       const completion = await openai.chat.completions.create({
         model: settings.model,
         messages: [{ role: 'user', content: 'Respond with "OK" to confirm the connection works.' }],
-        max_tokens: 10,
+        ...buildOpenAiChatOptions(settings.model, { maxTokens: 10 }),
       });
 
       const latencyMs = Date.now() - startTime;

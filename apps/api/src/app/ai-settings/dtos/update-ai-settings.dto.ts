@@ -21,7 +21,7 @@ export class UpdateAiSettingsDto {
   })
   apiKey?: string;
 
-  @ApiPropertyOptional({ description: 'Model identifier', example: 'gpt-4o-mini' })
+  @ApiPropertyOptional({ description: 'Model identifier', example: 'gpt-6-luna' })
   @IsOptional()
   @IsString()
   @MinLength(1)

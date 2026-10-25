@@ -9,6 +9,10 @@ export enum AiProviderEnum {
 }
 
 export enum OpenAIModelEnum {
+  GPT_6_LUNA = 'gpt-6-luna',
+  GPT_6_1_SOL = 'gpt-6.1-sol',
+  GPT_6_SOL = 'gpt-6-sol',
+  // Legacy models, kept so previously saved settings still type-check.
   GPT_4O_MINI = 'gpt-4o-mini',
   GPT_4O = 'gpt-4o',
   GPT_4_TURBO = 'gpt-4-turbo',
