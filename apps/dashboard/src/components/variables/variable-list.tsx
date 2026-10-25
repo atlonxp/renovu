@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { FacetedFormFilter } from '@/components/primitives/form/faceted-filter/facated-form-filter';
 import { PermissionButton } from '@/components/primitives/permission-button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/primitives/table';
-import { IS_SELF_HOSTED_CE } from '@/config';
+import { IS_SELF_HOSTED, IS_SELF_HOSTED_CE } from '@/config';
 import { useEnvironment } from '@/context/environment/hooks';
 import { useFetchEnvironmentVariables } from '@/hooks/use-fetch-environment-variables';
 import { useFetchSubscription } from '@/hooks/use-fetch-subscription';
@@ -22,11 +22,14 @@ export const VariableList = () => {
   const navigate = useNavigate();
   const { subscription, isLoading: isLoadingSubscription } = useFetchSubscription();
 
+  // ReNOVU: environment variables are unlocked on self-hosted deployments.
   const canUseVariablesFeature =
-    getFeatureForTierAsBoolean(
+    IS_SELF_HOSTED ||
+    (getFeatureForTierAsBoolean(
       FeatureNameEnum.ENVIRONMENT_VARIABLES,
       subscription?.apiServiceLevel || ApiServiceLevelEnum.FREE
-    ) && !IS_SELF_HOSTED_CE;
+    ) &&
+      !IS_SELF_HOSTED_CE);
 
   useEffect(() => {
     const timeout = setTimeout(() => {

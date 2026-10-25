@@ -42,6 +42,7 @@ function UserButtonInner(_props?: { children?: React.ReactNode; userProfileUrl?:
         <DropdownMenuTrigger asChild>
           <Button
             ref={buttonRef}
+            data-testid="user-profile-button"
             variant="secondary"
             size="sm"
             className="h-6 w-6 rounded-full bg-white p-0 hover:bg-gray-50 focus:outline-hidden focus:ring-0 focus-visible:shadow-none"

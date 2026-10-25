@@ -1,6 +1,6 @@
 import '@novu/maily-core/style.css';
 import { PermissionsEnum } from '@novu/shared';
-import { StrictMode } from 'react';
+import { type ReactNode, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom';
 import './index.css';
@@ -99,6 +99,11 @@ captureAgentTemplateIdFromUrl();
 // Stash an incoming connect claim token before Clerk's auth redirects drop the query params.
 captureConnectClaimTokenFromUrl();
 
+// ReNOVU: Novu's Agents/Connect product is not part of self-hosted ReNOVU (its public API routes are
+// disabled too), so its pages redirect home instead of showing a cloud upsell.
+const withoutAgentsOnSelfHosted = (element: ReactNode) =>
+  IS_SELF_HOSTED ? <Navigate to={ROUTES.ROOT} replace /> : element;
+
 const router = createBrowserRouter([
   {
     element: <RootRoute />,
@@ -114,26 +119,26 @@ const router = createBrowserRouter([
       },
       {
         path: ROUTES.CONNECT_CLAIM,
-        element: <ConnectClaimPage />,
+        element: withoutAgentsOnSelfHosted(<ConnectClaimPage />),
       },
       {
         // Public, unauthenticated setup page for Slack. Mounted outside
         // AuthRoute so unauthenticated visitors are not redirected to sign-in.
         path: ROUTES.AGENT_SLACK_SETUP,
-        element: <AgentSlackSetupPage />,
+        element: withoutAgentsOnSelfHosted(<AgentSlackSetupPage />),
       },
       {
         // Public, unauthenticated mobile setup page for Telegram. Mounted outside
         // AuthRoute so unauthenticated visitors are not redirected to sign-in.
         path: ROUTES.AGENT_TELEGRAM_MOBILE_SETUP,
-        element: <AgentTelegramMobileSetupPage />,
+        element: withoutAgentsOnSelfHosted(<AgentTelegramMobileSetupPage />),
       },
       {
         // Public, unauthenticated WhatsApp Embedded Signup page opened by
         // `npx novu connect`. Trust comes from the opaque token in the URL, so
         // it is mounted outside AuthRoute (keyless CLI users have no session).
         path: ROUTES.AGENT_WHATSAPP_SIGNUP,
-        element: <AgentWhatsAppSignupPage />,
+        element: withoutAgentsOnSelfHosted(<AgentWhatsAppSignupPage />),
       },
       {
         // Public, unauthenticated mobile setup page for the Telegram integration
@@ -193,11 +198,11 @@ const router = createBrowserRouter([
           },
           {
             path: ROUTES.AGENTS_PERSONALIZE,
-            element: <AgentsPersonalizePage />,
+            element: withoutAgentsOnSelfHosted(<AgentsPersonalizePage />),
           },
           {
             path: ROUTES.AGENTS_SETUP,
-            element: (
+            element: withoutAgentsOnSelfHosted(
               <ConnectSubscriberProvider>
                 <AgentsSetupPage />
               </ConnectSubscriberProvider>
@@ -424,11 +429,11 @@ const router = createBrowserRouter([
               },
               {
                 path: ROUTES.AGENTS,
-                element: <AgentsPage />,
+                element: withoutAgentsOnSelfHosted(<AgentsPage />),
               },
               {
                 path: ROUTES.AGENT_DETAILS_INTEGRATIONS_DETAIL,
-                element: (
+                element: withoutAgentsOnSelfHosted(
                   <ProtectedRoute permission={PermissionsEnum.AGENT_READ}>
                     <AgentDetailsPage />
                   </ProtectedRoute>
@@ -436,7 +441,7 @@ const router = createBrowserRouter([
               },
               {
                 path: ROUTES.AGENT_DETAILS_TAB,
-                element: (
+                element: withoutAgentsOnSelfHosted(
                   <ProtectedRoute permission={PermissionsEnum.AGENT_READ}>
                     <AgentDetailsPage />
                   </ProtectedRoute>
@@ -444,7 +449,7 @@ const router = createBrowserRouter([
               },
               {
                 path: ROUTES.AGENT_DETAILS,
-                element: (
+                element: withoutAgentsOnSelfHosted(
                   <ProtectedRoute permission={PermissionsEnum.AGENT_READ}>
                     <AgentDetailsPage />
                   </ProtectedRoute>

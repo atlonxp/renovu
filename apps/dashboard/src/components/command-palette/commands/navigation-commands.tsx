@@ -13,7 +13,7 @@ import {
   RiTranslate2,
 } from 'react-icons/ri';
 import { useNavigate } from 'react-router-dom';
-import { IS_SELF_HOSTED_CE } from '@/config';
+import { IS_SELF_HOSTED, IS_SELF_HOSTED_CE } from '@/config';
 import { useHasPermission } from '@/hooks/use-has-permission';
 import { buildRoute, ROUTES } from '@/utils/routes';
 import { Command, CommandExecutionContext } from '../command-types';
@@ -23,7 +23,8 @@ export function useNavigationCommands(context: CommandExecutionContext): Command
   const hasPermission = useHasPermission();
   const hasWorkflowPermission = hasPermission({ permission: PermissionsEnum.WORKFLOW_READ });
   const hasSubscriberPermission = hasPermission({ permission: PermissionsEnum.SUBSCRIBER_READ });
-  const areTranslationsAvailable = !IS_SELF_HOSTED_CE;
+  // ReNOVU: translations are unlocked on self-hosted deployments (packages/translation).
+  const areTranslationsAvailable = IS_SELF_HOSTED || !IS_SELF_HOSTED_CE;
 
   const createNavigationCommand = useCallback(
     (id: string, label: string, route: string, icon: React.ReactNode, permission?: () => boolean) => ({

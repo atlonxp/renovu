@@ -12,6 +12,7 @@ import {
 } from 'react-icons/ri';
 import { BOOK_DEMO_URL, docsUrl } from '@/components/help-panel';
 import { BotIcon } from '@/components/icons/bot';
+import { IS_SELF_HOSTED } from '@/config';
 import { LinkIcon } from '@/components/icons/link';
 import { useTelemetry } from '@/hooks/use-telemetry';
 import { AGENTS_DOCS_OVERVIEW_URL } from '@/utils/agent-docs';
@@ -25,13 +26,17 @@ type SidebarLink = {
 
 const QUICK_LINKS: SidebarLink[] = [
   { label: 'Join our community', href: 'https://discord.novu.co', icon: RiGroup2Fill },
-  { label: 'Book a demo (Yes, with a human)', href: BOOK_DEMO_URL, icon: RiCalendarScheduleLine },
+  // ReNOVU: no Novu sales demo on self-hosted.
+  ...(IS_SELF_HOSTED
+    ? []
+    : [{ label: 'Book a demo (Yes, with a human)', href: BOOK_DEMO_URL, icon: RiCalendarScheduleLine }]),
   { label: 'Read documentation', href: docsUrl(), icon: RiBookletLine },
   { label: 'See our code on GitHub', href: 'https://github.com/novuhq/novu', icon: RiGithubLine },
 ];
 
 const LEARN_LINKS: SidebarLink[] = [
-  { label: 'Agents', href: AGENTS_DOCS_OVERVIEW_URL, icon: BotIcon },
+  // ReNOVU: Novu's Agents product is not part of self-hosted ReNOVU.
+  ...(IS_SELF_HOSTED ? [] : [{ label: 'Agents', href: AGENTS_DOCS_OVERVIEW_URL, icon: BotIcon }]),
   { label: 'Environments', href: docsUrl('/platform/concepts/environments'), icon: RiDatabase2Line },
   {
     label: 'Contexts',

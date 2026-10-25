@@ -323,6 +323,11 @@ export class ResourceValidatorService {
   }
 
   async validateEnvironmentVariablesLimit(organizationId: string): Promise<void> {
+    // ArokaGO: Self-hosted deployments have NO environment variable limits
+    if (process.env.IS_SELF_HOSTED === 'true') {
+      return;
+    }
+
     const variablesCount = await this.environmentVariableRepository.count({ _organizationId: organizationId });
     const maxEnvironmentVariablesLimit = await this.featureFlagService.getFlag({
       key: FeatureFlagsKeysEnum.MAX_ENVIRONMENT_VARIABLES_LIMIT_NUMBER,
@@ -340,6 +345,11 @@ export class ResourceValidatorService {
   }
 
   async validateDomainsLimit(organizationId: string): Promise<void> {
+    // ArokaGO: Self-hosted deployments have NO domain limits
+    if (process.env.IS_SELF_HOSTED === 'true') {
+      return;
+    }
+
     const domainsCount = await this.domainRepository.count({
       _organizationId: organizationId,
     });
