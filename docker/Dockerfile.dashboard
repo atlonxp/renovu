@@ -28,8 +28,11 @@ COPY libs ./libs
 COPY packages ./packages
 
 # Install dependencies
+# Only this service and its workspace deps are in the build context; pnpm 11 rejects a
+# frozen install of the whole lockfile when other workspace projects are missing. The extra
+# filters cover projects nx builds from source imports that no package.json declares.
 RUN --mount=type=cache,id=pnpm-store-dashboard,target=/root/.pnpm-store \
-    pnpm install --frozen-lockfile --unsafe-perm
+    pnpm install --frozen-lockfile --unsafe-perm --filter "@novu/dashboard..." --filter "@novu/ee-auth" --filter "."
 
 # Build the dashboard with self-hosted flag
 # CRITICAL: VITE_SELF_HOSTED must be set at BUILD time for Vite to alias

@@ -25,8 +25,10 @@ COPY libs ./libs
 COPY packages ./packages
 
 # Install dependencies
+# Only this service and its workspace deps are in the build context; pnpm 11 rejects a
+# frozen install of the whole lockfile when other workspace projects are missing.
 RUN --mount=type=cache,id=pnpm-store-ws,target=/root/.pnpm-store \
-    pnpm install --frozen-lockfile --unsafe-perm
+    pnpm install --frozen-lockfile --unsafe-perm --filter "@novu/ws..." --filter "."
 
 # Build WebSocket Server
 RUN NODE_ENV=production pnpm build:ws --skip-nx-cache

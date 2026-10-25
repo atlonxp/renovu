@@ -28,8 +28,12 @@ COPY libs ./libs
 COPY packages ./packages
 
 # Install dependencies
+# Only this service and its workspace deps are in the build context; pnpm 11 rejects a
+# frozen install of the whole lockfile when other workspace projects are missing. The extra
+# filters cover projects nx builds from source imports that no package.json declares.
 RUN --mount=type=cache,id=pnpm-store-api,target=/root/.pnpm-store \
-    pnpm install --frozen-lockfile --unsafe-perm
+    pnpm install --frozen-lockfile --unsafe-perm --filter "@novu/api-service..." \
+      --filter "@novu/chat-sdk-adapter..." --filter "@novu/nextjs..." --filter "."
 
 # Build API
 RUN NODE_ENV=production pnpm build:api --skip-nx-cache
