@@ -1,3 +1,5 @@
+import { BILLING_SETTINGS_PATH } from '@novu/shared';
+
 export const ROUTES = {
   SIGN_IN: '/auth/sign-in',
   SIGN_UP: '/auth/sign-up',
@@ -9,20 +11,26 @@ export const ROUTES = {
   SSO_SIGN_IN: '/auth/sso',
   VERIFY_EMAIL: '/auth/verify-email',
   USECASE_SELECT: '/onboarding/usecase',
-  AGENTS_USECASE: '/onboarding/agents',
+  AGENTS_PERSONALIZE: '/onboarding/agents/personalize',
   AGENTS_SETUP: '/onboarding/agents/setup',
   INBOX_USECASE: '/onboarding/inbox',
   INBOX_EMBED: '/onboarding/inbox/embed',
   INBOX_EMBED_SUCCESS: '/onboarding/inbox/success',
   ROOT: '/',
   LOCAL_STUDIO_AUTH: '/local-studio/auth',
+  /** Handshake target opened by `novu dev` with tunnel params (see pages/local-handshake.tsx). */
+  LOCAL_HANDSHAKE: '/local',
+  LOCAL_WORKFLOWS: '/env/:environmentSlug/local/workflows',
+  LOCAL_EDIT_WORKFLOW: '/env/:environmentSlug/local/workflows/:workflowSlug',
+  LOCAL_TRIGGER_WORKFLOW: '/env/:environmentSlug/local/workflows/:workflowSlug/trigger',
   CLI_AUTH: '/cli/auth',
+  CONNECT_CLAIM: '/connect/claim',
   ENV: '/env',
   SETTINGS: '/settings',
   SETTINGS_ACCOUNT: '/settings/account',
   SETTINGS_ORGANIZATION: '/settings/organization',
   SETTINGS_TEAM: '/settings/team',
-  SETTINGS_BILLING: '/settings/billing',
+  SETTINGS_BILLING: BILLING_SETTINGS_PATH,
   SETTINGS_DATA_MANAGEMENT: '/settings/data-management',
   SETTINGS_AI: '/settings/ai',
   WORKFLOWS: '/env/:environmentSlug/workflows',
@@ -34,6 +42,7 @@ export const ROUTES = {
   WELCOME: '/env/:environmentSlug/welcome',
   HOME: '/env/:environmentSlug/home',
   EDIT_WORKFLOW_PREFERENCES: 'preferences',
+  EDIT_WORKFLOW_AGENT: 'agent',
   EDIT_STEP: 'steps/:stepSlug',
 
   EDIT_STEP_TEMPLATE: 'steps/:stepSlug/editor',
@@ -85,25 +94,19 @@ export const ROUTES = {
   AGENT_DETAILS_INTEGRATIONS_DETAIL:
     '/env/:environmentSlug/agents/:agentIdentifier/integrations/:integrationIdentifier',
   AGENT_DETAILS_TAB: '/env/:environmentSlug/agents/:agentIdentifier/:agentTab',
+  /** Public, tokenized Embedded Signup page opened by `npx novu connect` (keyless or authenticated). */
+  AGENT_WHATSAPP_SIGNUP: '/agents/whatsapp/connect/:token',
   AGENT_TELEGRAM_MOBILE_SETUP: '/agents/telegram/connect/:token',
+  AGENT_SLACK_SETUP: '/agents/slack/connect/:token',
   INTEGRATION_TELEGRAM_MOBILE_SETUP: '/integrations/telegram/connect/:token',
-  CONNECT_HOME: '/env/:environmentSlug/connect',
-  CONNECT_AGENTS: '/env/:environmentSlug/connect/agents',
-  CONNECT_AGENT_DETAILS: '/env/:environmentSlug/connect/agents/:agentIdentifier',
-  /** Must be registered before CONNECT_AGENT_DETAILS_TAB so `.../integrations/:integrationIdentifier` is not parsed as a tab name. */
-  CONNECT_AGENT_DETAILS_INTEGRATIONS_DETAIL:
-    '/env/:environmentSlug/connect/agents/:agentIdentifier/integrations/:integrationIdentifier',
-  CONNECT_AGENT_DETAILS_TAB: '/env/:environmentSlug/connect/agents/:agentIdentifier/:agentTab',
-  CONNECT_CONVERSATIONS: '/env/:environmentSlug/connect/conversations',
-  CONNECT_API_KEYS: '/env/:environmentSlug/connect/api-keys',
-  CONNECT_SETTINGS: '/env/:environmentSlug/connect/settings',
-  CONNECT_SETTINGS_ACCOUNT: '/env/:environmentSlug/connect/settings/account',
-  CONNECT_SETTINGS_ORGANIZATION: '/env/:environmentSlug/connect/settings/organization',
-  CONNECT_SETTINGS_TEAM: '/env/:environmentSlug/connect/settings/team',
-  CONNECT_SETTINGS_BILLING: '/env/:environmentSlug/connect/settings/billing',
 } as const;
 
 export const AGENT_DETAILS_DEFAULT_TAB = 'overview';
+
+/** Legacy `/chat` tab. Redirects to overview with the preview drawer open. */
+export const AGENT_DETAILS_CHAT_TAB = 'chat';
+
+export const WEB_CHAT_PREVIEW_PARAM = 'previewChat';
 
 export const AGENT_DETAILS_TABS = ['overview', 'integrations'] as const;
 
@@ -115,6 +118,13 @@ export function parseAgentDetailsTab(tab: string | undefined): AgentDetailsTab {
   }
 
   return AGENT_DETAILS_DEFAULT_TAB;
+}
+
+/** Reserved path segments, not slug prefixes. `create-account_wf_…` is still an editor slug. */
+const RESERVED_WORKFLOW_SEGMENTS = /\/workflows\/(?:create|templates)(?:\/|$)/;
+
+export function isWorkflowEditorPath(pathname: string): boolean {
+  return pathname.includes('/workflows/') && !RESERVED_WORKFLOW_SEGMENTS.test(pathname);
 }
 
 export const buildRoute = (route: string, params: Record<string, string>) => {

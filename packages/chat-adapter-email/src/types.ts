@@ -1,4 +1,9 @@
-import type { IEmailAlternative, NovuEmailAttachment } from '@novu/shared';
+import type {
+  EmailWebhookDomainContext,
+  EmailWebhookRouteContext,
+  IEmailAlternative,
+  NovuEmailAttachment,
+} from '@novu/shared';
 import type { Adapter } from 'chat';
 
 export type { EmailWebhookPayload, NovuEmailAttachment } from '@novu/shared';
@@ -7,6 +12,14 @@ export interface NovuEmailAdapterConfig {
   senderName?: string;
   signingSecret: string;
   sendEmail: (params: SendEmailParams) => Promise<{ messageId?: string }>;
+  stripAgentReplyToken: (address: string) => string;
+  /**
+   * Address the agent sends from when a thread has no recorded agent address yet.
+   * Inbound threads learn it from the `To` header of the first email; threads the
+   * agent opens itself (`openDM` → `post`, e.g. a human-interaction DM) have no
+   * inbound email to learn from and would otherwise fail on the first send.
+   */
+  defaultAgentAddress?: string;
   /**
    * Resolves a URL for an interactive `<Button id="…">` rendered inside an outbound email.
    * Called once per button before the email HTML is rendered. When omitted, action buttons
@@ -69,9 +82,24 @@ export interface NovuEmailRawMessage {
   subject: string;
   text?: string;
   html?: string;
+  /** RFC 2822 `In-Reply-To` header as sent by the client (parent message). */
+  inReplyTo?: string;
+  /** RFC 2822 `References` header as sent by the client (whitespace-separated chain). */
+  references?: string;
   headers?: Record<string, string>;
+  domain?: EmailWebhookDomainContext;
+  route?: EmailWebhookRouteContext;
+  /** Decoded `Message._id` from a trailing `+nv{base36}` Reply-To token, when present. */
+  originToken?: string;
   createdAt: string;
   attachments?: NovuEmailAttachment[];
+  /**
+   * Sender-authentication verdicts (`'pass'` / `'failed'`) forwarded from the
+   * inbound-mail service. Downstream identity resolution must treat the
+   * spoofable `from` address as untrusted unless both are `'pass'`.
+   */
+  dkim?: string;
+  spf?: string;
 }
 
 export type NovuEmailAdapter = Adapter<NovuEmailThreadId, NovuEmailRawMessage>;

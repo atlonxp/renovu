@@ -25,7 +25,7 @@
  */
 
 import getPort from 'get-port';
-import { esmImport } from '../../utils/esm-import';
+import { esmImport } from '../../shared/util/esm-import';
 
 interface EmulatorInstance {
   url: string;
@@ -41,6 +41,7 @@ export interface RecordedSlackCall {
 let emulator: EmulatorInstance | undefined;
 let webClientPatched = false;
 let recordedCalls: RecordedSlackCall[] = [];
+const patchedWebClientPrototypes = new Set<object>();
 
 /**
  * Synthetic Slack user records returned in place of real `users.info` lookups
@@ -216,28 +217,75 @@ export function resetEmulator(): void {
  * 1. **`module.exports.WebClient`** — wraps the constructor so any
  *    `new WebClient(token)` call constructed AFTER this patch (the typical
  *    case, since `@chat-adapter/slack` is lazy-imported in
- *    `chat-sdk.service.ts`) gets `slackApiUrl` injected.
+ *    `chat-instance.registry.ts`) gets `slackApiUrl` injected.
  * 2. **`WebClient.prototype.apiCall`** — mutates `slackApiUrl` and the
  *    underlying axios `baseURL` on every call. This catches WebClient
  *    instances that were constructed BEFORE the patch (e.g. cached on a
- *    `ChatSdkService.instances` entry surviving across test files), and is
+ *    `ChatInstanceRegistry.instances` entry surviving across test files), and is
  *    also our safety net if the constructor wrap somehow misses an instance.
  *
  * `WebClient` reads `slackApiUrl` once at construction to build axios's
  * `baseURL`, then `axios.getUri()` uses `this.axios.defaults.baseURL` per
  * request — so mutating both fields covers every Slack API call path.
+ *
+ * `@chat-adapter/slack` resolves its own copy of `@slack/web-api` (e.g. 7.15.0)
+ * while `apps/api` may depend on a newer direct version (e.g. 7.17.0). We patch
+ * every resolved copy so the emulator redirect + synthetic stubs apply to the
+ * WebClient instance the adapter actually constructs.
  */
-function patchWebClient(): void {
-  if (webClientPatched) return;
-
-  // biome-ignore lint/style/noCommonJs: deliberate require so we mutate module.exports before chat-adapter binds the named import
-  const webApi = require('@slack/web-api') as {
+function collectSlackWebApiModules(): Array<{
+  WebClient: new (token?: string, opts?: Record<string, unknown>) => unknown;
+}> {
+  const modules: Array<{
     WebClient: new (token?: string, opts?: Record<string, unknown>) => unknown;
-  };
+  }> = [];
+  const seen = new Set<string>();
+
+  function tryAdd(resolveFrom: string): void {
+    try {
+      const { createRequire } = require('node:module') as typeof import('node:module');
+      const req = createRequire(resolveFrom);
+      const resolved = req.resolve('@slack/web-api');
+      if (seen.has(resolved)) return;
+      seen.add(resolved);
+      modules.push(
+        req('@slack/web-api') as {
+          WebClient: new (token?: string, opts?: Record<string, unknown>) => unknown;
+        }
+      );
+    } catch {
+      // not installed from this resolution context
+    }
+  }
+
+  tryAdd(__filename);
+  try {
+    tryAdd(require.resolve('../../../../../package.json', { paths: [__filename] }));
+  } catch {
+    // apps/api package.json not found from this helper path
+  }
+
+  return modules;
+}
+
+function applyWebClientPatch(webApi: {
+  WebClient: new (token?: string, opts?: Record<string, unknown>) => unknown;
+}): void {
   const Original = webApi.WebClient;
+  if (patchedWebClientPrototypes.has(Original.prototype)) return;
+  patchedWebClientPrototypes.add(Original.prototype);
 
   function PatchedWebClient(this: unknown, token?: string, opts?: Record<string, unknown>) {
-    const merged: Record<string, unknown> = { ...(opts ?? {}) };
+    const baseOpts = opts ?? {};
+    const merged: Record<string, unknown> = {
+      ...baseOpts,
+      retryConfig: {
+        ...(typeof baseOpts.retryConfig === 'object' && baseOpts.retryConfig !== null
+          ? (baseOpts.retryConfig as Record<string, unknown>)
+          : {}),
+        retries: 0,
+      },
+    };
     const apiUrl = process.env.SLACK_API_URL;
     if (apiUrl && merged.slackApiUrl === undefined) {
       merged.slackApiUrl = apiUrl;
@@ -333,6 +381,14 @@ function patchWebClient(): void {
 
       return origApiCall.apply(this, args);
     };
+  }
+}
+
+function patchWebClient(): void {
+  if (webClientPatched) return;
+
+  for (const webApi of collectSlackWebApiModules()) {
+    applyWebClientPatch(webApi);
   }
 
   webClientPatched = true;

@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException, HttpException, HttpStatus } from '@nestjs/common';
 import { expect } from 'chai';
 import { restore, stub } from 'sinon';
 
@@ -15,8 +15,11 @@ describe('CreateDomain usecase', () => {
     userId: 'user-id',
   };
 
-  let domainRepositoryMock: { findByName: sinon.SinonStub; create: sinon.SinonStub };
-  let resourceValidatorMock: { validateDomainsLimit: sinon.SinonStub };
+  let domainRepositoryMock: { findByName: sinon.SinonStub; create: sinon.SinonStub; count: sinon.SinonStub };
+  let resourceValidatorMock: {
+    validateDomainsLimit: sinon.SinonStub;
+    validateCustomEmailDomainsLimit: sinon.SinonStub;
+  };
 
   function buildUsecase() {
     return new CreateDomain(domainRepositoryMock as any, resourceValidatorMock as any);
@@ -28,10 +31,12 @@ describe('CreateDomain usecase', () => {
     domainRepositoryMock = {
       findByName: stub().resolves(null),
       create: stub().callsFake((doc: Record<string, unknown>) => Promise.resolve({ _id: 'domain-id', ...doc })),
+      count: stub().resolves(0),
     };
 
     resourceValidatorMock = {
       validateDomainsLimit: stub().resolves(),
+      validateCustomEmailDomainsLimit: stub().resolves(),
     };
 
     stub(dnsProviderModule, 'detectDnsProvider').resolves(null);
@@ -42,11 +47,48 @@ describe('CreateDomain usecase', () => {
     process.env = { ...previousEnv };
   });
 
+  describe('custom email domain limit', () => {
+    it('propagates limit errors from the resource validator without creating the domain', async () => {
+      resourceValidatorMock.validateCustomEmailDomainsLimit.rejects(
+        new HttpException({ message: 'Upgrade your plan', currentCount: 3, limit: 3 }, HttpStatus.PAYMENT_REQUIRED)
+      );
+
+      const usecase = buildUsecase();
+
+      try {
+        await usecase.execute(baseCommand);
+        throw new Error('Expected execute to throw');
+      } catch (err) {
+        expect(err).to.be.instanceOf(HttpException);
+        expect((err as HttpException).getStatus()).to.equal(HttpStatus.PAYMENT_REQUIRED);
+      }
+
+      expect(resourceValidatorMock.validateDomainsLimit.called).to.equal(false);
+      expect(domainRepositoryMock.create.called).to.equal(false);
+    });
+
+    it('validates the plan entitlement before the global anti-abuse cap', async () => {
+      const usecase = buildUsecase();
+
+      await usecase.execute(baseCommand);
+
+      expect(resourceValidatorMock.validateCustomEmailDomainsLimit.calledOnceWith(baseCommand.organizationId)).to.equal(
+        true
+      );
+      expect(resourceValidatorMock.validateDomainsLimit.calledOnceWith(baseCommand.organizationId)).to.equal(true);
+      expect(
+        resourceValidatorMock.validateCustomEmailDomainsLimit.calledBefore(resourceValidatorMock.validateDomainsLimit)
+      ).to.equal(true);
+      expect(domainRepositoryMock.create.calledOnce).to.equal(true);
+    });
+  });
+
   describe('shared agent domain reservation', () => {
     beforeEach(() => {
       process.env.NOVU_ENTERPRISE = 'true';
       delete process.env.IS_SELF_HOSTED;
       process.env.NOVU_AGENT_SHARED_INBOUND_DOMAIN = 'agentconnect.sh';
+      process.env.NOVU_AGENT_INBOX_INBOUND_DOMAIN = 'agentinbox.md';
     });
 
     it('rejects creation when the domain matches the configured shared agent inbox domain', async () => {
@@ -72,6 +114,20 @@ describe('CreateDomain usecase', () => {
         throw new Error('Expected execute to throw');
       } catch (err) {
         expect(err).to.be.instanceOf(BadRequestException);
+      }
+
+      expect(domainRepositoryMock.create.called).to.equal(false);
+    });
+
+    it('rejects creation of the Agent Inbox shared domain', async () => {
+      const usecase = buildUsecase();
+
+      try {
+        await usecase.execute({ ...baseCommand, name: 'agentinbox.md' });
+        throw new Error('Expected execute to throw');
+      } catch (err) {
+        expect(err).to.be.instanceOf(BadRequestException);
+        expect((err as BadRequestException).message).to.include("reserved for Novu's shared agent inbox");
       }
 
       expect(domainRepositoryMock.create.called).to.equal(false);

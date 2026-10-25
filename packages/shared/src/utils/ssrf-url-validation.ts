@@ -1,5 +1,14 @@
 import * as dns from 'node:dns';
+import { isIP } from 'node:net';
 import { LRUCache } from 'lru-cache';
+import {
+  isAddressAllowedByOutboundAllowList,
+  isHostnameAllowedByOutboundAllowList,
+  isOutboundAddressAllowed,
+} from './outbound-ssrf-allow-list';
+import { isLinkLocalIp, isPrivateIp, normalizeHostnameForLookup } from './private-ip-classification';
+
+export { isLinkLocalIp, isPrivateIp, normalizeHostnameForLookup };
 
 /**
  * Resolves a webhook-style URL for outbound HTTP requests.
@@ -45,42 +54,6 @@ const DNS_CACHE = new LRUCache<string, dns.LookupAddress[]>({
 });
 
 /**
- * Returns true for IPs that are loopback, RFC1918 private, RFC6598 shared (CGNAT),
- * link-local, unique-local IPv6 (fc00::/7), IPv6 loopback/link-local, IPv4-mapped
- * IPv6 of any of these, or the unspecified 0.0.0.0 address.
- *
- * Used to reject SSRF candidates at validation **and** at connect time.
- */
-export function isPrivateIp(ip: string): boolean {
-  const sharedAddressSecondOctet = '(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])';
-  const privateRanges = [
-    /^0\.0\.0\.0$/i,
-    /^127\./,
-    /^10\./,
-    /^172\.(1[6-9]|2[0-9]|3[01])\./,
-    /^192\.168\./,
-    /^169\.254\./,
-    /* RFC6598 shared address space (100.64.0.0/10) — cloud metadata, CGNAT */
-    new RegExp(`^100\\.${sharedAddressSecondOctet}\\.`),
-    /^::ffff:127\./i,
-    /^::ffff:10\./i,
-    /^::ffff:172\.(1[6-9]|2[0-9]|3[01])\./i,
-    /^::ffff:192\.168\./i,
-    /^::ffff:169\.254\./i,
-    new RegExp(`^::ffff:100\\.${sharedAddressSecondOctet}\\.`, 'i'),
-    /^::1$/i,
-    /* ULA fc00::/7 (fc00–fdff first hextet) */
-    /^f[cd][0-9a-f]{2}:/i,
-    /^::ffff:f[cd][0-9a-f]{2}:/i,
-    /* Link-local fe80::/10 (fe80–febf first hextet) */
-    /^fe[89ab][0-9a-f]:/i,
-    /^::ffff:fe[89ab][0-9a-f]:/i,
-  ];
-
-  return privateRanges.some((range) => range.test(ip));
-}
-
-/**
  * Hostnames whose entire purpose is to expose internal/metadata endpoints.
  * Reject these by name, before DNS resolution, since the resolver could be
  * tricked into returning a public IP that proxies to a private destination.
@@ -124,6 +97,8 @@ export class SsrfBlockedError extends Error {
  *  - must be http/https
  *  - must not embed credentials
  *  - must not target a blocked hostname
+ *  - must not target a private / reserved IP literal (unless allow-listed);
+ *    link-local / cloud-metadata literals are never allow-listed
  *
  * Throws {@link SsrfBlockedError} on any rejection. Returns the parsed URL on success.
  *
@@ -156,6 +131,19 @@ export function assertSafeOutboundUrl(input: string | URL): URL {
     throw new SsrfBlockedError('BLOCKED_HOSTNAME', `Requests to "${hostname}" are not allowed.`, { hostname });
   }
 
+  const normalized = normalizeHostnameForLookup(hostname);
+  const literalFamily = isIP(normalized);
+
+  if (literalFamily !== 0) {
+    if (isLinkLocalIp(normalized) || (isPrivateIp(normalized) && !isOutboundAddressAllowed(normalized, normalized))) {
+      throw new SsrfBlockedError(
+        'PRIVATE_IP',
+        `Requests to private or reserved IP addresses are not allowed (resolved: ${normalized}).`,
+        { hostname: normalized, resolvedAddress: normalized }
+      );
+    }
+  }
+
   return parsed;
 }
 
@@ -176,31 +164,52 @@ export async function resolvePublicAddresses(
   hostname: string,
   options: { useCache?: boolean } = {}
 ): Promise<dns.LookupAddress[]> {
-  const lower = hostname.toLowerCase();
+  const normalized = normalizeHostnameForLookup(hostname);
   let addresses: dns.LookupAddress[] | undefined;
 
   if (options.useCache) {
-    addresses = DNS_CACHE.get(lower);
+    addresses = DNS_CACHE.get(normalized);
   }
 
   if (!addresses) {
-    try {
-      addresses = await dns.promises.lookup(lower, { all: true });
-    } catch {
-      throw new SsrfBlockedError('DNS_LOOKUP_FAILED', `Unable to resolve hostname "${lower}".`, { hostname: lower });
+    const literalFamily = isIP(normalized);
+
+    if (literalFamily !== 0) {
+      addresses = [{ address: normalized, family: literalFamily }];
+    } else {
+      try {
+        addresses = await dns.promises.lookup(normalized, { all: true });
+      } catch {
+        throw new SsrfBlockedError('DNS_LOOKUP_FAILED', `Unable to resolve hostname "${normalized}".`, {
+          hostname: normalized,
+        });
+      }
     }
 
     if (options.useCache) {
-      DNS_CACHE.set(lower, addresses);
+      DNS_CACHE.set(normalized, addresses);
     }
   }
 
   for (const { address } of addresses) {
+    // Link-local / IMDS ranges are never allow-listable.
+    if (isLinkLocalIp(address)) {
+      throw new SsrfBlockedError(
+        'PRIVATE_IP',
+        `Requests to private or reserved IP addresses are not allowed (resolved: ${address}).`,
+        { hostname: normalized, resolvedAddress: address }
+      );
+    }
+
+    if (isHostnameAllowedByOutboundAllowList(normalized) || isAddressAllowedByOutboundAllowList(address)) {
+      continue;
+    }
+
     if (isPrivateIp(address)) {
       throw new SsrfBlockedError(
         'PRIVATE_IP',
         `Requests to private or reserved IP addresses are not allowed (resolved: ${address}).`,
-        { hostname: lower, resolvedAddress: address }
+        { hostname: normalized, resolvedAddress: address }
       );
     }
   }

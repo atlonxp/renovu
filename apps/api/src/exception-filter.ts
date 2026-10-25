@@ -17,6 +17,11 @@ class ValidationPipeError {
   response: { message: string[] | string };
 }
 
+interface MulterErrorLike extends Error {
+  code: string;
+  field?: string;
+}
+
 export class AllExceptionsFilter implements ExceptionFilter {
   constructor(
     private readonly logger: PinoLogger,
@@ -87,24 +92,29 @@ export class AllExceptionsFilter implements ExceptionFilter {
   }
 
   private logError(errorDto: ErrorDto, exception: unknown) {
-    this.logger.error({
-      /**
-       * It's important to use `err` as the key, pino (the logger we use) will
-       * log an empty object if the key is not `err`
-       *
-       * @see https://github.com/pinojs/pino/issues/819#issuecomment-611995074
+    this.logger.error(
+      {
+        /**
+         * It's important to use `err` as the key, pino (the logger we use) will
+         * log an empty object if the key is not `err`
+         *
+         * @see https://github.com/pinojs/pino/issues/819#issuecomment-611995074
+         */
+        err: exception,
+        error: errorDto,
+      },
+      /*
+       * The errorId and path go into the message text so a plain-text search for the
+       * errorId a customer reports finds this log — nested attributes like
+       * `error.errorId` are not reliably indexed for full-text search. The query string
+       * is stripped from the path here because it may contain single-use secrets
+       * (OAuth codes, invite tokens); the full URL is still available on `error.path`.
        */
-      err: exception,
-      error: errorDto,
-    });
+      `Unhandled exception: statusCode=${errorDto.statusCode} path=${stripQuery(errorDto.path)}${errorDto.errorId ? ` errorId=${errorDto.errorId}` : ''}`
+    );
   }
 
-  private buildErrorDto(
-    request: RequestWithReqId,
-    statusCode: number,
-    message: string,
-    ctx?: Object | object
-  ): ErrorDto {
+  private buildErrorDto(request: RequestWithReqId, statusCode: number, message: string, ctx?: object): ErrorDto {
     return {
       statusCode,
       timestamp: new Date().toISOString(),
@@ -137,6 +147,10 @@ export class AllExceptionsFilter implements ExceptionFilter {
       return this.handleOtherHttpExceptions(new PayloadTooLargeException(), request);
     }
 
+    if (this.isMulterError(exception)) {
+      return this.handleMulterError(exception, request);
+    }
+
     return this.buildA5xxError(request, exception);
   }
 
@@ -144,13 +158,36 @@ export class AllExceptionsFilter implements ExceptionFilter {
     return exception?.constructor?.name === 'PayloadTooLargeError';
   }
 
+  /**
+   * @nestjs/platform-express maps multer errors to HTTP errors by message text, so any
+   * message it doesn't know (multer 2.4 renamed LIMIT_UNEXPECTED_FILE, and added new codes)
+   * reaches this filter as a raw MulterError. These are always caused by the client's upload.
+   */
+  private isMulterError(exception: unknown): exception is MulterErrorLike {
+    return (
+      exception instanceof Error &&
+      exception.name === 'MulterError' &&
+      typeof (exception as MulterErrorLike).code === 'string'
+    );
+  }
+
+  private handleMulterError(exception: MulterErrorLike, request: RequestWithReqId): ErrorDto {
+    if (exception.code === 'LIMIT_FILE_SIZE') {
+      return this.handleOtherHttpExceptions(new PayloadTooLargeException(exception.message), request);
+    }
+
+    const message = exception.field ? `${exception.message} - ${exception.field}` : exception.message;
+
+    return this.buildErrorDto(request, HttpStatus.BAD_REQUEST, message);
+  }
+
   private isBadRequestWithMultipleExceptions(exception: unknown): exception is ValidationPipeError {
     // noinspection UnnecessaryLocalVariableJS
     const isBadRequestExceptionFromValidationPipe =
       exception instanceof Object &&
       safeHasProperty(exception, 'response') &&
-      safeHasProperty((exception as any).response, 'message') &&
-      Array.isArray((exception as any).response.message);
+      safeHasProperty((exception as { response: unknown }).response, 'message') &&
+      Array.isArray((exception as { response: { message: unknown } }).response.message);
 
     return isBadRequestExceptionFromValidationPipe;
   }
@@ -232,4 +269,11 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
 function safeHasProperty(obj: unknown, property: string): boolean {
   return typeof obj === 'object' && obj !== null && property in obj;
+}
+
+function stripQuery(url: string | undefined): string {
+  if (!url) return '';
+  const questionMark = url.indexOf('?');
+
+  return questionMark === -1 ? url : url.slice(0, questionMark);
 }

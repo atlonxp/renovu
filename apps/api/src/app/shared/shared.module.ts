@@ -1,9 +1,9 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import {
+  AgentEmailInboxQuotaService,
   analyticsService,
   CacheServiceHealthIndicator,
-  CloudflareSchedulerService,
   ComputeJobWaitDurationService,
   CreateExecutionDetails,
   cacheService,
@@ -20,6 +20,7 @@ import {
   InMemoryLRUCacheService,
   InvalidateCacheService,
   LoggerModule,
+  NotificationPayloadService,
   QueuesModule,
   RequestLogRepository,
   SafeOutboundHttpService,
@@ -65,6 +66,7 @@ import {
 } from '@novu/dal';
 import { isClerkEnabled, JobTopicNameEnum } from '@novu/shared';
 import packageJson from '../../../package.json';
+import { ActivityRetentionService } from './services/activity-retention.service';
 
 function getDynamicAuthProviders() {
   if (isClerkEnabled()) {
@@ -147,16 +149,18 @@ const ANALYTICS_PROVIDERS = [
 ];
 
 const PROVIDERS = [
+  ActivityRetentionService,
+  AgentEmailInboxQuotaService,
   analyticsService,
   cacheService,
   CacheServiceHealthIndicator,
-  CloudflareSchedulerService,
   ComputeJobWaitDurationService,
   dalService,
   DalServiceHealthIndicator,
   featureFlagsService,
   InMemoryLRUCacheService,
   InvalidateCacheService,
+  NotificationPayloadService,
   storageService,
   ...DAL_MODELS,
   CreateExecutionDetails,

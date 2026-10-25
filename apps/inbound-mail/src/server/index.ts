@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { BullMqService } from '@novu/application-generic';
+import { buildEnvelopeRequestSource } from '@novu/application-generic';
 import { ObservabilityBackgroundTransactionEnum } from '@novu/shared';
 import Promise from 'bluebird';
 import dns from 'dns';
@@ -7,16 +7,19 @@ import events from 'events';
 import extend from 'extend';
 import { convert } from 'html-to-text';
 import _ from 'lodash';
-import { MailParser } from 'mailparser';
+import { simpleParser } from 'mailparser';
 import path from 'path';
 import shell from 'shelljs';
 import { SMTPServer } from 'smtp-server';
 import util from 'util';
 import { v4 as uuidv4 } from 'uuid';
 
+import { extractEmailDomain } from './address-utils';
 import { uploadAttachmentsToS3 } from './attachment-uploader';
+import { collectClientIpSources } from './client-ip-sources';
 import { InboundMailService } from './inbound-mail.service';
 import logger from './logger';
+import { normalizeParsedMail } from './mail-normalizer';
 
 const nr = require('newrelic');
 
@@ -26,7 +29,13 @@ const LanguageDetect = require('languagedetect');
 const mailUtilities = Promise.promisifyAll(require('./mailUtilities'));
 
 const inboundMailService = new InboundMailService();
-BullMqService.haveProInstalled();
+
+/**
+ * Exposed for tests so they can inject mock `requestLogger` / `tenantResolver`
+ * without standing up real ClickHouse / MongoDB. Production code should not
+ * read from this export.
+ */
+export const __testInboundMailService = inboundMailService;
 
 class Mailin extends events.EventEmitter {
   public configuration: IConfiguration;
@@ -125,7 +134,7 @@ class Mailin extends events.EventEmitter {
             return reject(new Error(localErrorMessage));
           }
 
-          const domain = /@(.*)/.exec(email)[1];
+          const domain = extractEmailDomain(email);
 
           const validateViaLocal = () => {
             if (_this.listeners(validateEvent).length) {
@@ -144,6 +153,11 @@ class Mailin extends events.EventEmitter {
           };
 
           const validateViaDNS = () => {
+            if (domain === null) {
+              _this.emit(validationFailedEvent, email);
+
+              return reject(new Error(dnsErrorMessage));
+            }
             try {
               dns.resolveMx(domain, (err, addresses) => {
                 if (err || !addresses || !addresses.length) {
@@ -207,7 +221,8 @@ class Mailin extends events.EventEmitter {
               `${connection.id} Processing message from ${connection.envelope.mailFrom.address}`
             );
 
-            return retrieveRawEmail(connection)
+            return logInboundMailAccepted(connection)
+              .then(() => retrieveRawEmail(connection))
               .then((rawEmail) =>
                 Promise.all([
                   rawEmail,
@@ -272,14 +287,21 @@ class Mailin extends events.EventEmitter {
                 return finalizedMessage;
               })
               .then((finalizedMessage) =>
+                // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing attachment upload flow is outside this change.
                 nr.startSegment('inbound-mail/upload-attachments', true, async () => {
                   if (Array.isArray(finalizedMessage.attachments) && finalizedMessage.attachments.length > 0) {
-                    const { uploaded, failedCount } = await uploadAttachmentsToS3(
+                    const { mode, uploaded, failedCount, retriableFailedCount } = await uploadAttachmentsToS3(
                       finalizedMessage.messageId,
                       finalizedMessage.attachments
                     );
 
                     finalizedMessage.attachments = uploaded;
+
+                    try {
+                      nr.addCustomAttributes({ 'mail.attachmentMode': mode });
+                    } catch {
+                      // instrumentation must never break the pipeline
+                    }
 
                     if (failedCount > 0) {
                       try {
@@ -289,20 +311,31 @@ class Mailin extends events.EventEmitter {
                       }
 
                       logger.warn(
-                        { context: LOG_CONTEXT, connectionId: connection.id, failedCount },
-                        `${connection.id} ${failedCount} attachment(s) failed to upload to S3 and were dropped`
+                        { context: LOG_CONTEXT, connectionId: connection.id, failedCount, mode },
+                        `${connection.id} ${failedCount} attachment(s) failed in ${mode} mode and were dropped`
                       );
 
                       /*
-                       * When INBOUND_FAIL_ON_ATTACHMENT_UPLOAD_ERROR=true, signal a transient
-                       * SMTP failure (4xx) so the sending MTA retries delivery rather than
-                       * silently dropping attachments. Because buildStorageKey is deterministic
-                       * by (messageId, index, filename), retries idempotently overwrite the same S3
-                       * key on success.
+                       * When INBOUND_FAIL_ON_ATTACHMENT_UPLOAD_ERROR=true and we were
+                       * uploading to S3, signal a transient SMTP failure (4xx) so the
+                       * sending MTA retries delivery rather than silently dropping
+                       * attachments. Because buildStorageKey is deterministic by
+                       * (messageId, index, filename), retries idempotently overwrite
+                       * the same S3 key on success.
+                       *
+                       * Gate on retriableFailedCount (transient S3 upload errors), NOT
+                       * the total failedCount: structural drops (no content, unsupported
+                       * shape, inline size-cap) would re-fail on every redelivery, so
+                       * retrying them would create an infinite 451 loop. Inline-mode
+                       * processing reports retriableFailedCount=0, so it is skipped too.
                        */
-                      if (process.env.INBOUND_FAIL_ON_ATTACHMENT_UPLOAD_ERROR === 'true') {
+                      if (
+                        mode === 's3' &&
+                        retriableFailedCount > 0 &&
+                        process.env.INBOUND_FAIL_ON_ATTACHMENT_UPLOAD_ERROR === 'true'
+                      ) {
                         const error: Error & { responseCode?: number } = new Error(
-                          `Attachment upload failed: ${failedCount} attachment(s) could not be stored`
+                          `Attachment upload failed: ${retriableFailedCount} attachment(s) could not be stored`
                         );
                         error.responseCode = 451;
                         throw error;
@@ -318,6 +351,7 @@ class Mailin extends events.EventEmitter {
                 () => unlinkFile(connection).then(() => resolve()),
                 (processingError) => {
                   nr.noticeError(processingError);
+                  emitProcessingFailureTrace(connection, processingError);
                   logger.error(
                     { err: processingError, context: LOG_CONTEXT, connectionId: connection.id },
                     `${connection.id} Unable to finish processing message!!`
@@ -378,9 +412,15 @@ class Mailin extends events.EventEmitter {
 
         logger.verbose({ context: LOG_CONTEXT, connectionId: connection.id }, `${connection.id} Validating spf.`);
 
-        /* Get ip and host. */
+        /*
+         * smtp-server sessions carry the sender under envelope.mailFrom, not
+         * `.from` (the old mailin field). Passing the wrong field made pyspf
+         * fall back to the HELO identity instead of the actual sender domain.
+         */
+        const envelopeFrom = connection.envelope?.mailFrom?.address;
+
         return mailUtilities
-          .validateSpfAsync(connection.remoteAddress, connection.from, connection.clientHostname)
+          .validateSpfAsync(connection.remoteAddress, envelopeFrom, connection.clientHostname)
           .catch((err) => {
             logger.error(
               { err, context: LOG_CONTEXT, connectionId: connection.id },
@@ -410,43 +450,27 @@ class Mailin extends events.EventEmitter {
     }
 
     function parseEmail(connection) {
-      return nr.startSegment(
-        'inbound-mail/parse-email',
-        true,
-        () =>
-          new Promise((resolve) => {
-            logger.verbose({ context: LOG_CONTEXT, connectionId: connection.id }, `${connection.id} Parsing email.`);
+      return nr.startSegment('inbound-mail/parse-email', true, async () => {
+        logger.verbose({ context: LOG_CONTEXT, connectionId: connection.id }, `${connection.id} Parsing email.`);
 
-            /* Prepare the mail parser. */
-            const mailParser = new MailParser();
+        const parsed = await simpleParser(fs.createReadStream(connection.mailPath));
+        const mail = normalizeParsedMail(parsed);
 
-            mailParser.on('end', (mail) => {
-              /*
-               * logger.verbose(util.inspect(mail, {
-               * depth: 5
-               * }));
-               */
+        /*
+         * Make sure that both text and html versions of the
+         * body are available.
+         */
+        if (!mail.text && !mail.html) {
+          mail.text = '';
+          mail.html = '<div></div>';
+        } else if (!mail.html) {
+          mail.html = _this._convertTextToHtml(mail.text);
+        } else if (!mail.text) {
+          mail.text = _this._convertHtmlToText(mail.html);
+        }
 
-              /*
-               * Make sure that both text and html versions of the
-               * body are available.
-               */
-              if (!mail.text && !mail.html) {
-                mail.text = '';
-                mail.html = '<div></div>';
-              } else if (!mail.html) {
-                mail.html = _this._convertTextToHtml(mail.text);
-              } else if (!mail.text) {
-                mail.text = _this._convertHtmlToText(mail.html);
-              }
-
-              return resolve(mail);
-            });
-
-            /* Stream the written email to the parser. */
-            fs.createReadStream(connection.mailPath).pipe(mailParser);
-          })
-      );
+        return mail;
+      });
     }
 
     function detectLanguage(connection, text) {
@@ -489,6 +513,65 @@ class Mailin extends events.EventEmitter {
       parsedEmail.language = language;
 
       /*
+       * One searchable line per email with the final sender-auth verdicts and
+       * the exact inputs the SPF check used. Downstream (agent runtime) fails
+       * closed on anything but pass/pass, so this is the primary breadcrumb
+       * when inbound agent mail bounces with "couldn't verify your email".
+       */
+      logger.info(
+        {
+          context: LOG_CONTEXT,
+          connectionId: connection.id,
+          messageId: parsedEmail.messageId,
+          from: connection.envelope?.mailFrom?.address,
+          remoteAddress: connection.remoteAddress,
+          clientHostname: connection.clientHostname,
+          dkim: parsedEmail.dkim,
+          spf: parsedEmail.spf,
+          spamScore,
+          dkimCheckDisabled: configuration.disableDkim,
+          spfCheckDisabled: configuration.disableSpf,
+        },
+        `${connection.id} Inbound mail sender authentication verdict: dkim=${parsedEmail.dkim} spf=${parsedEmail.spf}`
+      );
+
+      /*
+       * Structured client-IP source dump for debugging sender-auth issues in
+       * cloud envs: mirrors @supercharge/request-ip precedence (proxy headers
+       * first, then socket/connection fallbacks) adapted for SMTP session
+       * fields plus Received-chain IPs. Shows which property SPF currently
+       * uses vs the first public candidate elsewhere in the chain. Verbose and
+       * may include attacker-controlled header values.
+       */
+      const clientIpSources = collectClientIpSources(connection, parsedEmail.headers);
+
+      logger.info(
+        {
+          context: LOG_CONTEXT,
+          connectionId: connection.id,
+          envelopeFrom: connection.envelope?.mailFrom?.address,
+          clientIpSources,
+        },
+        `${connection.id} Inbound mail client IP source dump`
+      );
+
+      /*
+       * Full header dump when you need every raw header value beyond the
+       * structured IP-source view above.
+       */
+      logger.info(
+        {
+          context: LOG_CONTEXT,
+          connectionId: connection.id,
+          remoteAddress: connection.remoteAddress,
+          clientHostname: connection.clientHostname,
+          envelopeFrom: connection.envelope?.mailFrom?.address,
+          headers: parsedEmail.headers,
+        },
+        `${connection.id} Inbound mail header dump`
+      );
+
+      /*
        * Make fields exist, even if empty. That will make
        * json easier to use on the webhook receiver side.
        */
@@ -504,26 +587,66 @@ class Mailin extends events.EventEmitter {
 
       /*
        * Preserve threading headers so downstream consumers can correlate
-       * replies back to the original outbound message.
-       * mailparser@0.6.x stores both fields as string[] — normalise them to
-       * the shapes expected by IInboundParseDataDto / InboundEmailParseCommand
-       * so class-validator's @IsString() / @IsOptional() passes correctly.
+       * replies back to the original outbound message. normalizeParsedMail
+       * already guarantees bracketless ids with the shapes below; map absent
+       * values to null so class-validator's @IsString() / @IsOptional() on
+       * IInboundParseDataDto / InboundEmailParseCommand passes correctly.
        * inReplyTo  → string | null  (RFC 5322 allows only one message-id)
        * references → string[] | null
        */
-      parsedEmail.inReplyTo = Array.isArray(parsedEmail.inReplyTo)
-        ? (parsedEmail.inReplyTo[0] ?? null)
-        : (parsedEmail.inReplyTo ?? null);
-
-      parsedEmail.references = Array.isArray(parsedEmail.references)
-        ? parsedEmail.references.length > 0
-          ? parsedEmail.references
-          : null
-        : (parsedEmail.references ?? null);
+      parsedEmail.inReplyTo = parsedEmail.inReplyTo ?? null;
+      parsedEmail.references = parsedEmail.references ?? null;
 
       _this.emit('message', connection, parsedEmail, rawEmail);
 
       return parsedEmail;
+    }
+
+    function logInboundMailAccepted(connection) {
+      return nr.startSegment('inbound-mail/log-received', true, async () => {
+        const requestLogger = inboundMailService.requestLogger;
+        const tenantResolver = inboundMailService.tenantResolver;
+
+        if (!requestLogger || !tenantResolver) {
+          return;
+        }
+
+        const toAddress = getEnvelopeToAddress(connection);
+
+        if (!toAddress) {
+          return;
+        }
+
+        try {
+          const tenant = await tenantResolver.resolve(toAddress, undefined);
+          const durationMs = connection.startTimeMs ? Date.now() - connection.startTimeMs : 0;
+
+          const requestLogId = await requestLogger.logReceived({
+            source: buildEnvelopeRequestSource(connection.envelope, {
+              remoteAddress: connection.remoteAddress,
+              clientHostname: connection.clientHostname,
+            }),
+            toAddress,
+            tenant,
+            durationMs,
+          });
+
+          if (requestLogId) {
+            connection.requestLogContext = {
+              requestLogId,
+              organizationId: tenant.organizationId,
+              environmentId: tenant.environmentId,
+              transactionId: tenant.transactionId,
+            };
+          }
+        } catch (error) {
+          // Observability writes must never block the SMTP pipeline.
+          logger.warn(
+            { err: error, context: LOG_CONTEXT, connectionId: connection.id },
+            `${connection.id} Failed to write inbound-mail request log — continuing`
+          );
+        }
+      });
     }
 
     function postQueue(connection, finalizedMessage) {
@@ -541,6 +664,11 @@ class Mailin extends events.EventEmitter {
               { context: LOG_CONTEXT, connectionId: connection.id },
               `${connection.id} Adding mail to queue `
             );
+
+            const requestLogContext = connection.requestLogContext;
+            if (requestLogContext?.requestLogId) {
+              finalizedMessage.requestLogId = requestLogContext.requestLogId;
+            }
 
             const toAddress = getAddressTo(finalizedMessage);
             const parts: string[] = toAddress.split('@');
@@ -577,16 +705,62 @@ class Mailin extends events.EventEmitter {
                 data: finalizedMessage,
                 groupId,
               })
-              .then(() => resolve())
+              .then(() => {
+                emitQueueLifecycleTrace(connection, 'queued');
+                resolve();
+              })
               .catch((error) => {
                 logger.error(
                   { err: error, context: LOG_CONTEXT, connectionId: connection.id },
                   `${connection.id} Failed to add inbound mail to queue`
                 );
+                emitQueueLifecycleTrace(
+                  connection,
+                  'queue-failed',
+                  error instanceof Error ? error.message : 'Failed to enqueue inbound mail'
+                );
                 reject(error);
               });
           })
       );
+    }
+
+    function emitProcessingFailureTrace(connection, processingError) {
+      const requestLogger = inboundMailService.requestLogger;
+      const context = connection.requestLogContext;
+
+      if (!requestLogger || !context) {
+        return;
+      }
+
+      const message = processingError instanceof Error ? processingError.message : 'Inbound mail processing failed';
+
+      requestLogger.logProcessingFailed({ ...context, message }).catch((traceError) => {
+        logger.warn(
+          { err: traceError, context: LOG_CONTEXT, connectionId: connection.id },
+          `${connection.id} Failed to write inbound-mail processing-failure trace`
+        );
+      });
+    }
+
+    function emitQueueLifecycleTrace(connection, phase: 'queued' | 'queue-failed', message?: string) {
+      const requestLogger = inboundMailService.requestLogger;
+      const context = connection.requestLogContext;
+
+      if (!requestLogger || !context) {
+        return;
+      }
+
+      const promise =
+        phase === 'queued' ? requestLogger.logQueued(context) : requestLogger.logQueueFailed({ ...context, message });
+
+      promise.catch((traceError) => {
+        // Trace writes are best-effort; never fail the SMTP pipeline on them.
+        logger.warn(
+          { err: traceError, context: LOG_CONTEXT, connectionId: connection.id, phase },
+          `${connection.id} Failed to write inbound-mail ${phase} trace`
+        );
+      });
     }
     /*
      * Best-effort cleanup of the raw email temp file. Used on both success and
@@ -636,6 +810,7 @@ class Mailin extends events.EventEmitter {
           `${connection.id} Receiving message from ${connection.envelope.mailFrom.address}`
         );
 
+        connection.startTimeMs = Date.now();
         _this.emit('startMessage', connection);
 
         stream.pipe(fs.createWriteStream(mailPath));
@@ -774,6 +949,18 @@ class Mailin extends events.EventEmitter {
   }
 }
 
+function getEnvelopeToAddress(connection) {
+  const rcptTo = connection.envelope?.rcptTo;
+
+  if (!rcptTo) {
+    return '';
+  }
+
+  const toAddressObject = Array.isArray(rcptTo) ? rcptTo[0] : rcptTo;
+
+  return toAddressObject?.address ?? toAddressObject ?? '';
+}
+
 function getAddressTo(finalizedMessage) {
   const toAddressObject = Array.isArray(finalizedMessage.envelopeTo)
     ? finalizedMessage.envelopeTo[0]
@@ -781,6 +968,7 @@ function getAddressTo(finalizedMessage) {
 
   return toAddressObject.address ?? toAddressObject;
 }
+
 interface ISmtpOptions {
   banner: string;
   logger: boolean;

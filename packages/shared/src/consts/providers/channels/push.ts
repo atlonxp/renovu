@@ -4,6 +4,8 @@ import {
   apnsGroupConfigurations,
   expoGroupConfigurations,
   fcmGroupConfigurations,
+  oneSignalGroupConfigurations,
+  pusherBeamsGroupConfigurations,
   pushpadGroupConfigurations,
   pushWebhookGroupConfigurations,
 } from '../configurations/provider-configuration';
@@ -25,6 +27,7 @@ export const pushProviders: IProviderConfig[] = [
     displayName: 'OneSignal',
     channel: ChannelTypeEnum.PUSH,
     credentials: oneSignalConfig,
+    configurations: oneSignalGroupConfigurations,
     docReference: `https://docs.novu.co/platform/integrations/push/onesignal${UTM_CAMPAIGN_QUERY_PARAM}`,
     logoFileName: { light: 'one-signal.svg', dark: 'one-signal.svg' },
   },
@@ -72,7 +75,7 @@ export const pushProviders: IProviderConfig[] = [
     credentials: pushWebhookConfig,
     configurations: pushWebhookGroupConfigurations,
     docReference: `https://docs.novu.co/platform/integrations/push/push-webhook${UTM_CAMPAIGN_QUERY_PARAM}`,
-    logoFileName: { light: 'push-webhook.svg', dark: 'push-webhook.svg' },
+    logoFileName: { light: 'webhook.svg', dark: 'webhook.svg' },
     betaVersion: true,
   },
   {
@@ -80,6 +83,7 @@ export const pushProviders: IProviderConfig[] = [
     displayName: 'Pusher Beams',
     channel: ChannelTypeEnum.PUSH,
     credentials: pusherBeamsConfig,
+    configurations: pusherBeamsGroupConfigurations,
     docReference: `https://docs.novu.co/platform/integrations/push/pusher-beams${UTM_CAMPAIGN_QUERY_PARAM}`,
     logoFileName: { light: 'pusher-beams.svg', dark: 'pusher-beams.svg' },
   },

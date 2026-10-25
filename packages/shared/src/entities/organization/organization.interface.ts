@@ -1,4 +1,4 @@
-import { ApiServiceLevelEnum, IndustryEnum, OrganizationProductTypeEnum, ProductUseCases } from '../../types';
+import { ApiServiceLevelEnum, IndustryEnum, ProductUseCases } from '../../types';
 
 export type BrandEnrichmentStatus = 'pending' | 'completed' | 'failed' | 'not_available';
 export type OnboardingWorkflowsStatus = 'pending' | 'generating' | 'completed' | 'failed' | 'skipped';
@@ -22,6 +22,36 @@ export interface IBrandEnrichment {
   colors?: IBrandColor[];
   enrichedAt?: string;
   status: BrandEnrichmentStatus;
+}
+
+export enum UsageAlertRecipientsEnum {
+  /** Owners and admins. */
+  ADMINS = 'admins',
+  ALL_MEMBERS = 'all_members',
+}
+
+export interface IWorkflowRunsUsageLimit {
+  /** On-demand workflow runs allowed on top of the included runs; `null` means no on-demand limit. */
+  onDemandLimit: number | null;
+}
+
+export interface IUsageAlertSettings {
+  enabled: boolean;
+  sendTo: UsageAlertRecipientsEnum;
+}
+
+/**
+ * Organization-configured workflow-run limit and usage alert settings, stored and sent over the API in this shape.
+ * Absent on the organization means the defaults.
+ */
+export interface IOrganizationUsageLimits {
+  workflowRuns: IWorkflowRunsUsageLimit;
+  /**
+   * Rejects new workflow runs once usage reaches the included runs plus the on-demand limit, or the included runs when
+   * there is no on-demand limit.
+   */
+  pauseAtLimit: boolean;
+  alerts: IUsageAlertSettings;
 }
 
 export interface IOrganizationEntity {
@@ -49,11 +79,10 @@ export interface IOrganizationEntity {
   brandEnrichment?: IBrandEnrichment;
   /** Lifecycle of AI-generated onboarding workflow templates (snapshots). */
   onboardingWorkflowsStatus?: OnboardingWorkflowsStatus;
+  usageLimits?: IOrganizationUsageLimits;
   createdAt: string;
   updatedAt: string;
   externalId?: string;
   stripeCustomerId?: string;
   createdBy?: string;
-  /** Which Novu product this organization belongs to. Missing value is treated as `platform`. */
-  productType?: OrganizationProductTypeEnum;
 }

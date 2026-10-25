@@ -1,8 +1,8 @@
 import { Module } from '@nestjs/common';
 import {
+  AgentEmailInboxQuotaService,
   analyticsService,
   BulkCreateExecutionDetails,
-  CloudflareSchedulerService,
   ComputeJobWaitDurationService,
   CreateExecutionDetails,
   CreateNotificationJobs,
@@ -21,14 +21,19 @@ import {
   GetDecryptedSecretKey,
   GetTenant,
   HttpClientService,
+  InboundMailRequestLogger,
   InMemoryLRUCacheService,
   InvalidateCacheService,
+  isBullMqEnabled,
   LoggerModule,
   MetricsModule,
+  NotificationPayloadService,
   ProcessTenant,
   QueuesModule,
+  RequestLogRepository,
   SafeOutboundHttpService,
   StepRunRepository,
+  StepTemplateHydrationService,
   StorageHelperService,
   storageService,
   TraceLogRepository,
@@ -40,6 +45,7 @@ import {
 } from '@novu/application-generic';
 import {
   AgentIntegrationRepository,
+  CommunityOrganizationRepository,
   ControlValuesRepository,
   DalService,
   EnvironmentRepository,
@@ -67,6 +73,7 @@ import { ActiveJobsMetricService } from '../workflow/services';
 
 const DAL_MODELS = [
   AgentIntegrationRepository,
+  CommunityOrganizationRepository,
   EnvironmentRepository,
   EnvironmentVariableRepository,
   ExecutionDetailsRepository,
@@ -90,8 +97,13 @@ const dalService = {
   provide: DalService,
   useFactory: async () => {
     const service = new DalService();
+    const mongoUrl = process.env.MONGO_URL;
 
-    await service.connect(process.env.MONGO_URL!);
+    if (!mongoUrl) {
+      throw new Error('MONGO_URL is required to connect the worker to MongoDB');
+    }
+
+    await service.connect(mongoUrl);
 
     return service;
   },
@@ -102,18 +114,23 @@ const ANALYTICS_PROVIDERS = [
   TraceLogRepository,
   StepRunRepository,
   WorkflowRunRepository,
+  RequestLogRepository,
 
   // Services
   clickHouseService,
   clickHouseBatchService,
   WorkflowRunService,
+
+  // Inbound mail logging (shared with apps/inbound-mail; worker only writes
+  // terminal completion traces so the tenant resolver is not needed here).
+  InboundMailRequestLogger,
 ];
 
 const PROVIDERS = [
+  AgentEmailInboxQuotaService,
   analyticsService,
   BulkCreateExecutionDetails,
   cacheService,
-  CloudflareSchedulerService,
   ComputeJobWaitDurationService,
   CreateExecutionDetails,
   CreateNotificationJobs,
@@ -124,6 +141,8 @@ const PROVIDERS = [
   featureFlagsService,
   InMemoryLRUCacheService,
   InvalidateCacheService,
+  NotificationPayloadService,
+  StepTemplateHydrationService,
   StorageHelperService,
   storageService,
   UpdateSubscriber,
@@ -133,7 +152,12 @@ const PROVIDERS = [
   CreateTenant,
   ProcessTenant,
   ...DAL_MODELS,
-  ActiveJobsMetricService,
+  /*
+   * Queue-depth metrics are read off BullMQ counters, so the collector only
+   * exists while BullMQ does. QueuesModule drops the ACTIVE_JOBS_METRIC
+   * providers it depends on under the same condition.
+   */
+  ...(isBullMqEnabled() ? [ActiveJobsMetricService] : []),
   ExecuteBridgeRequest,
   ExecuteFrameworkRequest,
   ExecuteStepResolverRequest,

@@ -51,6 +51,12 @@ export interface HttpRequestOptions {
     errorCodes?: string[];
   };
   rejectUnauthorized?: boolean;
+  /**
+   * Trust anchors for this request only, replacing the process default store. Meant
+   * for Novu-to-Novu calls (see `getNovuServiceCa`). Not supported together with
+   * `enforceSsrfProtection`, which follows redirects to arbitrary hosts.
+   */
+  ca?: string[];
   onRetry?: (params: { attemptCount: number; statusCode?: number; errorCode?: string; delay: number }) => void;
   /**
    * When true, the request is routed through the SSRF-safe outbound HTTP
@@ -65,8 +71,9 @@ export interface HttpRequestOptions {
    *    strips sensitive headers when crossing origins.
    *
    * Required for any request whose destination is user-controlled (webhooks,
-   * bridge URLs, reply callbacks). When this flag is on, the `retry` and
-   * `onRetry` options are not honoured.
+   * bridge URLs, reply callbacks). The `retry` and `onRetry` options are
+   * honoured on this path too: retries are re-implemented around the SSRF-safe
+   * runner (SSRF policy rejections are never retried).
    */
   enforceSsrfProtection?: boolean;
 }

@@ -5,15 +5,15 @@ import {
   EnvironmentRepository,
   EnvironmentVariableRepository,
   JsonSchemaTypeEnum,
-  NotificationStepEntity,
-  NotificationTemplateEntity,
 } from '@novu/dal';
 import { ControlValuesLevelEnum, EnvironmentSystemVariables, StepTypeEnum } from '@novu/shared';
 import { JSONSchemaDto } from '../../dtos/json-schema.dto';
 import { PreviewPayloadDto } from '../../dtos/workflow/preview-payload.dto';
 import { resolveEnvironmentVariables } from '../../encryption/encrypt-environment-variable';
 import { Instrument, InstrumentUsecase } from '../../instrumentation';
+import { StepForVariableSchema, WorkflowForVariableSchema } from '../../types/workflow-mapper.types';
 import {
+  buildActorSchema,
   buildContextSchema,
   buildEnvSchema,
   buildSubscriberSchema,
@@ -24,11 +24,17 @@ import { emptyJsonSchema } from '../../utils/jsonToSchema';
 import { computeResultSchema } from '../../utils/map-step-type-to-result.mapper';
 import { parsePayloadSchema } from '../../utils/parse-payload-schema';
 import { CreateVariablesObject, CreateVariablesObjectCommand } from '../create-variables-object';
-import { BuildVariableSchemaCommand, IOptimisticStepInfo } from './build-available-variable-schema.command';
+import {
+  BuildVariableSchemaCommand,
+  IOptimisticStepInfo,
+  IPreloadedEnvironmentContext,
+} from './build-available-variable-schema.command';
 
-type SelectedControlValuesFields = Pick<ControlValuesEntity, 'controls' | '_stepId'>;
+type SelectedControlValuesFields = Pick<ControlValuesEntity, 'controls' | '_stepId'> & {
+  level?: ControlValuesLevelEnum;
+};
 
-const SELECTED_CONTROL_VALUES_PROJECTION: Record<keyof SelectedControlValuesFields, 1> & { _id: 0 } = {
+const SELECTED_CONTROL_VALUES_PROJECTION = {
   controls: 1,
   _stepId: 1,
   _id: 0,
@@ -36,6 +42,13 @@ const SELECTED_CONTROL_VALUES_PROJECTION: Record<keyof SelectedControlValuesFiel
 
 @Injectable()
 export class BuildVariableSchemaUsecase {
+  /**
+   * Concurrent callers in one request need the same environment document and variables.
+   * Share the in-flight read so that burst hits Mongo once, then drop it so the next
+   * request sees fresh data.
+   */
+  private readonly environmentContextInflight = new Map<string, Promise<IPreloadedEnvironmentContext>>();
+
   constructor(
     private readonly createVariablesObject: CreateVariablesObject,
     private readonly controlValuesRepository: ControlValuesRepository,
@@ -73,7 +86,7 @@ export class BuildVariableSchemaUsecase {
     }
 
     const optimisticControlValues = Object.values(command.optimisticControlValues || {});
-    const { payload, subscriber, context } = await this.createVariablesObject.execute(
+    const { payload, subscriber, actor, context } = await this.createVariablesObject.execute(
       CreateVariablesObjectCommand.create({
         environmentId: command.environmentId,
         organizationId: command.organizationId,
@@ -84,10 +97,16 @@ export class BuildVariableSchemaUsecase {
     const {
       payload: finalPayload,
       subscriber: finalSubscriber,
+      actor: finalActor,
       context: finalContext,
     } = previewData
-      ? this.mergePreviewData({ payload, subscriber, context }, previewData)
-      : { payload: payload || {}, subscriber: subscriber || {}, context: context || {} };
+      ? this.mergePreviewData({ payload, subscriber, actor, context }, previewData)
+      : {
+          payload: payload || {},
+          subscriber: subscriber || {},
+          actor: actor || {},
+          context: context || {},
+        };
 
     const effectiveSteps = this.buildEffectiveSteps(workflow, optimisticSteps);
 
@@ -95,26 +114,21 @@ export class BuildVariableSchemaUsecase {
 
     const effectivePayloadSchema = optimisticPayloadSchema ?? workflow?.payloadSchema;
 
-    const [rawEnvVars, environmentEntity] = await Promise.all([
-      this.environmentVariableRepository.findByEnvironment(command.organizationId, command.environmentId),
-      this.environmentRepository.findByIdAndOrganization(command.environmentId, command.organizationId),
-    ]);
-    const systemVars: EnvironmentSystemVariables | Record<string, never> = environmentEntity
-      ? { name: environmentEntity.name, type: environmentEntity.type }
+    const environmentContext = command.preloadedEnvironmentContext
+      ? command.preloadedEnvironmentContext
+      : await this.loadEnvironmentContext(command.organizationId, command.environmentId);
+    const systemVars: EnvironmentSystemVariables | Record<string, never> = environmentContext.environment
+      ? { name: environmentContext.environment.name, type: environmentContext.environment.type }
       : {};
-    const envVars = { ...resolveEnvironmentVariables(rawEnvVars), ...systemVars };
-    const controlValuesMap: Record<string, Record<string, unknown>> = {};
-    for (const cv of controls) {
-      if (cv._stepId) {
-        controlValuesMap[cv._stepId] = cv.controls;
-      }
-    }
+    const envVars = { ...resolveEnvironmentVariables(environmentContext.rawEnvVars), ...systemVars };
+    const controlValuesMap = buildControlValuesMap(controls.filter(isStepControlValue), optimisticSteps);
 
     return {
       type: JsonSchemaTypeEnum.OBJECT,
       properties: {
         workflow: buildWorkflowSchema(),
         subscriber: buildSubscriberSchema(finalSubscriber),
+        actor: buildActorSchema(finalActor),
         steps: buildPreviousStepsSchema({
           previousSteps,
           payloadSchema: effectivePayloadSchema,
@@ -128,14 +142,47 @@ export class BuildVariableSchemaUsecase {
     } as const satisfies JSONSchemaDto;
   }
 
+  @Instrument()
+  loadEnvironmentContext(organizationId: string, environmentId: string): Promise<IPreloadedEnvironmentContext> {
+    const key = `${organizationId}:${environmentId}`;
+    const inflight = this.environmentContextInflight.get(key);
+
+    if (inflight) {
+      return inflight;
+    }
+
+    const pending = this.fetchEnvironmentContext(organizationId, environmentId).finally(() => {
+      this.environmentContextInflight.delete(key);
+    });
+
+    this.environmentContextInflight.set(key, pending);
+
+    return pending;
+  }
+
+  private async fetchEnvironmentContext(
+    organizationId: string,
+    environmentId: string
+  ): Promise<IPreloadedEnvironmentContext> {
+    const [rawEnvVars, environmentEntity] = await Promise.all([
+      this.environmentVariableRepository.findByEnvironment(organizationId, environmentId),
+      this.environmentRepository.findByIdAndOrganization(environmentId, organizationId),
+    ]);
+
+    return {
+      rawEnvVars,
+      environment: environmentEntity ? { name: environmentEntity.name, type: environmentEntity.type } : null,
+    };
+  }
+
   /**
    * Builds effective steps for schema generation by combining persisted workflow steps
    * with optimistic steps (used during sync scenarios)
    */
   private buildEffectiveSteps(
-    workflow: NotificationTemplateEntity | undefined,
+    workflow: WorkflowForVariableSchema | undefined,
     optimisticSteps: IOptimisticStepInfo[] | undefined
-  ): Array<NotificationStepEntity | IOptimisticStepInfo> | undefined {
+  ): Array<StepForVariableSchema | IOptimisticStepInfo> | undefined {
     if (!optimisticSteps) {
       return workflow?.steps;
     }
@@ -156,7 +203,7 @@ export class BuildVariableSchemaUsecase {
    * Finds the index of a step in the effective steps array
    */
   private findStepIndex(
-    effectiveSteps: Array<NotificationStepEntity | IOptimisticStepInfo> | undefined,
+    effectiveSteps: Array<StepForVariableSchema | IOptimisticStepInfo> | undefined,
     stepInternalId: string | undefined
   ): number {
     if (!effectiveSteps || !stepInternalId) {
@@ -176,7 +223,7 @@ export class BuildVariableSchemaUsecase {
 
   @Instrument()
   private async resolvePayloadSchema(
-    workflow: NotificationTemplateEntity | undefined,
+    workflow: WorkflowForVariableSchema | undefined,
     payload: unknown,
     optimisticPayloadSchema?: JSONSchemaDto
   ): Promise<JSONSchemaDto> {
@@ -203,15 +250,93 @@ export class BuildVariableSchemaUsecase {
    * Merges preview data with extracted variables for preview scenarios
    */
   private mergePreviewData(
-    extracted: { payload?: unknown; subscriber?: unknown; context?: unknown },
+    extracted: { payload?: unknown; subscriber?: unknown; actor?: unknown; context?: unknown },
     previewData?: PreviewPayloadDto
-  ): { payload: Record<string, unknown>; subscriber: Record<string, unknown>; context: Record<string, unknown> } {
+  ): {
+    payload: Record<string, unknown>;
+    subscriber: Record<string, unknown>;
+    actor: Record<string, unknown>;
+    context: Record<string, unknown>;
+  } {
     return {
       payload: { ...((extracted.payload as Record<string, unknown>) || {}), ...(previewData?.payload || {}) },
       subscriber: { ...((extracted.subscriber as Record<string, unknown>) || {}), ...(previewData?.subscriber || {}) },
+      actor: { ...((extracted.actor as Record<string, unknown>) || {}), ...(previewData?.actor || {}) },
       context: { ...((extracted.context as Record<string, unknown>) || {}), ...(previewData?.context || {}) },
     };
   }
+}
+
+function isStepControlValue(controlValue: { level?: ControlValuesLevelEnum | null }): boolean {
+  if (!controlValue.level) {
+    return true;
+  }
+
+  return controlValue.level === ControlValuesLevelEnum.STEP_CONTROLS;
+}
+
+function buildControlValuesMap(
+  controls: SelectedControlValuesFields[],
+  optimisticSteps?: IOptimisticStepInfo[]
+): Record<string, Record<string, unknown>> {
+  const controlValuesMap: Record<string, Record<string, unknown>> = {};
+
+  for (const cv of controls) {
+    if (cv._stepId) {
+      controlValuesMap[cv._stepId] = cv.controls;
+    }
+  }
+
+  if (!optimisticSteps) {
+    return controlValuesMap;
+  }
+
+  for (const optimisticStep of optimisticSteps) {
+    if (!optimisticStep.controlValues || !optimisticStep._id) {
+      continue;
+    }
+
+    controlValuesMap[optimisticStep._id] = {
+      ...controlValuesMap[optimisticStep._id],
+      ...optimisticStep.controlValues,
+    };
+  }
+
+  return controlValuesMap;
+}
+
+function resolveHttpResponseBodySchema(
+  step: StepForVariableSchema | IOptimisticStepInfo,
+  stepType: StepTypeEnum,
+  controlValuesMap?: Record<string, Record<string, unknown>>
+): JSONSchemaDto | undefined {
+  if (stepType !== StepTypeEnum.HTTP_REQUEST) {
+    return undefined;
+  }
+
+  if ('controlValues' in step && step.controlValues?.responseBodySchema) {
+    return step.controlValues.responseBodySchema as JSONSchemaDto;
+  }
+
+  const stepControlsKey = getStepControlsKey(step);
+
+  if (stepControlsKey && controlValuesMap?.[stepControlsKey]?.responseBodySchema) {
+    return controlValuesMap[stepControlsKey].responseBodySchema as JSONSchemaDto;
+  }
+
+  return undefined;
+}
+
+function getStepControlsKey(step: StepForVariableSchema | IOptimisticStepInfo): string | undefined {
+  if ('_id' in step && step._id) {
+    return step._id;
+  }
+
+  if ('_templateId' in step && step._templateId) {
+    return step._templateId;
+  }
+
+  return undefined;
 }
 
 function buildPreviousStepsProperties({
@@ -219,7 +344,7 @@ function buildPreviousStepsProperties({
   payloadSchema,
   controlValuesMap,
 }: {
-  previousSteps: Array<NotificationStepEntity | IOptimisticStepInfo> | undefined;
+  previousSteps: Array<StepForVariableSchema | IOptimisticStepInfo> | undefined;
   payloadSchema?: JSONSchemaDto;
   controlValuesMap?: Record<string, Record<string, unknown>>;
 }) {
@@ -227,24 +352,18 @@ function buildPreviousStepsProperties({
     (acc, step) => {
       let stepId: string | undefined;
       let stepType: StepTypeEnum | undefined;
-      let responseBodySchema: JSONSchemaDto | undefined;
 
       if ('template' in step && step.template?.type) {
         stepId = step.stepId;
         stepType = step.template.type;
-
-        if (stepType === StepTypeEnum.HTTP_REQUEST && step._id && controlValuesMap) {
-          const stepControls = controlValuesMap[step._id];
-          if (stepControls?.responseBodySchema) {
-            responseBodySchema = stepControls.responseBodySchema as JSONSchemaDto;
-          }
-        }
       } else if ('type' in step) {
         stepId = step.stepId;
         stepType = step.type;
       }
 
       if (stepId && stepType) {
+        const responseBodySchema = resolveHttpResponseBodySchema(step, stepType, controlValuesMap);
+
         acc[stepId] = computeResultSchema({
           stepType,
           payloadSchema,
@@ -263,7 +382,7 @@ function buildPreviousStepsSchema({
   payloadSchema,
   controlValuesMap,
 }: {
-  previousSteps: Array<NotificationStepEntity | IOptimisticStepInfo> | undefined;
+  previousSteps: Array<StepForVariableSchema | IOptimisticStepInfo> | undefined;
   payloadSchema?: JSONSchemaDto;
   controlValuesMap?: Record<string, Record<string, unknown>>;
 }): JSONSchemaDto {

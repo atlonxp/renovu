@@ -8,11 +8,16 @@ import {
   EnvironmentCacheData,
   ExecuteBridgeRequest,
   ExecuteBridgeRequestCommand,
+  enhanceStepsMap,
   InMemoryLRUCacheService,
   InMemoryLRUCacheStore,
   Instrument,
   InstrumentUsecase,
+  NotificationPayloadService,
   PinoLogger,
+  STEP_OVERRIDE_CONTROL_LEVELS,
+  stitchStepOverridesFromDocs,
+  withStitchedProviderOverrides,
 } from '@novu/application-generic';
 import {
   ControlValuesRepository,
@@ -37,6 +42,7 @@ import {
   ControlValuesLevelEnum,
   ExecutionDetailsSourceEnum,
   ExecutionDetailsStatusEnum,
+  IAttachmentOptions,
   ITriggerPayload,
   JobStatusEnum,
   ResourceOriginEnum,
@@ -44,11 +50,16 @@ import {
 } from '@novu/shared';
 import { ExecuteBridgeJobCommand } from './execute-bridge-job.command';
 
+export interface ExecuteBridgeJobResult extends ExecuteOutput {
+  sourceControls: Record<string, unknown>;
+}
+
 @Injectable()
 export class ExecuteBridgeJob {
   constructor(
     private jobRepository: JobRepository,
     private notificationTemplateRepository: NotificationTemplateRepository,
+    private notificationPayloadService: NotificationPayloadService,
     private messageRepository: MessageRepository,
     private environmentRepository: EnvironmentRepository,
     private controlValuesRepository: ControlValuesRepository,
@@ -61,18 +72,23 @@ export class ExecuteBridgeJob {
   }
 
   @InstrumentUsecase()
-  async execute(command: ExecuteBridgeJobCommand): Promise<ExecuteOutput | null> {
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing bridge orchestration is outside this change.
+  async execute(command: ExecuteBridgeJobCommand): Promise<ExecuteBridgeJobResult | null> {
     const stepId = command.job.step.stepId || command.job.step.uuid;
 
     const isStateful = !command.job.step.bridgeUrl;
 
     let workflow: NotificationTemplateEntity | null = null;
     if (isStateful) {
-      if (
-        command.workflow &&
-        (command.workflow.type === ResourceTypeEnum.ECHO || command.workflow.type === ResourceTypeEnum.BRIDGE)
-      ) {
-        workflow = command.workflow;
+      if (command.workflow) {
+        /*
+         * The workflow was already loaded upstream (e.g. by run-job). The DB lookup below only
+         * returns a workflow whose type is ECHO or BRIDGE for the same `_id`, so when the workflow
+         * is already in memory its type fully determines the result — querying again is redundant.
+         */
+        const isBridgeWorkflow =
+          command.workflow.type === ResourceTypeEnum.ECHO || command.workflow.type === ResourceTypeEnum.BRIDGE;
+        workflow = isBridgeWorkflow ? command.workflow : null;
       } else {
         workflow = await this.notificationTemplateRepository.findOne(
           {
@@ -105,7 +121,7 @@ export class ExecuteBridgeJob {
       throw new Error(`Bridge URL is not set for environment id: ${environment._id}`);
     }
 
-    const { subscriber, payload: originalPayload, context, env } = command.variables || {};
+    const { subscriber, actor, payload: originalPayload, context, env } = command.variables || {};
     const payload = this.normalizePayload(originalPayload);
     const state = await this.generateState(command);
 
@@ -119,6 +135,7 @@ export class ExecuteBridgeJob {
       controls: variablesStores ?? {},
       state,
       subscriber: subscriber ?? {},
+      ...(actor && { actor }),
       context: context ?? {},
       // biome-ignore lint/style/noNonNullAssertion: <explanation> we always have env.type and env.name
       env: env!,
@@ -148,7 +165,10 @@ export class ExecuteBridgeJob {
       },
     });
 
-    return bridgeResponse;
+    return {
+      ...bridgeResponse,
+      sourceControls: variablesStores ?? {},
+    };
   }
 
   private async findControlValues(
@@ -158,12 +178,21 @@ export class ExecuteBridgeJob {
     controls: Record<string, unknown>;
     stepResolverHash?: string;
   }> {
-    const controlsEntity = await this.controlValuesRepository.findOne({
-      _organizationId: command.organizationId,
-      _workflowId: workflow._id,
-      _stepId: command.job.step._id,
-      level: ControlValuesLevelEnum.STEP_CONTROLS,
-    });
+    const [controlsEntity, overrideDocs] = await Promise.all([
+      this.controlValuesRepository.findOne({
+        _organizationId: command.organizationId,
+        _workflowId: workflow._id,
+        _stepId: command.job.step._id,
+        level: ControlValuesLevelEnum.STEP_CONTROLS,
+      }),
+      this.controlValuesRepository.find({
+        _organizationId: command.organizationId,
+        _environmentId: command.environmentId,
+        _workflowId: workflow._id,
+        _stepId: command.job.step._id,
+        level: { $in: STEP_OVERRIDE_CONTROL_LEVELS },
+      }),
+    ]);
 
     const rawControls = controlsEntity?.controls;
     const stepResolverHash = command.job.step.template?.stepResolverHash ?? undefined;
@@ -176,8 +205,10 @@ export class ExecuteBridgeJob {
       sanitizedControls = rawControls ?? {};
     }
 
+    const { providerOverrides, integrationOverrides } = stitchStepOverridesFromDocs(overrideDocs);
+
     return {
-      controls: sanitizedControls,
+      controls: withStitchedProviderOverrides(sanitizedControls, providerOverrides, integrationOverrides),
       stepResolverHash,
     };
   }
@@ -186,14 +217,70 @@ export class ExecuteBridgeJob {
     // Remove internal params
     const { __source, ...payload } = originalPayload;
 
-    return payload;
+    if (!Array.isArray(payload.attachments) || payload.attachments.length === 0) {
+      return payload;
+    }
+
+    /*
+     * Rehydrated attachment files are Node Buffers. JSON.stringify turns those into
+     * `{"type":"Buffer","data":[...]}` (~3.4x the raw size), which overflows the API
+     * bridge body limit for files larger than ~5–7 MB. Encode as base64 for the bridge
+     * wire format (same shape clients send on trigger) without mutating the original
+     * payload used later for channel delivery.
+     *
+     * Cast: IAttachmentOptions.file is typed as Buffer, but the bridge JSON body must
+     * carry a base64 string. Runtime consumers of this normalized payload expect that.
+     */
+    const attachments = payload.attachments.map((attachment) => {
+      // biome-ignore lint/plugin: file is typed Buffer but rehydrated attachments can carry a Uint8Array, so narrow from unknown
+      const file: unknown = attachment?.file;
+
+      if (Buffer.isBuffer(file)) {
+        return {
+          ...attachment,
+          file: file.toString('base64'),
+        };
+      }
+
+      if (file instanceof Uint8Array) {
+        return {
+          ...attachment,
+          file: Buffer.from(file).toString('base64'),
+        };
+      }
+
+      return attachment;
+    }) as IAttachmentOptions[];
+
+    return {
+      ...payload,
+      attachments,
+    };
+  }
+
+  public async buildStepsMap(job: JobEntity, environmentId: string): Promise<Record<string, Record<string, unknown>>> {
+    const state = await this.generateStateForJob(job, environmentId);
+
+    const stepsMap = state.reduce<Record<string, Record<string, unknown>>>((acc, stepState) => {
+      if (!(stepState.stepId in acc)) {
+        acc[stepState.stepId] = stepState.outputs;
+      }
+
+      return acc;
+    }, {});
+
+    return enhanceStepsMap(stepsMap);
   }
 
   private async generateState(command: ExecuteBridgeJobCommand): Promise<State[]> {
+    return this.generateStateForJob(command.job, command.environmentId);
+  }
+
+  private async generateStateForJob(job: JobEntity, environmentId: string): Promise<State[]> {
     const previousJobs: State[] = [];
     let theJob = (await this.jobRepository.findOne({
-      _id: command.job._parentId,
-      _environmentId: command.environmentId,
+      _id: job._parentId,
+      _environmentId: environmentId,
     })) as JobEntity;
 
     if (theJob) {
@@ -204,7 +291,7 @@ export class ExecuteBridgeJob {
     while (theJob) {
       theJob = (await this.jobRepository.findOne({
         _id: theJob._parentId,
-        _environmentId: command.environmentId,
+        _environmentId: environmentId,
       })) as JobEntity;
 
       if (theJob) {
@@ -276,10 +363,16 @@ export class ExecuteBridgeJob {
             payload: 1,
             createdAt: 1,
             _id: 1,
+            _notificationId: 1,
+            _environmentId: 1,
             transactionId: 1,
           }
         );
-        const events = [...digestJobs, job]
+        const digestEventJobs = [...digestJobs, job];
+        // Payload-dedup: resolve payloads from the parent notifications for
+        // jobs that no longer carry one before building the bridge events.
+        await this.notificationPayloadService.hydrateEntitiesPayload(digestEventJobs);
+        const events = digestEventJobs
           .map((digestJob) => ({
             id: digestJob._id,
             time: digestJob.createdAt,

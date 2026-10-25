@@ -1,4 +1,4 @@
-import type { IEnvironment, IOrganizationEntity } from '@novu/shared';
+import type { IEnvironment, IOrganizationEntity, UpdateExternalOrganizationDto } from '@novu/shared';
 import { get, patch, post } from './api.client';
 
 export type GetOrganizationSettingsDto = {
@@ -69,4 +69,10 @@ export async function switchOrganization(organizationId: string): Promise<string
   const response = await post<string | { data: string }>(`/auth/organizations/${organizationId}/switch`, {});
 
   return typeof response === 'string' ? response : response.data;
+}
+
+// Writes onboarding metadata (e.g. productUseCases) onto the external (Clerk) organization
+// and the internal Mongo organization. Org context is resolved server-side from the session.
+export async function updateExternalOrganization(data: UpdateExternalOrganizationDto): Promise<unknown> {
+  return post('/clerk/organization', { body: data });
 }

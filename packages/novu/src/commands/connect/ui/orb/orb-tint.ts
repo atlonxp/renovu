@@ -7,6 +7,8 @@ const CHANNEL_TINTS: Record<ChannelChoice, string> = {
   email: '#34A853', // generic mail green
   whatsapp: '#25D366', // WhatsApp green
   teams: '#5059C9', // Teams indigo
+  sendblue: '#34C759', // iMessage green
+  'web-chat': '#6366F1', // Web Chat indigo
   skip: 'white',
 };
 const DEFAULT_ORB_COLOR = 'white';
@@ -18,6 +20,8 @@ const CHANNEL_LABELS: Partial<Record<ChannelChoice, string>> = {
   email: 'EMAIL',
   whatsapp: 'WHATSAPP',
   teams: 'TEAMS',
+  sendblue: 'IMESSAGE',
+  'web-chat': 'WEB CHAT',
 };
 
 function lerpHexColor(from: string, to: string, amount: number): string {
@@ -68,14 +72,29 @@ export function computeOrbTint(
       return CHANNEL_TINTS.slack;
     case 'adding-telegram':
     case 'telegram-intro':
+    case 'pick-telegram-token-delivery':
     case 'telegram-link-token':
     case 'telegram-test':
       return CHANNEL_TINTS.telegram;
     case 'adding-email':
     case 'email-ready':
       return CHANNEL_TINTS.email;
+    case 'adding-sendblue':
+    case 'sendblue-intro':
+    case 'sendblue-credential':
+    case 'configuring-sendblue-webhook':
+    case 'sendblue-webhook-manual':
+    case 'sendblue-test-phone':
+    case 'sending-sendblue-test':
+    case 'sendblue-test-waiting':
+      return CHANNEL_TINTS.sendblue;
     case 'dashboard-channel-ready':
       return CHANNEL_TINTS[phase.channel];
+    case 'adding-web-chat':
+    case 'web-chat-handoff':
+    case 'pick-web-chat-setup':
+    case 'scaffolding-web-chat':
+      return CHANNEL_TINTS['web-chat'];
     case 'success': {
       const activeChannel = phase.connectedChannel ?? phase.dashboardRedirectChannel;
 
@@ -111,12 +130,27 @@ export function computeOrbLabel(
       return CHANNEL_LABELS.slack;
     case 'adding-telegram':
     case 'telegram-intro':
+    case 'pick-telegram-token-delivery':
     case 'telegram-link-token':
     case 'telegram-test':
       return CHANNEL_LABELS.telegram;
     case 'adding-email':
     case 'email-ready':
       return CHANNEL_LABELS.email;
+    case 'adding-sendblue':
+    case 'sendblue-intro':
+    case 'sendblue-credential':
+    case 'configuring-sendblue-webhook':
+    case 'sendblue-webhook-manual':
+    case 'sendblue-test-phone':
+    case 'sending-sendblue-test':
+    case 'sendblue-test-waiting':
+      return CHANNEL_LABELS.sendblue;
+    case 'adding-web-chat':
+    case 'web-chat-handoff':
+    case 'pick-web-chat-setup':
+    case 'scaffolding-web-chat':
+      return CHANNEL_LABELS['web-chat'];
     case 'dashboard-channel-ready':
       return CHANNEL_LABELS[phase.channel];
     case 'success': {

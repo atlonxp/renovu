@@ -2,7 +2,7 @@ import { Logger } from '@nestjs/common';
 import Redis, { Cluster, ClusterNode, ClusterOptions, NodeRole } from 'ioredis';
 import { ConnectionOptions } from 'tls';
 
-import { convertStringValues } from './variable-mappers';
+import { convertStringValues, isTlsFlagEnabled } from './variable-mappers';
 
 export { Cluster, ClusterOptions };
 
@@ -57,7 +57,7 @@ export const getRedisMasterSlaveProviderConfig = (): IRedisMasterSlaveProviderCo
     keepAlive: convertStringValues(process.env.REDIS_CLUSTER_KEEP_ALIVE),
     family: convertStringValues(process.env.REDIS_CLUSTER_FAMILY),
     keyPrefix: convertStringValues(process.env.REDIS_CLUSTER_KEY_PREFIX),
-    tls: process.env.REDIS_CLUSTER_TLS
+    tls: isTlsFlagEnabled(process.env.REDIS_CLUSTER_TLS)
       ? {
           servername: convertStringValues(process.env.REDIS_MASTER_HOST),
         }
@@ -116,15 +116,20 @@ export const getRedisMasterSlaveProviderConfig = (): IRedisMasterSlaveProviderCo
 export const getRedisMasterSlaveCluster = (enableAutoPipelining?: boolean): Cluster | undefined => {
   const { instances, password, tls } = getRedisMasterSlaveProviderConfig();
 
+  const skipVersionCheck = process.env.REDIS_SKIP_VERSION_CHECK === 'true';
+
+  const redisOptions = {
+    tls,
+    ...(password && { password }),
+    connectTimeout: 10000,
+    skipVersionCheck,
+  };
+
   const options: ClusterOptions = {
     enableAutoPipelining: enableAutoPipelining ?? false,
     enableOfflineQueue: false,
     enableReadyCheck: true,
-    redisOptions: {
-      tls,
-      ...(password && { password }),
-      connectTimeout: 10000,
-    },
+    redisOptions,
     // Scale reads to slave nodes for better performance
     scaleReads: 'slave',
     /*

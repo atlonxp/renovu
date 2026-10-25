@@ -1,8 +1,10 @@
 import 'event-target-polyfill';
+import type { AgentEventEnvelope } from '@novu/agent-event-protocol';
 import { WebSocket } from 'partysocket';
 import { InboxService } from '../api';
 import { BaseModule } from '../base-module';
 import {
+  WebChatAgentEvent,
   NotificationReceivedEvent,
   NotificationUnreadEvent,
   NotificationUnseenEvent,
@@ -21,6 +23,7 @@ import {
   WebSocketEvent,
 } from '../types';
 import { NovuError } from '../utils/errors';
+import { sanitizeInAppRedirect } from '../utils/in-app-redirect-url';
 import type { BaseSocketInterface } from './base-socket';
 
 export const PRODUCTION_SOCKET_URL = 'wss://socket.novu.co';
@@ -31,6 +34,7 @@ const HIBERNATION_PING_PAYLOAD = 'ping';
 const NOTIFICATION_RECEIVED: NotificationReceivedEvent = 'notifications.notification_received';
 const UNSEEN_COUNT_CHANGED: NotificationUnseenEvent = 'notifications.unseen_count_changed';
 const UNREAD_COUNT_CHANGED: NotificationUnreadEvent = 'notifications.unread_count_changed';
+const WEB_CHAT_AGENT_EVENT: WebChatAgentEvent = 'web_chat.agent_event';
 
 const mapToNotification = ({
   _id,
@@ -96,31 +100,16 @@ const mapToNotification = ({
     primaryAction: primaryCta && {
       label: primaryCta.content,
       isCompleted: actionType === ActionTypeEnum.PRIMARY && actionStatus === NotificationActionStatus.DONE,
-      redirect: primaryCta.url
-        ? {
-            target: primaryCta.target,
-            url: primaryCta.url,
-          }
-        : undefined,
+      redirect: sanitizeInAppRedirect(primaryCta.url, primaryCta.target),
     },
     secondaryAction: secondaryCta && {
       label: secondaryCta.content,
       isCompleted: actionType === ActionTypeEnum.SECONDARY && actionStatus === NotificationActionStatus.DONE,
-      redirect: secondaryCta.url
-        ? {
-            target: secondaryCta.target,
-            url: secondaryCta.url,
-          }
-        : undefined,
+      redirect: sanitizeInAppRedirect(secondaryCta.url, secondaryCta.target),
     },
     channelType: channel,
     tags,
-    redirect: cta.data?.url
-      ? {
-          url: cta.data.url,
-          target: cta.data.target,
-        }
-      : undefined,
+    redirect: sanitizeInAppRedirect(cta.data?.url, cta.data?.target),
     data,
     workflow,
     severity,
@@ -199,6 +188,19 @@ export class PartySocketClient extends BaseModule implements BaseSocketInterface
     }
   };
 
+  #agentEvent = (event: MessageEvent) => {
+    try {
+      const data = JSON.parse(event.data);
+      if (data.event === WebSocketEvent.AGENT_EVENT) {
+        this.#emitter.emit(WEB_CHAT_AGENT_EVENT, {
+          result: data.data as AgentEventEnvelope,
+        });
+      }
+    } catch (error) {
+      // Failed to parse agent event
+    }
+  };
+
   #handleMessage = (event: MessageEvent) => {
     if (event.data === HIBERNATION_PING_PAYLOAD || event.data === 'pong') {
       return;
@@ -217,6 +219,9 @@ export class PartySocketClient extends BaseModule implements BaseSocketInterface
         case WebSocketEvent.UNREAD:
           this.#unreadCountChanged(event);
           break;
+        case WebSocketEvent.AGENT_EVENT:
+          this.#agentEvent(event);
+          break;
         default:
         // Unknown WebSocket event type
       }
@@ -230,6 +235,11 @@ export class PartySocketClient extends BaseModule implements BaseSocketInterface
       clearInterval(this.#hibernationHeartbeatIntervalId);
       this.#hibernationHeartbeatIntervalId = undefined;
     }
+  }
+
+  #clearCurrentSocket(): void {
+    this.#clearHibernationHeartbeat();
+    this.#partySocket = undefined;
   }
 
   #startHibernationHeartbeat(): void {
@@ -279,8 +289,8 @@ export class PartySocketClient extends BaseModule implements BaseSocketInterface
         return;
       }
 
-      this.#clearHibernationHeartbeat();
-      this.#partySocket = undefined;
+      this.#clearCurrentSocket();
+      this.#emitter.emit('socket.disconnect.resolved', { args });
     });
 
     socket.addEventListener('message', this.#handleMessage);
@@ -298,9 +308,13 @@ export class PartySocketClient extends BaseModule implements BaseSocketInterface
 
   async #handleDisconnectSocket(): Result<void> {
     try {
-      this.#clearHibernationHeartbeat();
-      this.#partySocket?.close();
-      this.#partySocket = undefined;
+      const socket = this.#partySocket;
+      this.#clearCurrentSocket();
+      socket?.close();
+
+      if (socket) {
+        this.#emitter.emit('socket.disconnect.resolved', { args: { socketUrl: this.#socketUrl } });
+      }
 
       return {};
     } catch (error) {
@@ -310,7 +324,10 @@ export class PartySocketClient extends BaseModule implements BaseSocketInterface
 
   isSocketEvent(eventName: string): eventName is SocketEventNames {
     return (
-      eventName === NOTIFICATION_RECEIVED || eventName === UNSEEN_COUNT_CHANGED || eventName === UNREAD_COUNT_CHANGED
+      eventName === NOTIFICATION_RECEIVED ||
+      eventName === UNSEEN_COUNT_CHANGED ||
+      eventName === UNREAD_COUNT_CHANGED ||
+      eventName === WEB_CHAT_AGENT_EVENT
     );
   }
 

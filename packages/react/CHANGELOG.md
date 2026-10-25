@@ -1,3 +1,103 @@
+## v3.19.2 (2026-09-07)
+
+### 🚀 Features
+
+- **react:** add startNewConversation to useWebChat so new chats do not remount fixes NV-8744 ([#12535](https://github.com/novuhq/novu/pull/12535))
+
+### 🩹 Fixes
+
+- **react:** create web chat runtime in useEffect not during render fixes NV-8743 ([#12524](https://github.com/novuhq/novu/pull/12524))
+
+### ❤️ Thank You
+
+- Adam Chmara @ChmaraX
+
+## v3.19.1 (2026-08-31)
+
+### 🚀 Features
+
+- **js,react:** lazy-load Agent Chat so Inbox bundles stay isolated fixes NV-8698 ([#12466](https://github.com/novuhq/novu/pull/12466))
+- **react,js:** rebuild useAgentChat on conversation runtime fixes NV-8641 ([#12438](https://github.com/novuhq/novu/pull/12438))
+- **api-service,js:** deliver Agent Chat card parts and sendAction for button clicks fixes NV-8600 ([#12353](https://github.com/novuhq/novu/pull/12353))
+- **api-service,js:** emit MCP connection events for agent chat fixes NV-8578 ([#12321](https://github.com/novuhq/novu/pull/12321))
+- **js,react,api:** wire typing indicator through agent chat fixes NV-8569 ([#12297](https://github.com/novuhq/novu/pull/12297))
+- **js,react,api:** wire agent-chat live WS, status, fetchMore, approvals fixes NV-8445 ([#12292](https://github.com/novuhq/novu/pull/12292))
+
+### 🩹 Fixes
+
+- **react:** prevent Web Chat Next.js hydration mismatch fixes NV-8709 ([#12480](https://github.com/novuhq/novu/pull/12480))
+- **js,react:** harden agent-chat reconnect recovery and surface failures fixes NV-8639 ([#12417](https://github.com/novuhq/novu/pull/12417))
+- **js,react:** correct agent-chat pagination state and run-error exposure fixes NV-8638 ([#12414](https://github.com/novuhq/novu/pull/12414))
+
+### ❤️ Thank You
+
+- Adam Chmara @ChmaraX
+
+## v3.19.0 (2026-08-07)
+
+### 🚀 Features
+
+- **js,react,api:** headless useAgentChat send + open/resume fixes NV-8445 ([#12271](https://github.com/novuhq/novu/pull/12271))
+
+### 🩹 Fixes
+
+- **api-service:** support TelegramConnectButton without agent link fixes NV-8452 ([#12144](https://github.com/novuhq/novu/pull/12144))
+
+### ❤️ Thank You
+
+- Adam Chmara @ChmaraX
+- Paweł Tymczuk @LetItRock
+
+## v3.18.2 (2026-08-03)
+
+### 🩹 Fixes
+
+- **js,react:** when web locks not available then dont broadcast messages fixes NV-8425 ([#12170](https://github.com/novuhq/novu/pull/12170))
+
+### ❤️ Thank You
+
+- Paweł Tymczuk @LetItRock
+
+## v3.18.1 (2026-07-23)
+
+### 🚀 Features
+
+- **dashboard,api-service,js,react,framework:** novu copilot agent for slack fixes NV-8316 ([#11973](https://github.com/novuhq/novu/pull/11973))
+- **providers:** add Webex Messaging OAuth support fixes NV-8272 ([#11633](https://github.com/novuhq/novu/pull/11633))
+
+### ❤️ Thank You
+
+- Paweł Tymczuk @LetItRock
+- Rahul Jain
+
+## v3.18.0 (2026-07-08)
+
+### 🚀 Features
+
+- **js, react, api-service:** add Telegram connect button (SDK peer to Slack/MS Teams) ([#11661](https://github.com/novuhq/novu/pull/11661))
+- **api-service,js,react:** Telegram subscriber-link SDK + shared linking module fixes NV-8095 ([#11619](https://github.com/novuhq/novu/pull/11619))
+
+### 🩹 Fixes
+
+- **react:** set preferences/schedule data directly on fetch to prevent undefined state on re-mount ([#11756](https://github.com/novuhq/novu/pull/11756))
+- **js,react:** keep inbox badge counts in sync after mark-as-read fixes NV-7398 ([#11599](https://github.com/novuhq/novu/pull/11599))
+
+### ❤️ Thank You
+
+- Dima Grossman @scopsy
+- George Djabarov @djabarovgeorge
+- Shivam S @BIGSUS24
+
+## v3.17.0 (2026-06-01)
+
+### 🚀 Features
+
+- **js,react,api-service:** implement MS Teams connect and link-user components ([#10870](https://github.com/novuhq/novu/pull/10870))
+
+### ❤️ Thank You
+
+- George Djabarov @djabarovgeorge
+
 ## v3.16.0 (2026-04-27)
 
 ### 🚀 Features

@@ -1,11 +1,71 @@
-import { ENDPOINT_TYPES } from '@novu/stateless';
+import { CardElement, ENDPOINT_TYPES } from '@novu/stateless';
 import { v4 as uuidv4 } from 'uuid';
-import { expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import { axiosSpy } from '../../../utils/test/spy-axios';
+import { safeOutboundJsonSpy } from '../../../utils/test/spy-safe-outbound';
 import { MsTeamsProvider } from './msTeams.provider';
 
+// The runtime `esmImport` uses `new Function('return import(...)')` so the CJS build can load
+// the ESM-only chat adapter. That indirection has no dynamic-import callback under Vitest, so
+// swap it for a transform-aware dynamic import that resolves the real adapter.
+vi.mock('../../../utils/esm-import', () => ({
+  esmImport: (specifier: string) => import(/* @vite-ignore */ specifier),
+}));
+
+const richCard: CardElement = {
+  type: 'card',
+  children: [
+    { type: 'text', content: 'Deployment succeeded', style: 'bold' },
+    { type: 'divider' },
+    {
+      type: 'actions',
+      children: [{ type: 'link-button', label: 'View run', url: 'https://novu.co/run/1' }],
+    },
+  ],
+};
+
+describe('MsTeamsProvider.render', () => {
+  test('serializes a CardElement to an Adaptive Card attachment + fallback text', async () => {
+    const provider = new MsTeamsProvider({});
+    const result = await provider.render(richCard);
+
+    const attachments = result.nativePayload.attachments as Record<string, unknown>[];
+    expect(Array.isArray(attachments)).toBe(true);
+    expect(attachments[0].contentType).toBe('application/vnd.microsoft.card.adaptive');
+    expect(attachments[0].content).toBeTruthy();
+    expect(typeof result.content).toBe('string');
+    expect(result.validation).toEqual([]);
+  });
+});
+
+test('should deliver a rendered card as an Adaptive Card attachment over webhook', async () => {
+  const { mockSafeOutboundJsonRequest: fakePost } = safeOutboundJsonSpy({
+    headers: { 'request-id': uuidv4() },
+  });
+
+  const provider = new MsTeamsProvider({});
+  // The worker renders the card once, before send, and hands the native payload to the provider.
+  const rendered = await provider.render(richCard);
+  await provider.sendMessage({
+    channelData: {
+      endpoint: {
+        url: 'https://mycompany.webhook.office.com',
+      },
+      type: ENDPOINT_TYPES.WEBHOOK,
+      identifier: 'test-webhook-identifier',
+    },
+    content: rendered.content,
+    nativePayload: rendered.nativePayload,
+  });
+
+  const call = fakePost.mock.calls[0][0];
+  const attachments = call.body.attachments as Record<string, unknown>[];
+  expect(Array.isArray(attachments)).toBe(true);
+  expect(attachments[0].contentType).toBe('application/vnd.microsoft.card.adaptive');
+});
+
 test('should trigger msTeams webhook correctly', async () => {
-  const { mockPost: fakePost } = axiosSpy({
+  const { mockSafeOutboundJsonRequest: fakePost } = safeOutboundJsonSpy({
     headers: { 'request-id': uuidv4() },
   });
 
@@ -25,13 +85,18 @@ test('should trigger msTeams webhook correctly', async () => {
   });
 
   expect(fakePost).toHaveBeenCalled();
-  expect(fakePost).toHaveBeenCalledWith(testWebhookUrl, {
-    title: 'Message test title',
+  expect(fakePost).toHaveBeenCalledWith({
+    url: testWebhookUrl,
+    method: 'POST',
+    headers: undefined,
+    body: {
+      title: 'Message test title',
+    },
   });
 });
 
 test('should trigger msTeams webhook correctly with _passthrough', async () => {
-  const { mockPost: fakePost } = axiosSpy({
+  const { mockSafeOutboundJsonRequest: fakePost } = safeOutboundJsonSpy({
     headers: { 'request-id': uuidv4() },
   });
 
@@ -60,13 +125,18 @@ test('should trigger msTeams webhook correctly with _passthrough', async () => {
   );
 
   expect(fakePost).toHaveBeenCalled();
-  expect(fakePost).toHaveBeenCalledWith(testWebhookUrl, {
-    title: '_passthrough test title',
+  expect(fakePost).toHaveBeenCalledWith({
+    url: testWebhookUrl,
+    method: 'POST',
+    headers: undefined,
+    body: {
+      title: '_passthrough test title',
+    },
   });
 });
 
 test('should handle plain text content in webhook', async () => {
-  const { mockPost: fakePost } = axiosSpy({
+  const { mockSafeOutboundJsonRequest: fakePost } = safeOutboundJsonSpy({
     headers: { 'request-id': uuidv4() },
   });
 
@@ -86,8 +156,13 @@ test('should handle plain text content in webhook', async () => {
   });
 
   expect(fakePost).toHaveBeenCalled();
-  expect(fakePost).toHaveBeenCalledWith(testWebhookUrl, {
-    text: 'Plain text message',
+  expect(fakePost).toHaveBeenCalledWith({
+    url: testWebhookUrl,
+    method: 'POST',
+    headers: undefined,
+    body: {
+      text: 'Plain text message',
+    },
   });
 });
 

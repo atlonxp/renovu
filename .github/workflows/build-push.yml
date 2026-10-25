@@ -28,6 +28,11 @@ on:
       - 'packages/**'
       - 'docker/**'
       - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'package.json'
+      - 'nx.json'
+      - 'tsconfig.json'
+      - '.npmrc'
       - '.github/workflows/build-push.yml'
   release:
     types: [published]

@@ -7,6 +7,10 @@ const stripEmptyValues = (values: Record<string, unknown>): Record<string, unkno
   return Object.fromEntries(Object.entries(values).filter(([, v]) => v !== null && v !== undefined && v !== ''));
 };
 
+const hasEntries = (value: Record<string, unknown> | null | undefined): value is Record<string, unknown> => {
+  return !!value && Object.keys(value).length > 0;
+};
+
 function deepMergeDefaults(
   defaults: Record<string, unknown>,
   overrides: Record<string, unknown>
@@ -36,9 +40,23 @@ function deepMergeDefaults(
 // When uiSchema is non-empty, merges both schemas with dataSchema taking precedence over uiSchema for
 // overlapping keys; controlValues take precedence over both. When uiSchema is empty, only dataSchema
 // and controlValues are used.
-export const getControlsDefaultValues = (resource: { controls: Controls }): Record<string, unknown> => {
+// Provider and integration overrides are stored as step sibling fields but remain nested in the editor form.
+export const getControlsDefaultValues = (resource: {
+  controls: Controls;
+  providerOverrides?: Record<string, unknown> | null;
+  integrationOverrides?: Record<string, unknown> | null;
+}): Record<string, unknown> => {
   const controlValues = resource.controls.values;
   const strippedControlValues = stripEmptyValues(controlValues as Record<string, unknown>);
+  const withOverrides = { ...strippedControlValues };
+
+  if (hasEntries(resource.providerOverrides)) {
+    withOverrides.providerOverrides = resource.providerOverrides;
+  }
+
+  if (hasEntries(resource.integrationOverrides)) {
+    withOverrides.integrationOverrides = resource.integrationOverrides;
+  }
 
   const uiSchemaDefaultValues = buildDefaultValues(resource.controls.uiSchema ?? {});
   const dataSchemaDefaultValues = buildDefaultValuesOfDataSchema(resource.controls.dataSchema ?? {});
@@ -46,10 +64,10 @@ export const getControlsDefaultValues = (resource: { controls: Controls }): Reco
   if (Object.keys(resource.controls.uiSchema ?? {}).length !== 0) {
     const defaults = deepMergeDefaults(uiSchemaDefaultValues, dataSchemaDefaultValues);
 
-    return deepMergeDefaults(defaults, strippedControlValues);
+    return deepMergeDefaults(defaults, withOverrides);
   }
 
-  return deepMergeDefaults(dataSchemaDefaultValues, strippedControlValues);
+  return deepMergeDefaults(dataSchemaDefaultValues, withOverrides);
 };
 
 // When uiSchema is non-empty, merges both schemas with uiSchema taking precedence over dataSchema for

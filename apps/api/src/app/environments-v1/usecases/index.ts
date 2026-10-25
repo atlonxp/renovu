@@ -1,5 +1,8 @@
 import { GetMxRecord } from '../../inbound-parse/usecases/get-mx-record/get-mx-record.usecase';
+import { BuildDashboardInboxHashes } from './build-dashboard-inbox-hashes/build-dashboard-inbox-hashes.usecase';
+import { CreateApiKey } from './create-api-key/create-api-key.usecase';
 import { CreateEnvironment } from './create-environment/create-environment.usecase';
+import { DeleteApiKey } from './delete-api-key/delete-api-key.usecase';
 import { DeleteEnvironment } from './delete-environment';
 import { GenerateUniqueApiKey } from './generate-unique-api-key/generate-unique-api-key.usecase';
 import { GetApiKeys } from './get-api-keys/get-api-keys.usecase';
@@ -14,8 +17,11 @@ export const USE_CASES = [
   UpdateEnvironment,
   GenerateUniqueApiKey,
   GetApiKeys,
+  CreateApiKey,
+  DeleteApiKey,
   RegenerateApiKeys,
   GetEnvironment,
   GetMyEnvironments,
   DeleteEnvironment,
+  BuildDashboardInboxHashes,
 ];

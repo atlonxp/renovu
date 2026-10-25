@@ -7,12 +7,15 @@ import { MsTeamsOauthCallbackCommand } from './msteams-oauth-callback/msteams-oa
 import { MsTeamsOauthCallback } from './msteams-oauth-callback/msteams-oauth-callback.usecase';
 import { SlackOauthCallbackCommand } from './slack-oauth-callback/slack-oauth-callback.command';
 import { SlackOauthCallback } from './slack-oauth-callback/slack-oauth-callback.usecase';
+import { WebexOauthCallbackCommand } from './webex-oauth-callback/webex-oauth-callback.command';
+import { WebexOauthCallback } from './webex-oauth-callback/webex-oauth-callback.usecase';
 
 @Injectable()
 export class ChatOauthCallback {
   constructor(
     private slackOauthCallback: SlackOauthCallback,
-    private msTeamsOauthCallback: MsTeamsOauthCallback
+    private msTeamsOauthCallback: MsTeamsOauthCallback,
+    private webexOauthCallback: WebexOauthCallback
   ) {}
 
   async execute(command: ChatOauthCallbackCommand): Promise<ChatOauthCallbackResult> {
@@ -42,9 +45,26 @@ export class ChatOauthCallback {
           })
         );
 
+      case ChatProviderIdEnum.WebexMessaging:
+        if (!command.providerCode) {
+          throw new BadRequestException('Missing required parameter: code');
+        }
+
+        return await this.webexOauthCallback.execute(
+          WebexOauthCallbackCommand.create({
+            providerCode: command.providerCode,
+            state: command.state,
+          })
+        );
+
       default:
         throw new BadRequestException(`OAuth callback not supported for provider: ${providerId}`);
     }
+  }
+
+  /** Agent Inbox Slack failures land on the public result page. Every other callback keeps its error. */
+  resolveHumanRelayErrorRedirect(state: string): Promise<string | null> {
+    return this.slackOauthCallback.resolveHumanRelayErrorRedirect(state);
   }
 
   private extractProviderIdFromState(state: string): ChatProviderIdEnum {

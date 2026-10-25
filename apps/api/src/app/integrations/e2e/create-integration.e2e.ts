@@ -7,6 +7,7 @@ import {
   InAppProviderIdEnum,
   PushProviderIdEnum,
   SmsProviderIdEnum,
+  ToolProviderIdEnum,
 } from '@novu/shared';
 import { UserSession } from '@novu/testing';
 import { expect } from 'chai';
@@ -122,6 +123,109 @@ describe('Create Integration - /integration (POST) #novu-v2', () => {
     expect(body.data.conditions[0].children[0].operator).to.equal('EQUAL');
   });
 
+  it('should create integration with JsonLogic conditions', async () => {
+    const payload = {
+      providerId: EmailProviderIdEnum.SendGrid,
+      channel: ChannelTypeEnum.EMAIL,
+      identifier: 'identifier-conditions-logic',
+      active: false,
+      check: false,
+      rules: {
+        '==': [{ var: 'context.tenant.id' }, 'acme'],
+      },
+    };
+
+    const { body } = await session.testAgent.post('/v1/integrations').send(payload);
+
+    expect(body.data.rules).to.deep.equal(payload.rules);
+    expect(body.data.primary).to.equal(false);
+  });
+
+  it('should reject JsonLogic conditions on a payload field', async () => {
+    const payload = {
+      providerId: EmailProviderIdEnum.SendGrid,
+      channel: ChannelTypeEnum.EMAIL,
+      identifier: 'identifier-conditions-logic-invalid',
+      active: false,
+      check: false,
+      rules: {
+        '==': [{ var: 'payload.foo' }, 'bar'],
+      },
+    };
+
+    const { body } = await session.testAgent.post('/v1/integrations').send(payload);
+
+    expect(body.statusCode).to.equal(400);
+  });
+
+  it('should create integration with JsonLogic conditions on a workflow field', async () => {
+    const payload = {
+      providerId: EmailProviderIdEnum.SendGrid,
+      channel: ChannelTypeEnum.EMAIL,
+      identifier: 'identifier-conditions-logic-workflow',
+      active: false,
+      check: false,
+      rules: {
+        '==': [{ var: 'workflow.name' }, 'Order confirmation'],
+      },
+    };
+
+    const { body } = await session.testAgent.post('/v1/integrations').send(payload);
+
+    expect(body.data.rules).to.deep.equal(payload.rules);
+  });
+
+  it('should reject JsonLogic conditions on unsupported workflow fields', async () => {
+    const payload = {
+      providerId: EmailProviderIdEnum.SendGrid,
+      channel: ChannelTypeEnum.EMAIL,
+      identifier: 'identifier-conditions-logic-workflow-invalid',
+      active: false,
+      check: false,
+      rules: {
+        '==': [{ var: 'workflow.identifier' }, 'order-confirmation'],
+      },
+    };
+
+    const { body } = await session.testAgent.post('/v1/integrations').send(payload);
+
+    expect(body.statusCode).to.equal(400);
+  });
+
+  it('should reject JsonLogic conditions on deprecated tenant fields', async () => {
+    const payload = {
+      providerId: EmailProviderIdEnum.SendGrid,
+      channel: ChannelTypeEnum.EMAIL,
+      identifier: 'identifier-conditions-logic-tenant',
+      active: false,
+      check: false,
+      rules: {
+        '==': [{ var: 'tenant.identifier' }, 'acme'],
+      },
+    };
+
+    const { body } = await session.testAgent.post('/v1/integrations').send(payload);
+
+    expect(body.statusCode).to.equal(400);
+  });
+
+  it('should reject JsonLogic conditions with unsupported operators', async () => {
+    const payload = {
+      providerId: EmailProviderIdEnum.SendGrid,
+      channel: ChannelTypeEnum.EMAIL,
+      identifier: 'identifier-conditions-logic-log',
+      active: false,
+      check: false,
+      rules: {
+        log: { var: 'subscriber.email' },
+      },
+    };
+
+    const { body } = await session.testAgent.post('/v1/integrations').send(payload);
+
+    expect(body.statusCode).to.equal(400);
+  });
+
   it('should return error with malformed conditions', async () => {
     const payload = {
       providerId: EmailProviderIdEnum.SendGrid,
@@ -182,6 +286,28 @@ describe('Create Integration - /integration (POST) #novu-v2', () => {
     expect(data.providerId).to.equal(EmailProviderIdEnum.SendGrid);
     expect(data.channel).to.equal(ChannelTypeEnum.EMAIL);
     expect(data.active).to.equal(false);
+  });
+
+  it('should persist webhook payload schema configuration', async () => {
+    const payloadSchema = JSON.stringify({
+      type: 'object',
+      properties: { event: { type: 'string' } },
+    });
+    const {
+      body: { data },
+    } = await session.testAgent.post('/v1/integrations').send({
+      providerId: ToolProviderIdEnum.Webhook,
+      channel: ChannelTypeEnum.TOOL,
+      configurations: { payloadSchema },
+      check: false,
+    });
+    const persisted = await integrationRepository.findOne({
+      _id: data._id,
+      _environmentId: session.environment._id,
+    });
+
+    expect(data.configurations.payloadSchema).to.equal(payloadSchema);
+    expect(persisted?.configurations?.payloadSchema).to.equal(payloadSchema);
   });
 
   it('should allow creating the integration in the chosen environment', async () => {
@@ -652,12 +778,12 @@ describe('Create Integration - /integration (POST) #novu-v2', () => {
   describe('API key authentication is scoped to the key environment', () => {
     it('should forbid creating with a different `_environmentId` when authenticated via API key', async () => {
       const prodEnv = await envRepository.findOne({ name: 'Production', _organizationId: session.organization._id });
-      expect(prodEnv?._id, 'Expected Production environment fixture').to.exist;
+      if (!prodEnv) throw new Error('Expected Production environment fixture');
 
       const payload = {
         providerId: EmailProviderIdEnum.SendGrid,
         channel: ChannelTypeEnum.EMAIL,
-        _environmentId: prodEnv!._id,
+        _environmentId: prodEnv._id,
         check: false,
       };
 
@@ -667,7 +793,7 @@ describe('Create Integration - /integration (POST) #novu-v2', () => {
         .send(payload);
 
       expect(body.statusCode).to.equal(403);
-      expect(body.message).to.contain('API key authentication is scoped to a single environment');
+      expect(body.message).to.contain('is scoped to a single environment');
     });
 
     it('should allow creating without `_environmentId` (defaults to API key environment) via API key', async () => {

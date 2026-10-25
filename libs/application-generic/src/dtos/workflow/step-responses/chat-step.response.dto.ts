@@ -1,11 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ChatProviderIdEnum } from '@novu/shared';
 import { Type } from 'class-transformer';
-import { ValidateNested } from 'class-validator';
+import { IsObject, IsOptional, ValidateNested } from 'class-validator';
 import { ControlsMetadataDto } from '../../controls-metadata.dto';
 import { ChatControlDto } from '../chat-control.dto';
+import { INTEGRATION_OVERRIDES_API_PROPERTY, PROVIDER_OVERRIDES_API_PROPERTY } from '../provider-overrides.dto';
 import { StepResponseDto } from '../step.response.dto';
 
-class ChatControlsMetadataResponseDto extends ControlsMetadataDto {
+class ChatControlsMetadataResponseDto extends ControlsMetadataDto<ChatControlDto> {
   @ApiProperty({
     description: 'Control values specific to Chat',
     type: () => ChatControlDto,
@@ -31,4 +33,18 @@ export class ChatStepResponseDto extends StepResponseDto<ChatControlDto> {
   @ValidateNested()
   @Type(() => ChatControlDto)
   declare controlValues?: ChatControlDto;
+
+  @ApiPropertyOptional({
+    ...PROVIDER_OVERRIDES_API_PROPERTY,
+  })
+  @IsOptional()
+  @IsObject()
+  declare providerOverrides?: Partial<Record<ChatProviderIdEnum, Record<string, unknown>>> | null;
+
+  @ApiPropertyOptional({
+    ...INTEGRATION_OVERRIDES_API_PROPERTY,
+  })
+  @IsOptional()
+  @IsObject()
+  declare integrationOverrides?: Partial<Record<ChatProviderIdEnum, Record<string, Record<string, unknown>>>> | null;
 }

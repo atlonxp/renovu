@@ -14,7 +14,7 @@
   "keywords": [],
   "scripts": {
     "start": "npm run build:watch",
-    "prebuild": "rimraf build",
+    "prebuild": "node -e \"require('fs').rmSync('build', { recursive: true, force: true })\"",
     "build": "node ./check-ee.mjs",
     "build:main": "tsc -p tsconfig.json",
     "build:esm": "tsc -p tsconfig.json",
@@ -41,7 +41,7 @@
     "typescript": "5.6.2"
   },
   "peerDependencies": {
-    "@nestjs/common": "11.1.21",
+    "@nestjs/common": "11.1.27",
     "@novu/dal": "workspace:*"
   }
 }

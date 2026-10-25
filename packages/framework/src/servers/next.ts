@@ -1,9 +1,11 @@
 import { type NextApiRequest, type NextApiResponse } from 'next';
 import { type NextRequest } from 'next/server';
+// `.js` required: Node ESM cannot resolve bare `next/server` when this package is externalized (NV-8366).
+import * as NextServer from 'next/server.js';
 
 import { NovuRequestHandler, type ServeHandlerOptions } from '../handler';
 import { type Either, type SupportedFrameworkName } from '../types';
-import { getResponse } from '../utils';
+import { getResponse, pipeToNodeResponse } from '../utils';
 
 /*
  * Re-export all top level exports from the main package.
@@ -31,6 +33,33 @@ export const frameworkName: SupportedFrameworkName = 'next';
  */
 export type RequestHandler = (expectedReq: NextRequest, res: unknown) => Promise<Response>;
 
+/**
+ * Builds a `waitUntil` implementation backed by Next.js `after()` (stable since
+ * Next.js 15.1). `after()` extends the invocation lifetime on serverless
+ * platforms (e.g. Vercel) so background agent turns complete after the
+ * acknowledgement response is sent.
+ *
+ * Feature-detected at runtime: on older Next.js versions `after` is not
+ * exported and this returns `undefined`, preserving the previous behavior.
+ */
+const getAfterWaitUntil = (): ((promise: Promise<unknown>) => void) | undefined => {
+  if (typeof NextServer.after !== 'function') {
+    return undefined;
+  }
+
+  return (promise) => {
+    try {
+      NextServer.after(promise);
+    } catch {
+      /*
+       * `after()` requires an App Router request scope and throws in the
+       * pages router. Fall back to fire-and-forget, matching the behavior
+       * on Next.js versions without `after()`.
+       */
+    }
+  };
+};
+
 // Helper function to check if the response is a Next.js 12 API response
 const isNext12ApiResponse = (val: unknown): val is NextApiResponse => {
   return (
@@ -42,11 +71,29 @@ const isNext12ApiResponse = (val: unknown): val is NextApiResponse => {
   );
 };
 
+const devAwareProtocol = (): 'http' | 'https' => {
+  try {
+    // biome-ignore lint/suspicious/noExplicitAny: Needed for some edge cases
+    if (process.env.NODE_ENV === 'development' || (process.env.NODE_ENV as any) === 'dev') {
+      return 'http';
+    }
+  } catch (error) {
+    // no-op
+  }
+
+  return 'https';
+};
+
 /**
  * In Next.js, serve and register any declared workflows with Novu, making
  * them available to be triggered by events.
  *
  * Supports Next.js 12+, both serverless and edge.
+ *
+ * On Next.js >= 15.1 (App Router), background agent turns are kept alive after
+ * the acknowledgement response via `after()` from `next/server`, so agents work
+ * on serverless platforms such as Vercel without extra configuration. On older
+ * versions, pass `waitUntil` to `serve()` when deploying to serverless.
  *
  * @example Next.js <=12 or the pages router can export the handler directly
  * ```ts
@@ -89,6 +136,7 @@ export const serve = (
 
       return {
         body: () => (typeof request.json === 'function' ? request.json() : request.body),
+        waitUntil: getAfterWaitUntil(),
         headers: extractHeader,
         method: () => {
           /**
@@ -139,19 +187,8 @@ export const serve = (
             return absoluteUrl;
           }
 
-          let protocol: 'http' | 'https' = 'https';
           const hostHeader = extractHeader('host') || '';
-
-          try {
-            // biome-ignore lint/suspicious/noExplicitAny: Needed for some edge cases
-            if (process.env.NODE_ENV === 'development' || (process.env.NODE_ENV as any) === 'dev') {
-              protocol = 'http';
-            }
-          } catch (error) {
-            // no-op
-          }
-
-          const url = new URL(request.url as string, `${protocol}://${hostHeader}`);
+          const url = new URL(request.url as string, `${devAwareProtocol()}://${hostHeader}`);
 
           return url;
         },
@@ -175,6 +212,7 @@ export const serve = (
              * `Response`, so we still enforce that as we cannot dynamically
              * adjust typing based on the environment.
              */
+            // biome-ignore lint/plugin: Next.js 12 API routes ignore the return value; Next.js 13 needs it typed as `Response`
             return undefined as unknown as Response;
           }
 
@@ -188,6 +226,17 @@ export const serve = (
           const Res = getResponse();
 
           return new Res(body, { status, headers });
+        },
+        transformStreamResponse: (streamResponse): Response => {
+          if (isNext12ApiResponse(response)) {
+            // Settles when the stream ends, which keeps the serverless function alive until then.
+            // biome-ignore lint/plugin: Next.js 12 API routes ignore the return value; Next.js 13 needs it typed as `Response`
+            return pipeToNodeResponse(response, streamResponse) as unknown as Response;
+          }
+
+          const Res = getResponse();
+
+          return new Res(streamResponse.body, { status: streamResponse.status, headers: streamResponse.headers });
         },
       };
     },

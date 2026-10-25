@@ -15,9 +15,11 @@ import { useEnvironment } from '@/context/environment/hooks';
 import { getProviderSquareIconFileName } from '@/utils/provider-square-icon';
 import { buildRoute, ROUTES } from '@/utils/routes';
 import { cn } from '@/utils/ui';
+import { isHitlTimelineActivity } from './conversation-hitl';
+import { HitlTimelineRow } from './conversation-hitl-row';
 import { ConversationStatusBadge } from './conversation-status-badge';
+import { getTimelineLabel, groupActivitiesForTimeline } from './conversation-timeline-grouping';
 import { SubscriberFallbackAvatar } from './subscriber-fallback-avatar';
-import { ToolProgressCard } from './tool-progress-card';
 
 type ConversationTimelineProps = {
   activities: ConversationActivityDto[];
@@ -42,13 +44,13 @@ function getActivityContent(activity: ConversationActivityDto): string {
 
 function formatActivityTimestamp(dateStr: string | undefined): string {
   if (!dateStr?.trim()) {
-    return '—';
+    return '-';
   }
 
   const d = new Date(dateStr);
 
   if (Number.isNaN(d.getTime())) {
-    return '—';
+    return '-';
   }
 
   const day = String(d.getDate()).padStart(2, '0');
@@ -183,10 +185,10 @@ function MessageCard({ activity }: { activity: ConversationActivityDto }) {
 }
 
 function InlineLogRow({ activity }: { activity: ConversationActivityDto }) {
-  const isAgentAction = activity.senderType === 'agent' || activity.senderType === 'system';
   const signalData = activity.signalData;
   const signalType = signalData?.type;
   const { currentEnvironment } = useEnvironment();
+  const label = getTimelineLabel(activity);
 
   const transactionId =
     signalType === 'trigger' && signalData?.type === 'trigger' ? signalData.payload?.transactionId : undefined;
@@ -197,10 +199,10 @@ function InlineLogRow({ activity }: { activity: ConversationActivityDto }) {
       : undefined;
 
   const icon =
-    signalType === 'trigger' ? (
+    signalType === 'trigger' || signalType === 'workflow_origin' ? (
       <RiRouteFill className="text-text-soft size-3.5 shrink-0" />
     ) : (
-      <RiRobot2Line className={cn('size-3.5 shrink-0', isAgentAction ? 'text-text-soft' : 'text-text-soft')} />
+      <RiRobot2Line className="text-text-soft size-3.5 shrink-0" />
     );
 
   return (
@@ -211,10 +213,10 @@ function InlineLogRow({ activity }: { activity: ConversationActivityDto }) {
           to={activityFeedLink}
           className="text-text-sub text-label-xs min-w-0 truncate font-medium underline decoration-dashed underline-offset-[3px] decoration-[currentColor]/40 transition-colors hover:text-text-strong hover:decoration-[currentColor]/70"
         >
-          {activity.content}
+          {label}
         </Link>
       ) : (
-        <span className="text-text-sub text-label-xs min-w-0 truncate font-medium">{activity.content}</span>
+        <span className="text-text-sub text-label-xs min-w-0 truncate font-medium">{label}</span>
       )}
       <span className="text-text-soft font-code shrink-0 text-[11px] leading-normal">•</span>
       <span className="text-text-soft shrink-0 text-[10px] font-medium leading-[14px]">
@@ -249,39 +251,16 @@ function ResolvedFooter({ totalCount }: { totalCount: number }) {
   );
 }
 
-type TimelineEntry =
-  | { type: 'single'; key: string; activity: ConversationActivityDto }
-  | { type: 'tool-progress'; key: string; activities: ConversationActivityDto[] };
-
-function isToolUseSignal(activity: ConversationActivityDto): boolean {
-  return activity.type === 'signal' && activity.signalData?.type === 'tool-use';
-}
-
-function groupActivitiesForTimeline(activities: ConversationActivityDto[]): TimelineEntry[] {
-  const result: TimelineEntry[] = [];
-  const toolGroups = new Map<string, ConversationActivityDto[]>();
-
-  for (const activity of activities) {
-    if (isToolUseSignal(activity)) {
-      const runId = String((activity.signalData?.payload as Record<string, unknown>)?.runId ?? '');
-      if (!runId) {
-        result.push({ type: 'single', key: activity._id, activity });
-        continue;
-      }
-
-      let group = toolGroups.get(runId);
-      if (!group) {
-        group = [];
-        toolGroups.set(runId, group);
-        result.push({ type: 'tool-progress', key: `tools-${runId}`, activities: group });
-      }
-      group.push(activity);
-    } else {
-      result.push({ type: 'single', key: activity._id, activity });
-    }
+function TimelineActivity({ activity }: { activity: ConversationActivityDto }) {
+  if (activity.type === 'message') {
+    return <MessageCard activity={activity} />;
   }
 
-  return result;
+  if (isHitlTimelineActivity(activity)) {
+    return <HitlTimelineRow activity={activity} formatTimestamp={formatActivityTimestamp} />;
+  }
+
+  return <InlineLogRow activity={activity} />;
 }
 
 export function ConversationTimeline({
@@ -328,16 +307,10 @@ export function ConversationTimeline({
       </div>
 
       <div className="flex flex-col">
-        {groupActivitiesForTimeline(activities).map((entry, index) => (
-          <Fragment key={entry.key}>
+        {groupActivitiesForTimeline(activities).map((activity, index) => (
+          <Fragment key={activity._id}>
             {index > 0 && <TimelineDivider />}
-            {entry.type === 'tool-progress' ? (
-              <ToolProgressCard activities={entry.activities} />
-            ) : entry.activity.type === 'message' ? (
-              <MessageCard activity={entry.activity} />
-            ) : (
-              <InlineLogRow activity={entry.activity} />
-            )}
+            <TimelineActivity activity={activity} />
           </Fragment>
         ))}
 

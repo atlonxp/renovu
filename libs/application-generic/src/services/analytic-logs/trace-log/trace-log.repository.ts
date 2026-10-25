@@ -193,6 +193,33 @@ export class TraceLogRepository extends LogRepository<typeof traceLogSchema, Tra
     return result.data;
   }
 
+  /**
+   * Processing workflow runs of one organization within exactly `[startDate, endDate)`.
+   */
+  async getOrganizationWorkflowRunsCount(organizationId: string, startDate: Date, endDate: Date): Promise<number> {
+    const query = `
+      SELECT count() as count
+      FROM ${TABLE_NAME}
+      WHERE
+        organization_id = {organizationId:String}
+        AND entity_type = 'workflow_run'
+        AND event_type = 'workflow_run_status_processing'
+        AND created_at >= {startDate:DateTime64(3, 'UTC')}
+        AND created_at < {endDate:DateTime64(3, 'UTC')}
+    `;
+
+    const result = await this.clickhouseService.query<{ count: string }>({
+      query,
+      params: {
+        organizationId,
+        startDate: LogRepository.formatDateTime64(startDate),
+        endDate: LogRepository.formatDateTime64(endDate),
+      },
+    });
+
+    return parseInt(result.data[0]?.count || '0', 10);
+  }
+
   async getMessagesSentCount(environmentIds: string[], startDate: Date, endDate: Date): Promise<number> {
     if (environmentIds.length === 0) {
       this.logger.info(
@@ -492,6 +519,8 @@ export function mapEventTypeToTitle(eventType: EventType): string {
     // Integration events
     case 'integration_selected':
       return 'Integration selected';
+    case 'integration_conditions_matched':
+      return 'Integration conditions matched';
 
     // Layout events
     case 'layout_not_found':
@@ -522,6 +551,16 @@ export function mapEventTypeToTitle(eventType: EventType): string {
       return 'Chat phone missing';
     case 'chat_some_channels_skipped':
       return 'Chat some channels skipped';
+    case 'chat_agent_integration_not_linked':
+      return 'Chat integration not linked to the assigned agent';
+    case 'chat_agent_unsupported_endpoint':
+      return 'Chat agent unsupported endpoint';
+    case 'chat_agent_no_eligible_channels':
+      return 'Chat agent has no eligible channels';
+    case 'chat_agent_channels_fallback':
+      return 'Fell back to subscriber chat channels';
+    case 'chat_agent_platform_thread_persist_failed':
+      return 'Chat agent platform thread persist failed';
 
     // MS Teams events
     case 'msteams_bot_not_installed':
@@ -562,6 +601,8 @@ export function mapEventTypeToTitle(eventType: EventType): string {
       return 'Request received';
     case 'request_queued':
       return 'Request queued';
+    case 'request_delivered':
+      return 'Request delivered';
     case 'request_failed':
       return 'Request failed';
     case 'request_organization_not_found':
@@ -614,6 +655,8 @@ export function mapEventTypeToTitle(eventType: EventType): string {
     // Step skipped events
     case 'step_skipped':
       return 'Step skipped';
+    case 'step_conditions_passed':
+      return 'Step conditions matched';
     case 'step_skipped_outside_of_the_schedule':
       return "The step was skipped as it fell outside the subscriber's schedule";
     case 'step_extended_to_schedule':

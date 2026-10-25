@@ -6,6 +6,7 @@ import {
   IProviderConfig,
   PermissionsEnum,
   slackConfig,
+  ToolProviderIdEnum,
 } from '@novu/shared';
 import { useEffect, useMemo } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
@@ -20,26 +21,19 @@ import { ROUTES } from '@/utils/routes';
 import { cn } from '../../../utils/ui';
 import { InlineToast } from '../../primitives/inline-toast';
 import { EnvironmentDropdown } from '../../side-navigation/environment-dropdown';
+import { IntegrationFormData } from '../types';
 import { CredentialSection } from './credential-section';
+import { IntegrationConditionsDrawer } from './integration-conditions-drawer';
 import { GeneralSettings } from './integration-general-settings';
+import { ProviderDeprecationNotice } from './provider-deprecation';
 import { SlackCredentialsPaste } from './slack-credentials-paste';
 import { TelegramCredentialsPaste, type TelegramCredentialsPasteMobileSetup } from './telegram-credentials-paste';
+import { ToolWebhookSettings } from './tool-webhook-settings';
 import { useSlackCredentialsPasteFallback } from './use-slack-credentials-paste-fallback';
 import { useWhatsAppCredentialsPasteFallback } from './use-whatsapp-credentials-paste-fallback';
 import { isDemoIntegration } from './utils/helpers';
 import { WhatsAppCredentialsPaste } from './whatsapp-credentials-paste';
 import { WhatsAppCredentialsValidator } from './whatsapp-credentials-validator';
-
-type IntegrationFormData = {
-  name: string;
-  identifier: string;
-  credentials: Record<string, string>;
-  configurations: Record<string, string>;
-  active: boolean;
-  check: boolean;
-  primary: boolean;
-  environmentId: string;
-};
 
 type IntegrationConfigurationProps = {
   provider: IProviderConfig;
@@ -95,6 +89,7 @@ export function IntegrationSettings({
           credentials: integration.credentials as Record<string, string>,
           configurations: integration.configurations as Record<string, string>,
           environmentId: integration._environmentId,
+          rules: integration.rules ?? null,
         }
       : {
           name: provider?.displayName ?? '',
@@ -104,6 +99,7 @@ export function IntegrationSettings({
           credentials: {},
           configurations: {},
           environmentId: currentEnvironment?._id ?? '',
+          rules: null,
         },
   });
 
@@ -134,6 +130,7 @@ export function IntegrationSettings({
   const isSlackOnboarding = isAgentOnboarding && provider.id === ChatProviderIdEnum.Slack;
   const isWhatsAppOnboarding = isAgentOnboarding && provider.id === ChatProviderIdEnum.WhatsAppBusiness;
   const isTelegramProvider = provider.id === ChatProviderIdEnum.Telegram;
+  const isToolWebhookProvider = provider.id === ToolProviderIdEnum.Webhook;
   // The BotFather paste helper is an onboarding affordance — once the integration
   // already has a saved bot token, the textarea and mobile QR card are noise
   // (and the "Auto-filled from the BotFather message above…" hint becomes
@@ -148,14 +145,14 @@ export function IntegrationSettings({
   const telegramMobileVariant = useMemo<TelegramCredentialsPasteMobileSetup | undefined>(() => {
     if (!showTelegramPaste) return undefined;
 
-    if (isAgentOnboarding && agentIdentifier && integration?._id) {
-      return { kind: 'agent', agentIdentifier, integrationId: integration._id, testSubscriberId };
+    if (isAgentOnboarding && integration?.identifier) {
+      return { kind: 'agent', integrationIdentifier: integration.identifier, testSubscriberId };
     }
 
     if (mode === 'create') return { kind: 'integration-store' };
 
     return undefined;
-  }, [showTelegramPaste, isAgentOnboarding, agentIdentifier, integration?._id, mode, testSubscriberId]);
+  }, [showTelegramPaste, isAgentOnboarding, integration?.identifier, mode, testSubscriberId]);
   const handleSlackCredentialsPaste = useSlackCredentialsPasteFallback({
     control,
     setValue,
@@ -199,6 +196,7 @@ export function IntegrationSettings({
         onSubmit={handleSubmit(onSubmit)}
         className="flex flex-col"
       >
+        <ProviderDeprecationNotice provider={provider} replaceOnNavigate={mode === 'create'} />
         <div className="flex items-center justify-between gap-2 p-3">
           <Label className="text-sm" htmlFor="environmentId">
             Environment
@@ -231,6 +229,7 @@ export function IntegrationSettings({
               <AccordionContent>
                 <GeneralSettings
                   control={control}
+                  setValue={setValue}
                   mode={mode}
                   isReadOnly={isReadOnly}
                   hidePrimarySelector={!isChannelSupportPrimary}
@@ -269,7 +268,35 @@ export function IntegrationSettings({
           </div>
         )}
 
-        {!isDemo && providerCredentials.length > 0 && (
+        {!isDemo &&
+          !isAgentOnboarding &&
+          ((integration && integration.channel === ChannelTypeEnum.IN_APP && !integration.connected) ||
+            provider?.docReference) && (
+            <div className="p-3">
+              {integration && integration.channel === ChannelTypeEnum.IN_APP && !integration.connected ? (
+                <InlineToast
+                  variant={'tip'}
+                  title="Integrate in less than 4 minutes"
+                  ctaLabel="Get started"
+                  onCtaClick={() => navigate(`${ROUTES.INBOX_EMBED}?environmentId=${integration._environmentId}`)}
+                />
+              ) : (
+                provider?.docReference && (
+                  <InlineToast
+                    variant={'tip'}
+                    title="Configure Integration"
+                    description="To learn more about how to configure your integration, please refer to the documentation."
+                    ctaLabel="View Guide"
+                    onCtaClick={() => {
+                      window.open(provider.docReference ?? '', '_blank');
+                    }}
+                  />
+                )
+              )}
+            </div>
+          )}
+
+        {!isDemo && (isToolWebhookProvider || providerCredentials.length > 0) && (
           <div className="p-3">
             <Protect permission={PermissionsEnum.INTEGRATION_WRITE}>
               <Accordion type="single" collapsible defaultValue="credentials">
@@ -306,59 +333,44 @@ export function IntegrationSettings({
                           mobileSetup={telegramMobileVariant}
                         />
                       )}
-                      <div onPasteCapture={handleAgentOnboardingPaste} className="flex flex-col gap-2">
-                        {providerCredentials.map((credential) => (
-                          <CredentialSection
-                            key={`${credential.key}-${integration?._id || 'no-id'}`}
-                            credential={
-                              showTelegramPaste && credential.key === CredentialsKeyEnum.ApiToken
-                                ? {
-                                    ...credential,
-                                    description: 'Auto-filled from the BotFather message above, or enter it manually.',
-                                  }
-                                : credential
-                            }
-                            control={control}
-                            isReadOnly={isReadOnly}
-                            integrationId={integration?._id}
-                          />
-                        ))}
-                      </div>
+                      {isToolWebhookProvider ? (
+                        <ToolWebhookSettings control={control} setValue={setValue} isReadOnly={isReadOnly} />
+                      ) : (
+                        <div onPasteCapture={handleAgentOnboardingPaste} className="flex flex-col gap-2">
+                          {providerCredentials.map((credential) => (
+                            <CredentialSection
+                              key={`${credential.key}-${integration?._id || 'no-id'}`}
+                              credential={
+                                showTelegramPaste && credential.key === CredentialsKeyEnum.ApiToken
+                                  ? {
+                                      ...credential,
+                                      description:
+                                        'Auto-filled from the BotFather message above, or enter it manually.',
+                                    }
+                                  : credential
+                              }
+                              control={control}
+                              isReadOnly={isReadOnly}
+                              integrationId={integration?._id}
+                            />
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </AccordionContent>
                 </AccordionItem>
               </Accordion>
             </Protect>
-
-            {/* TODO: This is a temporary solution to show the guide only for in-app channel, 
-              we need to replace it with dedicated view per integration channel */}
-            {!isAgentOnboarding &&
-            integration &&
-            integration.channel === ChannelTypeEnum.IN_APP &&
-            !integration.connected ? (
-              <InlineToast
-                variant={'tip'}
-                className="mt-3"
-                title="Integrate in less than 4 minutes"
-                ctaLabel="Get started"
-                onCtaClick={() => navigate(`${ROUTES.INBOX_EMBED}?environmentId=${integration._environmentId}`)}
-              />
-            ) : (
-              !isAgentOnboarding &&
-              provider?.docReference && (
-                <InlineToast
-                  variant={'tip'}
-                  className="mt-3"
-                  title="Configure Integration"
-                  description="To learn more about how to configure your integration, please refer to the documentation."
-                  ctaLabel="View Guide"
-                  onCtaClick={() => {
-                    window.open(provider?.docReference ?? '', '_blank');
-                  }}
-                />
-              )
-            )}
           </div>
+        )}
+
+        {!isAgentOnboarding && (
+          <IntegrationConditionsDrawer
+            control={control}
+            setValue={setValue}
+            legacyConditions={integration?.conditions}
+            isReadOnly={isReadOnly}
+          />
         )}
       </FormRoot>
     </Form>

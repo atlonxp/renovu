@@ -1,14 +1,22 @@
 import { ssoClient } from '@better-auth/sso/client';
+import type { MemberRoleEnum } from '@novu/shared';
 import { organizationClient } from 'better-auth/client/plugins';
+import type { Role } from 'better-auth/plugins/access';
 import { createAuthClient } from 'better-auth/react';
 import { API_HOSTNAME, BETTER_AUTH_BASE_URL } from '@/config';
 
+/** Type-only: lets the client accept Novu role names. Permissions are enforced by the API. */
+type NovuOrganizationClientOptions = {
+  roles: Record<MemberRoleEnum, Role>;
+};
+
 const baseURL = BETTER_AUTH_BASE_URL || API_HOSTNAME || 'http://localhost:3000';
-const fullBaseURL = `${baseURL}/v1/better-auth`;
+
+export const BETTER_AUTH_API_URL = `${baseURL}/v1/better-auth`;
 
 export const authClient = createAuthClient({
-  baseURL: fullBaseURL,
-  plugins: [organizationClient(), ssoClient()],
+  baseURL: BETTER_AUTH_API_URL,
+  plugins: [organizationClient<NovuOrganizationClientOptions>(), ssoClient()],
   fetchOptions: {
     credentials: 'include',
     auth: {

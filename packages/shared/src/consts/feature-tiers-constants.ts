@@ -72,7 +72,26 @@ export enum FeatureNameEnum {
 
   // Agent Features
   AGENT_EMAIL_INTEGRATION = 'agentEmailIntegration',
+  AGENT_EMAIL_INBOX_DAILY_LIMIT = 'agentEmailInboxDailyLimit',
+  AGENT_EMAIL_INBOX_MONTHLY_LIMIT = 'agentEmailInboxMonthlyLimit',
+  HUMAN_MESSAGE_DAILY_LIMIT = 'humanMessageDailyLimit',
+  HUMAN_MESSAGE_MONTHLY_LIMIT = 'humanMessageMonthlyLimit',
+  AGENT_MAX_AGENTS = 'agentMaxAgents',
+  AGENT_MAX_ACTIVE_CHANNELS = 'agentMaxActiveChannels',
+  AGENT_MAX_CUSTOM_EMAIL_DOMAINS = 'agentMaxCustomEmailDomains',
+  AGENT_MAX_ACTIVE_CONVERSATIONS = 'agentMaxActiveConversations',
+  AGENT_COST_PER_ADDITIONAL_CONVERSATION = 'agentCostPerAdditionalConversation',
 }
+
+/**
+ * Which constraint produced a resource limit (agents, channels, custom email
+ * domains, …). Drives user-facing messaging and the API error contract:
+ * `plan` limits are lifted by upgrading (402); `system` limits (the
+ * platform-wide cap, or a per-organization override) require contacting the
+ * Novu team (409).
+ */
+export const RESOURCE_LIMIT_SOURCES = ['plan', 'system'] as const;
+export type ResourceLimitSource = (typeof RESOURCE_LIMIT_SOURCES)[number];
 
 export type FeatureValue = string | number | null | boolean | DetailedPriceListItem;
 
@@ -488,7 +507,7 @@ const novuServiceTiers: Record<FeatureNameEnum, Record<ApiServiceLevelEnum, Feat
     [ApiServiceLevelEnum.UNLIMITED]: { label: 'HIPAA compliance', value: true },
   },
   [FeatureNameEnum.COMPLIANCE_CUSTOM_SECURITY_REVIEWS]: {
-    [ApiServiceLevelEnum.FREE]: { label: 'Security reviews: SOC 2 and ISO 27001 upon request', value: true },
+    [ApiServiceLevelEnum.FREE]: { label: 'No security reviews', value: false },
     [ApiServiceLevelEnum.PRO]: { label: 'Security reviews: SOC 2 and ISO 27001 upon request', value: true },
     [ApiServiceLevelEnum.BUSINESS]: { label: 'Security reviews: SOC 2 and ISO 27001 upon request', value: true },
     [ApiServiceLevelEnum.ENTERPRISE]: {
@@ -521,6 +540,74 @@ const novuServiceTiers: Record<FeatureNameEnum, Record<ApiServiceLevelEnum, Feat
     [ApiServiceLevelEnum.BUSINESS]: { label: 'Agent email integration', value: true },
     [ApiServiceLevelEnum.ENTERPRISE]: { label: 'Agent email integration', value: true },
     [ApiServiceLevelEnum.UNLIMITED]: { label: 'Agent email integration', value: true },
+  },
+  // Anti-abuse ceilings on the shared inbox, not a plan perk: every tier gets
+  // the same allowance until the inbox has its own per-plan pricing.
+  [FeatureNameEnum.AGENT_EMAIL_INBOX_DAILY_LIMIT]: {
+    [ApiServiceLevelEnum.FREE]: { label: '50 emails per day', value: 50 },
+    [ApiServiceLevelEnum.PRO]: { label: '50 emails per day', value: 50 },
+    [ApiServiceLevelEnum.BUSINESS]: { label: '50 emails per day', value: 50 },
+    [ApiServiceLevelEnum.ENTERPRISE]: { label: '50 emails per day', value: 50 },
+    [ApiServiceLevelEnum.UNLIMITED]: { label: '50 emails per day', value: 50 },
+  },
+  [FeatureNameEnum.AGENT_EMAIL_INBOX_MONTHLY_LIMIT]: {
+    [ApiServiceLevelEnum.FREE]: { label: '300 emails per month', value: 300 },
+    [ApiServiceLevelEnum.PRO]: { label: '300 emails per month', value: 300 },
+    [ApiServiceLevelEnum.BUSINESS]: { label: '300 emails per month', value: 300 },
+    [ApiServiceLevelEnum.ENTERPRISE]: { label: '300 emails per month', value: 300 },
+    [ApiServiceLevelEnum.UNLIMITED]: { label: '300 emails per month', value: 300 },
+  },
+  // Beta abuse ceilings for signed-up Human messages, not a plan perk. Every
+  // current tier shares them; a later tier can diverge by editing this table.
+  [FeatureNameEnum.HUMAN_MESSAGE_DAILY_LIMIT]: {
+    [ApiServiceLevelEnum.FREE]: { label: '50 messages per day', value: 50 },
+    [ApiServiceLevelEnum.PRO]: { label: '50 messages per day', value: 50 },
+    [ApiServiceLevelEnum.BUSINESS]: { label: '50 messages per day', value: 50 },
+    [ApiServiceLevelEnum.ENTERPRISE]: { label: '50 messages per day', value: 50 },
+    [ApiServiceLevelEnum.UNLIMITED]: { label: '50 messages per day', value: 50 },
+  },
+  [FeatureNameEnum.HUMAN_MESSAGE_MONTHLY_LIMIT]: {
+    [ApiServiceLevelEnum.FREE]: { label: '300 messages per month', value: 300 },
+    [ApiServiceLevelEnum.PRO]: { label: '300 messages per month', value: 300 },
+    [ApiServiceLevelEnum.BUSINESS]: { label: '300 messages per month', value: 300 },
+    [ApiServiceLevelEnum.ENTERPRISE]: { label: '300 messages per month', value: 300 },
+    [ApiServiceLevelEnum.UNLIMITED]: { label: '300 messages per month', value: 300 },
+  },
+  [FeatureNameEnum.AGENT_MAX_AGENTS]: {
+    [ApiServiceLevelEnum.FREE]: { label: '2 agents', value: 2 },
+    [ApiServiceLevelEnum.PRO]: { label: '5 agents', value: 5 },
+    [ApiServiceLevelEnum.BUSINESS]: { label: '10 agents', value: 10 },
+    [ApiServiceLevelEnum.ENTERPRISE]: { label: 'Unlimited agents', value: UNLIMITED_VALUE },
+    [ApiServiceLevelEnum.UNLIMITED]: { label: 'Unlimited agents', value: UNLIMITED_VALUE },
+  },
+  [FeatureNameEnum.AGENT_MAX_ACTIVE_CHANNELS]: {
+    [ApiServiceLevelEnum.FREE]: { label: '2 active channels', value: 2 },
+    [ApiServiceLevelEnum.PRO]: { label: '5 active channels', value: 5 },
+    [ApiServiceLevelEnum.BUSINESS]: { label: 'All active channels', value: UNLIMITED_VALUE },
+    [ApiServiceLevelEnum.ENTERPRISE]: { label: 'All active channels', value: UNLIMITED_VALUE },
+    [ApiServiceLevelEnum.UNLIMITED]: { label: 'All active channels', value: UNLIMITED_VALUE },
+  },
+  [FeatureNameEnum.AGENT_MAX_CUSTOM_EMAIL_DOMAINS]: {
+    [ApiServiceLevelEnum.FREE]: { label: 'No custom email domains', value: 0 },
+    [ApiServiceLevelEnum.PRO]: { label: 'No custom email domains', value: 0 },
+    [ApiServiceLevelEnum.BUSINESS]: { label: 'Custom email domains', value: UNLIMITED_VALUE },
+    [ApiServiceLevelEnum.ENTERPRISE]: { label: 'Unlimited custom email domains', value: UNLIMITED_VALUE },
+    [ApiServiceLevelEnum.UNLIMITED]: { label: 'Unlimited custom email domains', value: UNLIMITED_VALUE },
+  },
+  [FeatureNameEnum.AGENT_MAX_ACTIVE_CONVERSATIONS]: {
+    [ApiServiceLevelEnum.FREE]: { label: '100 active conversations included', value: 100 },
+    [ApiServiceLevelEnum.PRO]: { label: '1,000 active conversations included', value: 1000 },
+    [ApiServiceLevelEnum.BUSINESS]: { label: '5,000 active conversations included', value: 5000 },
+    [ApiServiceLevelEnum.ENTERPRISE]: { label: 'Custom active conversations', value: UNLIMITED_VALUE },
+    [ApiServiceLevelEnum.UNLIMITED]: { label: 'Custom active conversations', value: UNLIMITED_VALUE },
+  },
+  // TODO: Product is in beta phase, Backend is not yet implemented for overage pricing.
+  [FeatureNameEnum.AGENT_COST_PER_ADDITIONAL_CONVERSATION]: {
+    [ApiServiceLevelEnum.FREE]: { label: 'No additional conversations', value: null },
+    [ApiServiceLevelEnum.PRO]: { label: '$0.03 per extra conversation', value: 0.03 },
+    [ApiServiceLevelEnum.BUSINESS]: { label: '$0.02 per extra conversation', value: 0.02 },
+    [ApiServiceLevelEnum.ENTERPRISE]: { label: 'Custom pricing for additional conversations', value: 0.015 },
+    [ApiServiceLevelEnum.UNLIMITED]: { label: 'Custom pricing for additional conversations', value: 0.015 },
   },
 };
 
@@ -607,45 +694,36 @@ function getConvertToMs(conversionToMs: boolean | undefined) {
   };
 }
 
+function scalarToBoolean(
+  value: boolean | number | string,
+  featureName: FeatureNameEnum,
+  tier: ApiServiceLevelEnum
+): boolean {
+  if (typeof value === 'boolean') return value;
+
+  if (typeof value === 'number') {
+    if (value === 0) return false;
+    if (value === 1) return true;
+    throw new Error(`Cannot convert number ${value} to boolean for ${featureName} at tier ${tier}`);
+  }
+
+  const lowercased = value.toLowerCase();
+  if (lowercased === 'true') return true;
+  if (lowercased === 'false') return false;
+
+  throw new Error(`Cannot convert string "${value}" to boolean for ${featureName} at tier ${tier}`);
+}
+
 export function getFeatureForTierAsBoolean(featureName: FeatureNameEnum, tier: ApiServiceLevelEnum): boolean {
   const featureTiers = novuServiceTiers[featureName];
 
   if (!featureTiers) return false;
 
   const feature: FeatureValue = featureTiers[tier];
+  const scalar = isDetailedPriceListItem(feature) ? feature.value : feature;
 
-  // Handle DetailedPriceListItem
-  if (isDetailedPriceListItem(feature)) {
-    if (typeof feature.value === 'boolean') return feature.value;
-    if (typeof feature.value === 'number') {
-      if (feature.value === 0) return false;
-      if (feature.value === 1) return true;
-      throw new Error(`Cannot convert number ${feature.value} to boolean for ${featureName} at tier ${tier}`);
-    }
-    if (typeof feature.value === 'string') {
-      const lowercased = feature.value.toLowerCase();
-      if (lowercased === 'true') return true;
-      if (lowercased === 'false') return false;
-      throw new Error(`Cannot convert string "${feature.value}" to boolean for ${featureName} at tier ${tier}`);
-    }
-  }
-
-  // Direct boolean
-  if (typeof feature === 'boolean') return feature;
-
-  // Number conversion
-  if (typeof feature === 'number') {
-    if (feature === 0) return false;
-    if (feature === 1) return true;
-    throw new Error(`Cannot convert number ${feature} to boolean for ${featureName} at tier ${tier}`);
-  }
-
-  // String conversion
-  if (typeof feature === 'string') {
-    const lowercased = feature.toLowerCase();
-    if (lowercased === 'true') return true;
-    if (lowercased === 'false') return false;
-    throw new Error(`Cannot convert string "${feature}" to boolean for ${featureName} at tier ${tier}`);
+  if (typeof scalar === 'boolean' || typeof scalar === 'number' || typeof scalar === 'string') {
+    return scalarToBoolean(scalar, featureName, tier);
   }
 
   throw new Error(`Cannot convert feature ${featureName} at tier ${tier} to boolean`);

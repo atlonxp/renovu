@@ -1,9 +1,11 @@
 import { DynamicModule, Module, OnApplicationShutdown, Provider } from '@nestjs/common';
 import { CommunityOrganizationRepository, MessageRepository } from '@novu/dal';
 import { JobTopicNameEnum } from '@novu/shared';
+import { hasMetricsBackend, isBullMqEnabled } from '../config';
 import { featureFlagsService } from '../custom-providers';
 import {
   ActiveJobsMetricQueueServiceHealthIndicator,
+  IHealthIndicator,
   InboundParseQueueServiceHealthIndicator,
   StandardQueueServiceHealthIndicator,
   SubscriberProcessQueueHealthIndicator,
@@ -11,7 +13,7 @@ import {
   WorkflowQueueServiceHealthIndicator,
 } from '../health';
 import {
-  CloudflareSchedulerService,
+  EventBridgeSchedulerService,
   ReadinessService,
   SocketWorkerService,
   SqsService,
@@ -20,6 +22,7 @@ import {
 import {
   ActiveJobsMetricQueueService,
   InboundParseQueueService,
+  QueueBaseService,
   StandardQueueService,
   SubscriberProcessQueueService,
   WebSocketsQueueService,
@@ -41,9 +44,9 @@ const memoryQueueService = {
 const INTERNAL_MODULE_PROVIDERS = [memoryQueueService, featureFlagsService];
 const BASE_PROVIDERS: Provider[] = [
   ReadinessService,
-  CloudflareSchedulerService,
   CommunityOrganizationRepository,
   SqsService,
+  EventBridgeSchedulerService,
 ];
 
 @Module({
@@ -93,7 +96,19 @@ export class QueuesModule implements OnApplicationShutdown {
           DYNAMIC_PROVIDERS.push(SubscriberProcessQueueService, SubscriberProcessQueueHealthIndicator);
           break;
         case JobTopicNameEnum.ACTIVE_JOBS_METRIC:
-          healthIndicators.push(ActiveJobsMetricQueueServiceHealthIndicator);
+          // The gauges it records are BullMQ counters, so the topic follows BullMQ.
+          if (!isBullMqEnabled()) {
+            break;
+          }
+
+          /*
+           * Without a metrics backend `ActiveJobsMetricService` never creates a
+           * worker for this queue, so waiting on its health would gate startup
+           * on a queue nothing consumes.
+           */
+          if (hasMetricsBackend()) {
+            healthIndicators.push(ActiveJobsMetricQueueServiceHealthIndicator);
+          }
           tokenList.push(ActiveJobsMetricQueueService);
           DYNAMIC_PROVIDERS.push(
             ActiveJobsMetricQueueService,
@@ -101,25 +116,37 @@ export class QueuesModule implements OnApplicationShutdown {
             ActiveJobsMetricWorkerService
           );
           break;
-        default:
+        case JobTopicNameEnum.TRANSLATION:
+          // ReNOVU: translation-queue is owned by TranslationQueueService (@novu/translation)
+          // and TranslationWorkerModule (apps/worker), not by QueuesModule.
           break;
+        default: {
+          const exhaustive: never = entity;
+          throw new Error(`Unhandled job topic in QueuesModule: ${exhaustive}`);
+        }
       }
     }
 
     DYNAMIC_PROVIDERS.push({
       provide: 'BULLMQ_LIST',
-      useFactory: (...args: any[]) => {
-        return args;
+      useFactory: (...queueServices: QueueBaseService[]) => {
+        return queueServices;
       },
       inject: tokenList,
     });
 
     DYNAMIC_PROVIDERS.push({
       provide: 'QUEUE_HEALTH_INDICATORS',
-      useFactory: (...args: any[]) => {
-        return args;
+      useFactory: (...indicators: IHealthIndicator[]) => {
+        return indicators;
       },
-      inject: healthIndicators,
+      /*
+       * These indicators only assert that the BullMQ client is up. Handing them
+       * to readiness once BullMQ is retired would make
+       * `ReadinessService.enableWorkers` block startup on a backend the
+       * deployment no longer uses.
+       */
+      inject: isBullMqEnabled() ? healthIndicators : [],
     });
 
     return {

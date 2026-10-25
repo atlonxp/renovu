@@ -1,8 +1,34 @@
-import { ApiServiceLevelEnum, OrganizationProductTypeEnum } from '@novu/shared';
+import { ApiServiceLevelEnum, UsageAlertRecipientsEnum } from '@novu/shared';
 import mongoose, { Schema } from 'mongoose';
 
 import { schemaOptions } from '../schema-default.options';
 import { OrganizationDBModel, PartnerTypeEnum } from './organization.entity';
+
+const usageLimitsSchema = new Schema(
+  {
+    workflowRuns: {
+      type: new Schema(
+        {
+          onDemandLimit: Schema.Types.Number,
+        },
+        { _id: false }
+      ),
+      required: false,
+    },
+    pauseAtLimit: Schema.Types.Boolean,
+    alerts: {
+      type: new Schema(
+        {
+          enabled: Schema.Types.Boolean,
+          sendTo: { type: Schema.Types.String, enum: UsageAlertRecipientsEnum },
+        },
+        { _id: false }
+      ),
+      required: false,
+    },
+  },
+  { _id: false }
+);
 
 const organizationSchema = new Schema<OrganizationDBModel>(
   {
@@ -66,6 +92,10 @@ const organizationSchema = new Schema<OrganizationDBModel>(
         type: Schema.Types.Boolean,
         default: false,
       },
+      agents: {
+        type: Schema.Types.Boolean,
+        default: false,
+      },
     },
     externalId: Schema.Types.String,
     stripeCustomerId: Schema.Types.String,
@@ -106,9 +136,8 @@ const organizationSchema = new Schema<OrganizationDBModel>(
       enum: ['pending', 'generating', 'completed', 'failed', 'skipped'],
       required: false,
     },
-    productType: {
-      type: Schema.Types.String,
-      enum: OrganizationProductTypeEnum,
+    usageLimits: {
+      type: usageLimitsSchema,
       required: false,
     },
   },

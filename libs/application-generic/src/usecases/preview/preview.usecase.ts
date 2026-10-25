@@ -13,6 +13,7 @@ import { ControlValueSanitizerService } from '../../services/control-value-sanit
 import { resolveHttpRequestBody, shouldIncludeBody } from '../../services/http-client/http-request.utils';
 import { buildVariables } from '../../utils/build-variables';
 import { buildNovuSignatureHeader } from '../../utils/hmac';
+import { withStitchedProviderOverrides } from '../../utils/provider-overrides';
 import { isStepResolverActive } from '../../utils/step-resolver-control-state';
 import { BuildStepDataUsecase } from '../build-step-data';
 import { CreateVariablesObjectCommand } from '../create-variables-object/create-variables-object.command';
@@ -23,6 +24,7 @@ import { GetWorkflowByIdsCommand, GetWorkflowByIdsUseCase } from '../workflow';
 import { PreviewCommand } from './preview.command';
 import { PayloadMergerService } from './services/payload-merger.service';
 import { PreviewPayloadProcessorService } from './services/preview-payload-processor.service';
+import { buildStepPreview } from './utils/build-step-preview';
 import { PreviewErrorHandler } from './utils/preview-error-handler';
 
 @Injectable()
@@ -101,7 +103,8 @@ export class PreviewUsecase {
 
         return {
           result: {
-            preview: executeOutput.outputs as Record<string, unknown>,
+            preview: buildStepPreview(context.stepData.type, executeOutput),
+            // biome-ignore lint/plugin: preview results are keyed by the step type, which the response DTO types as a channel
             type: context.stepData.type as unknown as ChannelTypeEnum,
           },
           previewPayloadExample: cleanedPayloadExample,
@@ -123,6 +126,7 @@ export class PreviewUsecase {
           return {
             result: {
               preview: {},
+              // biome-ignore lint/plugin: preview results are keyed by the step type, which the response DTO types as a channel
               type: context.stepData.type as unknown as ChannelTypeEnum,
               error: this.errorHandler.extractErrorContent(error),
             },
@@ -135,6 +139,7 @@ export class PreviewUsecase {
         return {
           result: {
             preview: {},
+            // biome-ignore lint/plugin: preview results are keyed by the step type, which the response DTO types as a channel
             type: context.stepData.type as unknown as ChannelTypeEnum,
           },
           previewPayloadExample: cleanedPayloadExample,
@@ -210,7 +215,16 @@ export class PreviewUsecase {
   private async initializePreviewContext(command: PreviewCommand) {
     // get step with control values, variables, issues etc.
     const stepData = await this.getStepData(command);
-    const controlValues = command.generatePreviewRequestDto.controlValues || stepData.controls.values || {};
+    // Preview requests from the editor may still nest providerOverrides / integrationOverrides inside controlValues.
+    // When falling back to persisted step data, stitch the sibling fields back into controls
+    // so the bridge/tool output renderer contract stays unchanged.
+    const controlValues = command.generatePreviewRequestDto.controlValues
+      ? command.generatePreviewRequestDto.controlValues
+      : withStitchedProviderOverrides(
+          stepData.controls.values || {},
+          stepData.providerOverrides,
+          stepData.integrationOverrides
+        );
     const workflow = await this.findWorkflow(command);
 
     // extract all variables from the control values and build the variables object
@@ -306,6 +320,7 @@ export class PreviewUsecase {
       PreviewStepCommand.create({
         payload: previewPayloadExample.payload || {},
         subscriber: previewPayloadExample.subscriber,
+        actor: previewPayloadExample.actor,
         controls: controlValues || {},
         context: previewPayloadExample.context as ContextResolved,
         environmentId: command.user.environmentId,

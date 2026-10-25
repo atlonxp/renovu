@@ -1,6 +1,6 @@
 import { decryptCredentials, encryptCredentials } from '@novu/application-generic';
 import * as AgentRuntimeFactoryModule from '@novu/application-generic/build/main/agent-runtimes/agent-runtime.factory';
-import { AgentRepository, IntegrationRepository } from '@novu/dal';
+import { AgentMcpServerRepository, AgentRepository, IntegrationRepository } from '@novu/dal';
 import { AgentRuntimeProviderIdEnum, IntegrationKindEnum } from '@novu/shared';
 import { UserSession } from '@novu/testing';
 import { expect } from 'chai';
@@ -14,6 +14,7 @@ const FAKE_EXTERNAL_ENV_ID = 'env_01DemoClaudeE2E';
 
 const integrationRepository = new IntegrationRepository();
 const agentRepository = new AgentRepository();
+const agentMcpServerRepository = new AgentMcpServerRepository();
 
 function buildMockProvider(overrides: Partial<Record<string, sinon.SinonStub>> = {}) {
   return {
@@ -31,6 +32,7 @@ function buildMockProvider(overrides: Partial<Record<string, sinon.SinonStub>> =
       tools: [],
       skills: [],
     }),
+    refreshPlatformDefinition: sinon.stub().resolves(undefined),
     updateConfig: sinon.stub().resolves({
       model: 'claude-3-5-sonnet-20241022',
       systemPrompt: '',
@@ -321,6 +323,53 @@ describe('Demo Managed Claude #novu-v2', () => {
     expect(agent).to.equal(null);
   });
 
+  it('should drop demo-unavailable MCPs from Mongo and send no MCPs to createAgent', async () => {
+    const integrationId = await createNovuAnthropicIntegration();
+    const identifier = `e2e-demo-mcp-filter-${Date.now()}`;
+    createdAgentIdentifiers.push(identifier);
+
+    // `sentry` (dcr) connects through Novu's own OAuth and stays; `slack` (provider-managed) needs
+    // the runtime provider's vault UI the demo never exposes, so it must be filtered out.
+    const res = await session.testAgent.post('/v1/agents').send({
+      name: 'Demo MCP Filter Agent',
+      identifier,
+      runtime: 'managed',
+      managedRuntime: {
+        providerId: AgentRuntimeProviderIdEnum.NovuAnthropic,
+        integrationId,
+        systemPrompt: 'You are a demo agent.',
+        mcpServers: ['sentry', 'slack'],
+      },
+    });
+
+    expect(res.status, `create failed: ${JSON.stringify(res.body)}`).to.equal(201);
+    expect(mockProvider.createAgent.calledOnce, 'createAgent should run once').to.equal(true);
+
+    // Demo integration filters provider-managed Slack from Mongo; both sentry and
+    // slack are subscriber OAuth so neither belongs on the shared agent at create.
+    const sentToProvider = mockProvider.createAgent.firstCall.args[0].mcpServers as Array<{ name: string }> | undefined;
+    expect(sentToProvider ?? []).to.deep.equal([]);
+
+    const agent = await agentRepository.findOne(
+      {
+        identifier,
+        _environmentId: session.environment._id,
+        _organizationId: session.organization._id,
+      },
+      ['_id']
+    );
+
+    const persistedRows = await agentMcpServerRepository.findByAgent({
+      organizationId: session.organization._id,
+      environmentId: session.environment._id,
+      agentId: agent?._id ?? '',
+    });
+
+    const persistedMcpIds = persistedRows.map((row) => row.mcpId);
+    expect(persistedMcpIds).to.deep.equal(['sentry']);
+    expect(persistedMcpIds).to.not.include('slack');
+  });
+
   it('should migrate agent runtime to user Anthropic integration', async () => {
     const demoIntegrationId = await createNovuAnthropicIntegration();
     const identifier = `e2e-demo-migrate-${Date.now()}`;
@@ -375,5 +424,53 @@ describe('Demo Managed Claude #novu-v2', () => {
     });
 
     expect(demoIntegration).to.equal(null);
+  });
+
+  it('should keep the demo integration when other demo agents remain after migrating one', async () => {
+    const demoIntegrationId = await createNovuAnthropicIntegration();
+    const migratedIdentifier = `e2e-demo-migrate-one-${Date.now()}`;
+    const remainingIdentifier = `e2e-demo-migrate-remaining-${Date.now()}`;
+    createdAgentIdentifiers.push(migratedIdentifier, remainingIdentifier);
+
+    for (const identifier of [migratedIdentifier, remainingIdentifier]) {
+      const createRes = await session.testAgent.post('/v1/agents').send({
+        name: 'Migrate Demo Agent',
+        identifier,
+        runtime: 'managed',
+        managedRuntime: {
+          providerId: AgentRuntimeProviderIdEnum.NovuAnthropic,
+          integrationId: demoIntegrationId,
+        },
+      });
+
+      expect(createRes.status, `create failed: ${JSON.stringify(createRes.body)}`).to.equal(201);
+    }
+
+    const userIntegrationRes = await session.testAgent.post('/v1/integrations').send({
+      providerId: AgentRuntimeProviderIdEnum.Anthropic,
+      kind: IntegrationKindEnum.AGENT,
+      credentials: { apiKey: 'sk-user-anthropic-key' },
+      active: true,
+      name: `user-anthropic-e2e-${Date.now()}`,
+    });
+
+    expect(userIntegrationRes.status).to.equal(201);
+    const userIntegrationId: string =
+      userIntegrationRes.body._id ?? userIntegrationRes.body.data?._id ?? userIntegrationRes.body.data?.id;
+    createdIntegrationIds.push(userIntegrationId);
+
+    const migrateRes = await session.testAgent
+      .post(`/v1/agents/${encodeURIComponent(migratedIdentifier)}/migrate-runtime`)
+      .send({ integrationId: userIntegrationId });
+
+    expect(migrateRes.status).to.equal(201);
+
+    const demoIntegration = await integrationRepository.findOne({
+      _id: demoIntegrationId,
+      _environmentId: session.environment._id,
+      _organizationId: session.organization._id,
+    });
+
+    expect(demoIntegration).to.not.equal(null);
   });
 });

@@ -1,13 +1,13 @@
 import { PushProviderIdEnum } from '@novu/shared';
-import { ChannelTypeEnum, IPushOptions, IPushProvider, ISendMessageSuccessResponse } from '@novu/stateless';
+import { IPushOptions, IPushProvider, ISendMessageSuccessResponse } from '@novu/stateless';
 import apn from '@parse/node-apn';
-import { BaseProvider, CasingEnum } from '../../../base.provider';
+import { CasingEnum } from '../../../base.provider';
 import { WithPassthrough } from '../../../utils/types';
+import { PushBaseProvider } from '../push.base-provider';
 
-export class APNSPushProvider extends BaseProvider implements IPushProvider {
+export class APNSPushProvider extends PushBaseProvider implements IPushProvider {
   id = PushProviderIdEnum.APNS;
   protected casing: CasingEnum = CasingEnum.CAMEL_CASE;
-  channelType = ChannelTypeEnum.PUSH as ChannelTypeEnum.PUSH;
 
   protected override keyCaseObject: Record<string, string> = {
     contentAvailable: 'content-available',
@@ -47,7 +47,7 @@ export class APNSPushProvider extends BaseProvider implements IPushProvider {
     options: IPushOptions,
     bridgeProviderData: WithPassthrough<Record<string, unknown>> = {}
   ): Promise<ISendMessageSuccessResponse> {
-    delete (options.overrides as any)?.notificationIdentifiers;
+    delete (options.overrides as { notificationIdentifiers?: unknown } | undefined)?.notificationIdentifiers;
     const transformedBody = this.transform(bridgeProviderData, {
       body: options.content,
       title: options.title,
@@ -69,7 +69,12 @@ export class APNSPushProvider extends BaseProvider implements IPushProvider {
 
     if (res.failed.length > 0) {
       throw new Error(
-        res.failed.map((failed) => `${failed.device} failed for reason: ${failed.response.reason}`).join(',')
+        res.failed
+          .map(
+            (failed) =>
+              `${failed.device} failed for reason: ${failed.response?.reason ?? failed.error?.message ?? 'unknown'}`
+          )
+          .join(',')
       );
     }
 

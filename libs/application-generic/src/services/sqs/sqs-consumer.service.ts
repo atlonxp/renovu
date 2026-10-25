@@ -1,10 +1,11 @@
-import { DeleteMessageCommand, type Message } from '@aws-sdk/client-sqs';
+import { ChangeMessageVisibilityCommand, DeleteMessageCommand, type Message } from '@aws-sdk/client-sqs';
 import { Logger } from '@nestjs/common';
 import { JobTopicNameEnum } from '@novu/shared';
 import { Consumer } from 'sqs-consumer';
 import { PinoLogger } from '../../logging';
 import { SqsService } from './sqs.service';
 import { SQS_LARGE_PAYLOAD_MARKER, SqsPayloadOffloadService } from './sqs-payload-offload.service';
+import { isSqsRetryError } from './sqs-retry.error';
 import {
   ISqsConsumerOptions,
   ISqsMessageMeta,
@@ -241,10 +242,35 @@ class ConcurrencyPool {
 }
 
 export class SqsConsumerService {
+  /**
+   * Every consumer alive in this process, so shutdown can ask "is anything
+   * still being processed?" without threading each consumer through DI.
+   * Consumers are created by `WorkerBaseService` with `new`, and the only
+   * caller that needs the aggregate is `ClickHouseBatchService`, which lives
+   * in a different module tree.
+   */
+  private static readonly liveConsumers = new Set<SqsConsumerService>();
+
+  /** Messages currently being processed across every SQS consumer. */
+  public static getTotalInFlightCount(): number {
+    let total = 0;
+
+    for (const consumer of SqsConsumerService.liveConsumers) {
+      total += consumer.pool.activeCount;
+    }
+
+    return total;
+  }
+
+  public static hasLiveConsumers(): boolean {
+    return SqsConsumerService.liveConsumers.size > 0;
+  }
+
   private consumer: Consumer;
   private pool: ConcurrencyPool;
   private queueUrl: string;
   private payloadOffload?: SqsPayloadOffloadService;
+  private visibilityTimeout: number;
   private isStarted = false;
   private isPaused = false;
 
@@ -263,19 +289,35 @@ export class SqsConsumerService {
 
     const batchSize = this.options.maxNumberOfMessages ?? SQS_DEFAULT_BATCH_SIZE;
     const waitTime = this.options.waitTimeSeconds ?? SQS_DEFAULT_WAIT_TIME_SECONDS;
-    const visibilityTimeout = this.options.visibilityTimeout ?? SQS_DEFAULT_VISIBILITY_TIMEOUT;
+    this.visibilityTimeout = this.options.visibilityTimeout ?? SQS_DEFAULT_VISIBILITY_TIMEOUT;
     const maxConcurrency = this.options.maxConcurrency ?? SQS_DEFAULT_MAX_CONCURRENCY;
 
     this.pool = new ConcurrencyPool(maxConcurrency);
+
+    /*
+     * `heartbeatInterval` covers the window where a received message is
+     * waiting for a concurrency slot (handleMessage is pending in
+     * pool.acquire): sqs-consumer keeps extending its visibility until
+     * handleMessage resolves. Once processing is dispatched, our own
+     * per-message heartbeat in processAndDelete takes over.
+     */
+    const heartbeatIntervalSeconds = Math.floor(this.visibilityTimeout / 2);
 
     this.consumer = Consumer.create({
       queueUrl: this.queueUrl,
       sqs: this.sqsService.getClient(),
       batchSize,
       waitTimeSeconds: waitTime,
-      visibilityTimeout,
+      visibilityTimeout: this.visibilityTimeout,
+      ...(heartbeatIntervalSeconds > 0 && { heartbeatInterval: heartbeatIntervalSeconds }),
       shouldDeleteMessages: false,
-      messageSystemAttributeNames: ['ApproximateReceiveCount'],
+      /*
+       * MessageGroupId is the organization id. Requested purely for
+       * observability - it is absent from `Message` unless asked for, and it
+       * is what lets a slow or failing message be attributed to a tenant.
+       * Fairness itself is handled by SQS fair queues, not by this consumer.
+       */
+      messageSystemAttributeNames: ['ApproximateReceiveCount', 'MessageGroupId'],
       handleMessage: async (message: Message): Promise<Message> => {
         try {
           await this.pool.acquire();
@@ -288,7 +330,11 @@ export class SqsConsumerService {
       },
     });
 
-    this.setupEventHandlers();
+    this.consumer.on('error', (err) => {
+      Logger.error({ error: err.message, topic: this.topic }, 'SQS consumer error', LOG_CONTEXT);
+    });
+
+    SqsConsumerService.liveConsumers.add(this);
 
     Logger.log({ topic: this.topic, batchSize, maxConcurrency }, 'SQS consumer initialized', LOG_CONTEXT);
   }
@@ -298,29 +344,169 @@ export class SqsConsumerService {
    *
    * On success: delete the message from SQS (manual ack), release the slot.
    * On failure: don't delete - SQS retries via visibility timeout, release the slot.
+   *
+   * A visibility heartbeat runs for the whole processing window, mirroring
+   * BullMQ's lock renewal: a slow-but-healthy job keeps its message invisible
+   * for as long as the processor is alive, and redelivery only happens when
+   * the worker actually dies (heartbeat stops, visibility expires).
    */
   private processAndDelete(message: Message): void {
     const messageId = message.MessageId || 'unknown';
+    const startedAt = Date.now();
+    const stopVisibilityHeartbeat = this.startVisibilityHeartbeat(message, messageId, startedAt);
 
     this.processMessage(message)
       .then(async () => {
+        /*
+         * Must precede the delete: a tick landing after the message is gone
+         * always fails with `Message does not exist`, which is indistinguishable
+         * in the logs from a genuinely expired visibility. The `finally` below
+         * repeats it only as a belt-and-braces guard - `clearInterval` on an
+         * already-cleared timer is a no-op.
+         */
+        stopVisibilityHeartbeat();
         await this.deleteMessageWithRetry(message, messageId);
       })
-      .catch((error) => {
+      .catch(async (error) => {
+        stopVisibilityHeartbeat();
+
+        const cause = isSqsRetryError(error) ? error.cause : error;
         Logger.error(
           {
-            error: error instanceof Error ? error.message : String(error),
+            error: cause instanceof Error ? cause.message : String(cause),
             messageId,
             topic: this.topic,
+            processingMs: Date.now() - startedAt,
             ...extractSqsMessageContext(message.Body),
           },
           'SQS message failed, will be retried via visibility timeout',
           LOG_CONTEXT
         );
+
+        if (isSqsRetryError(error)) {
+          await this.applyRetryBackoff(message, messageId, error.retryDelayMs);
+        }
       })
       .finally(() => {
+        stopVisibilityHeartbeat();
         this.pool.release();
       });
+  }
+
+  /**
+   * Shorten the message's visibility so the retry lands on the worker's
+   * requested cadence rather than the consumer-wide flat timeout.
+   *
+   * Best-effort: if this fails the message still reappears when its current
+   * visibility lapses, so the retry happens either way - just later.
+   */
+  private async applyRetryBackoff(message: Message, messageId: string, retryDelayMs: number): Promise<void> {
+    const visibilityTimeout = Math.max(Math.ceil(retryDelayMs / 1000), 0);
+
+    try {
+      await this.sqsService.getClient().send(
+        new ChangeMessageVisibilityCommand({
+          QueueUrl: this.queueUrl,
+          ReceiptHandle: message.ReceiptHandle,
+          VisibilityTimeout: visibilityTimeout,
+        })
+      );
+
+      this.logger?.debug(
+        { messageId, topic: this.topic, retryDelayMs, visibilityTimeout },
+        'Applied retry backoff to SQS message visibility'
+      );
+    } catch (error) {
+      Logger.warn(
+        {
+          error: error instanceof Error ? error.message : String(error),
+          messageId,
+          topic: this.topic,
+          visibilityTimeout,
+        },
+        'Failed to apply retry backoff, message will retry on the default visibility timeout',
+        LOG_CONTEXT
+      );
+    }
+  }
+
+  /**
+   * Periodically resets the message's visibility timeout while its processor
+   * is running - the SQS equivalent of BullMQ's lock renewal (which extends
+   * the job lock at half the lock duration for as long as the worker is
+   * alive). Prevents redelivery of long-running jobs and the follow-up
+   * `ReceiptHandleIsInvalid` delete failures that push already-processed
+   * messages toward the DLQ.
+   *
+   * Returns a stop function; the caller must invoke it when processing ends
+   * (success or failure). The interval is unref'd so it never keeps the
+   * process alive on shutdown.
+   */
+  private startVisibilityHeartbeat(message: Message, messageId: string, startedAt: number): () => void {
+    const intervalMs = Math.max(1_000, Math.floor((this.visibilityTimeout * 1000) / 2));
+    const receiveCount = parseInt(message.Attributes?.ApproximateReceiveCount || '1', 10);
+    const groupId = message.Attributes?.MessageGroupId;
+    let extensionCount = 0;
+
+    const timer = setInterval(() => {
+      const elapsedMs = Date.now() - startedAt;
+
+      this.sqsService
+        .getClient()
+        .send(
+          new ChangeMessageVisibilityCommand({
+            QueueUrl: this.queueUrl,
+            ReceiptHandle: message.ReceiptHandle,
+            VisibilityTimeout: this.visibilityTimeout,
+          })
+        )
+        .then(() => {
+          extensionCount += 1;
+          const context = { messageId, topic: this.topic, groupId, elapsedMs, extensionCount, receiveCount };
+          const event = 'Extended SQS message visibility (heartbeat)';
+
+          /*
+           * Only the first extension is worth an info line - it marks a job
+           * crossing into "running long". Later ones are demoted because a slow
+           * downstream provider puts every in-flight message over the threshold
+           * at once, which is exactly when logs need to stay readable.
+           */
+          if (extensionCount === 1) {
+            Logger.log(context, event, LOG_CONTEXT);
+          } else {
+            this.logger?.debug(context, event);
+          }
+        })
+        .catch((error: unknown) => {
+          const errorName = error instanceof Error ? error.name : undefined;
+          // MessageNotInflight / ReceiptHandleIsInvalid: the message already
+          // expired or was redelivered - further extensions are pointless.
+          const isPermanent = isNonRetryableDeleteError(error) || errorName === 'MessageNotInflight';
+
+          Logger.warn(
+            {
+              error: error instanceof Error ? error.message : String(error),
+              errorName,
+              messageId,
+              topic: this.topic,
+              groupId,
+              processingMs: elapsedMs,
+              extensionCount,
+              receiveCount,
+              stoppingHeartbeat: isPermanent,
+            },
+            'Failed to extend SQS message visibility',
+            LOG_CONTEXT
+          );
+
+          if (isPermanent) {
+            clearInterval(timer);
+          }
+        });
+    }, intervalMs);
+    timer.unref();
+
+    return () => clearInterval(timer);
   }
 
   /**
@@ -399,6 +585,21 @@ export class SqsConsumerService {
     const resolvedBody = this.payloadOffload ? await this.payloadOffload.maybeResolve(rawBody) : rawBody;
 
     const data = JSON.parse(resolvedBody);
+
+    /*
+     * The producer decides to offload based on its own bucket config, and
+     * `maybeResolve` returns the body untouched when this process has none.
+     * Without this check the pointer itself would be handed to the processor
+     * as the job payload, running the job with none of its real fields. Fail
+     * instead: the message is redelivered and eventually reaches the DLQ.
+     */
+    if (data && typeof data === 'object' && SQS_LARGE_PAYLOAD_MARKER in data) {
+      throw new Error(
+        'Received an S3-offloaded SQS payload that could not be resolved. ' +
+          'SQS_PAYLOAD_OFFLOAD_BUCKET is set on the producer but not on this consumer.'
+      );
+    }
+
     const receiveCount = parseInt(message.Attributes?.ApproximateReceiveCount || '1', 10);
     const meta: ISqsMessageMeta = {
       messageId: message.MessageId || 'unknown',
@@ -406,30 +607,6 @@ export class SqsConsumerService {
     };
 
     await this.processor(data, meta);
-  }
-
-  private setupEventHandlers(): void {
-    this.consumer.on('error', (err) => {
-      Logger.error({ error: err.message, topic: this.topic }, 'SQS consumer error', LOG_CONTEXT);
-    });
-
-    this.consumer.on('message_processed', (message) => {
-      this.logger?.debug(
-        {
-          messageId: message.MessageId,
-          topic: this.topic,
-        },
-        'SQS message dispatched to processing pool'
-      );
-    });
-
-    this.consumer.on('started', () => {
-      Logger.debug({ topic: this.topic }, 'SQS consumer started (event)', LOG_CONTEXT);
-    });
-
-    this.consumer.on('stopped', () => {
-      Logger.debug({ topic: this.topic }, 'SQS consumer stopped (event)', LOG_CONTEXT);
-    });
   }
 
   public start(): void {
@@ -471,7 +648,7 @@ export class SqsConsumerService {
 
     if (!this.isStarted) {
       this.pool.close();
-      await this.pool.drain(drainTimeoutMs);
+      this.deregisterWhenDrained(await this.pool.drain(drainTimeoutMs));
 
       return;
     }
@@ -488,6 +665,7 @@ export class SqsConsumerService {
     );
 
     const drained = await this.pool.drain(drainTimeoutMs);
+    this.deregisterWhenDrained(drained);
 
     if (drained) {
       Logger.log({ topic: this.topic }, 'SQS consumer fully drained and stopped', LOG_CONTEXT);
@@ -498,6 +676,31 @@ export class SqsConsumerService {
         LOG_CONTEXT
       );
     }
+  }
+
+  /**
+   * Deregister only once nothing is in flight, so a shutdown hook asking for the
+   * in-flight count always gets a truthful answer.
+   *
+   * A timed-out drain leaves processors running, and `ClickHouseBatchService`
+   * clears its buffers as soon as the count reaches zero - deregistering here
+   * would drop the rows those processors are still writing. Callers are not kept
+   * waiting: `stop` returns on the timeout and the rest happens in the
+   * background, bounded on the consumer side by the visibility timeout and on
+   * the shutdown side by the caller's own attempt limit.
+   */
+  private deregisterWhenDrained(drained: boolean): void {
+    if (drained) {
+      SqsConsumerService.liveConsumers.delete(this);
+
+      return;
+    }
+
+    void this.pool.drain().then(() => {
+      SqsConsumerService.liveConsumers.delete(this);
+
+      Logger.log({ topic: this.topic }, 'SQS consumer drained after its stop timeout', LOG_CONTEXT);
+    });
   }
 
   public getStatus(): { isRunning: boolean; isPaused: boolean; activeSlots: number; waitingSlots: number } {

@@ -1,7 +1,7 @@
 import { expect } from 'chai';
 import { AdditionalOperation, RulesLogic } from 'json-logic-js';
 
-import { evaluateRules } from './query-parser.service';
+import { evaluateRules, extractRuleVariables } from './query-parser.service';
 
 describe('QueryParserService', () => {
   describe('Smoke Tests', () => {
@@ -236,6 +236,88 @@ describe('QueryParserService', () => {
         const { result, error } = evaluateRules(rule, data);
         expect(error).to.be.undefined;
         expect(result).to.be.false;
+      });
+    });
+
+    describe('isEmpty operator', () => {
+      it('should return true when the string is empty', () => {
+        const rule: RulesLogic<AdditionalOperation> = {
+          isEmpty: [{ var: 'steps.http-step.marketingName' }],
+        };
+        const { result, error } = evaluateRules(rule, {
+          steps: { 'http-step': { marketingName: '' } },
+        });
+
+        expect(error).to.be.undefined;
+        expect(result).to.be.true;
+      });
+
+      it('should return false when the string is non-empty', () => {
+        const rule: RulesLogic<AdditionalOperation> = { isEmpty: [{ var: 'value' }] };
+        const { result, error } = evaluateRules(rule, { value: ' ' });
+
+        expect(error).to.be.undefined;
+        expect(result).to.be.false;
+      });
+
+      it('should return false when the value is missing, null, or not a string', () => {
+        const rule: RulesLogic<AdditionalOperation> = { isEmpty: [{ var: 'value' }] };
+
+        expect(evaluateRules(rule, {}).result).to.be.false;
+        expect(evaluateRules(rule, { value: null }).result).to.be.false;
+        expect(evaluateRules(rule, { value: [] }).result).to.be.false;
+      });
+    });
+
+    describe('isNonEmpty operator', () => {
+      it('should return true when the string is non-empty', () => {
+        const rule: RulesLogic<AdditionalOperation> = { isNonEmpty: [{ var: 'value' }] };
+        const { result, error } = evaluateRules(rule, { value: ' ' });
+
+        expect(error).to.be.undefined;
+        expect(result).to.be.true;
+      });
+
+      it('should return false when the string is empty', () => {
+        const rule: RulesLogic<AdditionalOperation> = { isNonEmpty: [{ var: 'value' }] };
+        const { result, error } = evaluateRules(rule, { value: '' });
+
+        expect(error).to.be.undefined;
+        expect(result).to.be.false;
+      });
+
+      it('should return false when the value is missing, null, or not a string', () => {
+        const rule: RulesLogic<AdditionalOperation> = { isNonEmpty: [{ var: 'value' }] };
+
+        expect(evaluateRules(rule, {}).result).to.be.false;
+        expect(evaluateRules(rule, { value: null }).result).to.be.false;
+        expect(evaluateRules(rule, { value: 1 }).result).to.be.false;
+      });
+    });
+
+    describe('existing skip rules', () => {
+      it('should keep stored equals rules matching the comparison value', () => {
+        const rule: RulesLogic<AdditionalOperation> = { '==': [{ var: 'payload.foo' }, 'high'] };
+
+        expect(evaluateRules(rule, { payload: { foo: 'high' } }).result).to.be.true;
+        expect(evaluateRules(rule, { payload: { foo: '' } }).result).to.be.false;
+        expect(evaluateRules(rule, { payload: { foo: 'low' } }).result).to.be.false;
+      });
+
+      it('should keep stored is-null comparison rules matching the same values as before', () => {
+        const rule: RulesLogic<AdditionalOperation> = { '==': [{ var: 'payload.foo' }, null] };
+
+        expect(evaluateRules(rule, { payload: { foo: null } }).result).to.be.true;
+        expect(evaluateRules(rule, { payload: { foo: '' } }).result).to.be.true;
+        expect(evaluateRules(rule, { payload: { foo: 'Acme' } }).result).to.be.false;
+      });
+
+      it('should keep stored is-not-null comparison rules matching the same values as before', () => {
+        const rule: RulesLogic<AdditionalOperation> = { '!=': [{ var: 'payload.foo' }, null] };
+
+        expect(evaluateRules(rule, { payload: { foo: 'Acme' } }).result).to.be.true;
+        expect(evaluateRules(rule, { payload: { foo: '' } }).result).to.be.false;
+        expect(evaluateRules(rule, { payload: { foo: null } }).result).to.be.false;
       });
     });
 
@@ -741,6 +823,47 @@ describe('QueryParserService', () => {
           expect(result).to.be.true;
         });
       });
+    });
+  });
+
+  describe('extractRuleVariables', () => {
+    it('should resolve referenced variable values from data', () => {
+      const rule: RulesLogic<AdditionalOperation> = {
+        and: [
+          { '=': [{ var: 'payload.tier' }, 'pro'] },
+          { '>': [{ var: 'payload.count' }, 5] },
+          { contains: [{ var: 'subscriber.data.plan' }, 'monthly'] },
+        ],
+      };
+      const data = {
+        payload: { tier: 'free', count: 10 },
+        subscriber: { data: { plan: 'monthly-basic' } },
+      };
+
+      const variables = extractRuleVariables(rule, data);
+
+      expect(variables).to.deep.equal({
+        'payload.tier': 'free',
+        'payload.count': 10,
+        'subscriber.data.plan': 'monthly-basic',
+      });
+    });
+
+    it('should return undefined for paths missing from data', () => {
+      const rule: RulesLogic<AdditionalOperation> = { '=': [{ var: 'payload.missing.deep' }, 'x'] };
+      const data = { payload: {} };
+
+      const variables = extractRuleVariables(rule, data);
+
+      expect(variables).to.have.property('payload.missing.deep', undefined);
+    });
+
+    it('should return an empty object when the rule references no variables', () => {
+      const rule: RulesLogic<AdditionalOperation> = { '=': [1, 1] };
+
+      const variables = extractRuleVariables(rule, { payload: { value: 1 } });
+
+      expect(variables).to.deep.equal({});
     });
   });
 });

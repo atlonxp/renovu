@@ -1,5 +1,4 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
-import { ModuleRef } from '@nestjs/core';
 import {
   CreateExecutionDetails,
   CreateExecutionDetailsCommand,
@@ -7,19 +6,13 @@ import {
   EmailControlType,
   GetLayoutCommand,
   GetLayoutUseCase,
-  hasShow,
   InstrumentUsecase,
-  isButtonNode,
-  isImageNode,
-  isLinkNode,
-  isRepeatNode,
-  isVariableNode,
   LayoutControlType,
-  MailyAttrsEnum,
   PinoLogger,
   removeBrandingFromHtml,
   replaceMailyNodesByCondition,
   sanitizeHTML,
+  transformMailyContent,
   wrapMailyInLiquid,
 } from '@novu/application-generic';
 import {
@@ -47,6 +40,7 @@ import { Liquid } from 'liquidjs';
 import { GetOrganizationSettingsCommand } from '../../../organization/usecases/get-organization-settings/get-organization-settings.command';
 import { GetOrganizationSettings } from '../../../organization/usecases/get-organization-settings/get-organization-settings.usecase';
 import { BaseTranslationRendererUsecase } from './base-translation-renderer.usecase';
+import { ControlsTranslationService } from './controls-translation.service';
 import { NOVU_BRANDING_HTML } from './novu-branding-html';
 import { FullPayloadForRender, RenderCommand } from './render-command';
 
@@ -57,7 +51,12 @@ type TranslationContext = {
   resourceId: string;
 };
 
-type MailyJSONMarks = NonNullable<MailyJSONContent['marks']>[number];
+interface TranslatableEmailControls {
+  [key: string]: unknown;
+  subject: string;
+  from?: Pick<NonNullable<EmailControlType['from']>, 'name'>;
+  preheader?: string;
+}
 
 export class EmailOutputRendererCommand extends RenderCommand {
   dbWorkflow: NotificationTemplateEntity;
@@ -84,14 +83,14 @@ export class EmailOutputRendererUsecase extends BaseTranslationRendererUsecase {
 
   constructor(
     private getOrganizationSettings: GetOrganizationSettings,
-    protected moduleRef: ModuleRef,
-    protected logger: PinoLogger,
+    logger: PinoLogger,
+    controlsTranslationService: ControlsTranslationService,
     private controlValuesRepository: ControlValuesRepository,
     private getLayoutUseCase: GetLayoutUseCase,
     private jobRepository: JobRepository,
     private createExecutionDetails: CreateExecutionDetails
   ) {
-    super(moduleRef, logger);
+    super(logger, controlsTranslationService);
     /**
      * Custom outputEscape function for email rendering that handles object serialization
      * without escaping HTML content.
@@ -131,19 +130,23 @@ export class EmailOutputRendererUsecase extends BaseTranslationRendererUsecase {
       disableOutputSanitization,
       layoutId: stepLayoutId,
       from,
+      replyTo,
+      preheader,
+      useProviderDefaults,
     } = renderCommand.controlValues as EmailControlType;
 
-    if (!body || typeof body !== 'string') {
-      /**
-       * Force type mapping in case undefined control.
-       * This passes responsibility to framework to throw type validation exceptions
-       * rather than handling invalid types here.
-       */
+    const controlMeta = {
+      ...(from && { from }),
+      ...(replyTo && { replyTo }),
+      ...(preheader !== undefined && { preheader }),
+      ...(useProviderDefaults !== undefined && { useProviderDefaults }),
+    };
 
+    if (!body || typeof body !== 'string') {
       return {
         subject: controlSubject as string,
         body: body as string,
-        ...(from && { from }),
+        ...controlMeta,
       };
     }
 
@@ -160,29 +163,52 @@ export class EmailOutputRendererUsecase extends BaseTranslationRendererUsecase {
 
     const { _environmentId: environmentId, _organizationId: organizationId, _id: workflowId } = dbWorkflow;
 
-    const workflowTranslationContext = await this.createTranslationContext({
-      environmentId,
-      organizationId,
-      resourceId: workflowId,
-      resourceType: LocalizationResourceEnum.WORKFLOW,
-      locale,
-      organization,
-      resourceEntity: dbWorkflow,
-    });
+    const [translatedControls, workflowTranslationContext] = await Promise.all([
+      this.processTranslations({
+        controls: {
+          subject: controlSubject as string,
+          ...(from?.name !== undefined && { from: { name: from.name } }),
+          ...(preheader !== undefined && { preheader }),
+        },
+        variables: fullPayloadForRender,
+        environmentId,
+        organizationId,
+        resourceId: workflowId,
+        resourceType: LocalizationResourceEnum.WORKFLOW,
+        locale,
+        organization,
+        resourceEntity: dbWorkflow,
+      }) as Promise<TranslatableEmailControls>,
+      this.createTranslationContext({
+        environmentId,
+        organizationId,
+        resourceId: workflowId,
+        resourceType: LocalizationResourceEnum.WORKFLOW,
+        locale,
+        organization,
+        resourceEntity: dbWorkflow,
+      }),
+    ]);
 
-    // Step 1: Apply translations to subject (already liquid-interpolated)
-    const translatedSubject = await this.processSubjectTranslations(
-      controlSubject as string,
-      fullPayloadForRender,
-      environmentId,
-      organizationId,
-      workflowId,
-      locale,
-      organization,
-      workflowTranslationContext
-    );
+    const translatedSubject = decodeHTML(this.unescapeJsonString(translatedControls.subject));
+    const translatedFromName =
+      translatedControls.from?.name === undefined
+        ? undefined
+        : decodeHTML(this.unescapeJsonString(translatedControls.from.name));
+    const translatedPreheader =
+      translatedControls.preheader === undefined
+        ? undefined
+        : decodeHTML(this.unescapeJsonString(translatedControls.preheader));
+    const translatedFrom = from ? { ...from, ...(from.name !== undefined && { name: translatedFromName }) } : undefined;
 
-    // Step 2: Process body content (with translations applied before rendering)
+    const translatedControlMeta = {
+      ...(translatedFrom && { from: translatedFrom }),
+      ...(replyTo && { replyTo }),
+      ...(preheader !== undefined && { preheader: translatedPreheader }),
+      ...(useProviderDefaults !== undefined && { useProviderDefaults }),
+    };
+
+    // Process body content with translations applied before rendering
     const renderedHtml = await this.renderWithLayout({
       body,
       stepLayoutId,
@@ -199,25 +225,26 @@ export class EmailOutputRendererUsecase extends BaseTranslationRendererUsecase {
       workflowTranslationContext,
     });
 
-    // Step 3: Add Novu branding
+    // Add Novu branding
     const htmlWithBranding = await this.appendNovuBranding(renderedHtml, organizationId, organization);
     const cleanedHtml = this.cleanupRenderedHtml(htmlWithBranding);
+    const htmlWithPreheader = injectRenderedPreheader(cleanedHtml, translatedPreheader);
 
-    // Step 4: Sanitize output if needed
+    // Sanitize output if needed
     if (disableOutputSanitization) {
       return {
         subject: translatedSubject,
-        body: cleanedHtml,
-        ...(from && { from }),
+        body: htmlWithPreheader,
+        ...translatedControlMeta,
       };
     }
 
-    const sanitizedBody = sanitizeHTML(cleanedHtml);
+    const sanitizedBody = sanitizeHTML(htmlWithPreheader);
 
     return {
       subject: translatedSubject,
       body: sanitizedBody,
-      ...(from && { from }),
+      ...translatedControlMeta,
     };
   }
 
@@ -485,7 +512,7 @@ export class EmailOutputRendererUsecase extends BaseTranslationRendererUsecase {
       const unescapedPayload = this.deepUnescapeTranslationStrings(payload) as FullPayloadForRender;
       const escapedPayloadForJson = this.deepEscapePayloadStrings(unescapedPayload);
       const liquifiedMaily = wrapMailyInLiquid(this.enhanceContentVariable(body));
-      const transformedMaily = await this.transformMailyContent(liquifiedMaily, escapedPayloadForJson);
+      const transformedMaily = await transformMailyContent(liquifiedMaily, escapedPayloadForJson, this.liquidEngine);
       const translatedMaily = await this.processMailyTranslations({
         mailyContent: transformedMaily,
         variables: escapedPayloadForJson,
@@ -514,86 +541,6 @@ export class EmailOutputRendererUsecase extends BaseTranslationRendererUsecase {
       });
 
       return processedHtml;
-    }
-  }
-
-  private async processSubjectTranslations(
-    subject: string,
-    variables: FullPayloadForRender,
-    environmentId: string,
-    organizationId: string,
-    workflowId?: string,
-    locale?: string,
-    organization?: OrganizationEntity,
-    translationContext?: TranslationContext | null
-  ): Promise<string> {
-    const unescapedVariables = this.deepUnescapeTranslationStrings(variables) as FullPayloadForRender;
-
-    const translatedSubject = translationContext
-      ? await this.processStringWithContext({
-          context: translationContext,
-          content: subject,
-          variables: unescapedVariables,
-        })
-      : await this.processStringTranslations({
-          content: subject,
-          variables: unescapedVariables,
-          environmentId,
-          organizationId,
-          resourceId: workflowId,
-          resourceType: LocalizationResourceEnum.WORKFLOW,
-          locale,
-          organization,
-        });
-
-    return decodeHTML(this.unescapeJsonString(translatedSubject));
-  }
-
-  private async processMailyTranslations({
-    mailyContent,
-    variables,
-    environmentId,
-    organizationId,
-    resourceId,
-    resourceType,
-    locale,
-    organization,
-    translationContext,
-  }: {
-    mailyContent: MailyJSONContent;
-    variables: FullPayloadForRender;
-    environmentId: string;
-    organizationId: string;
-    resourceId?: string;
-    resourceType?: LocalizationResourceEnum;
-    locale?: string;
-    organization?: OrganizationEntity;
-    translationContext?: TranslationContext | null;
-  }): Promise<MailyJSONContent> {
-    const contentString = JSON.stringify(mailyContent);
-    const translatedContent = translationContext
-      ? await this.processStringWithContext({
-          context: translationContext,
-          content: contentString,
-          variables,
-        })
-      : await this.processStringTranslations({
-          content: contentString,
-          variables,
-          environmentId,
-          organizationId,
-          resourceId,
-          resourceType,
-          locale,
-          organization,
-        });
-
-    try {
-      return JSON.parse(translatedContent);
-    } catch (error) {
-      throw new InternalServerErrorException(
-        `Translated Maily content is not valid JSON: ${error instanceof Error ? error.message : String(error)}`
-      );
     }
   }
 
@@ -656,252 +603,6 @@ export class EmailOutputRendererUsecase extends BaseTranslationRendererUsecase {
     }
   }
 
-  private async transformMailyContent(
-    node: MailyJSONContent,
-    variables: FullPayloadForRender,
-    parent?: MailyJSONContent
-  ) {
-    const queue: Array<{ node: MailyJSONContent; parent?: MailyJSONContent }> = [{ node, parent }];
-
-    while (queue.length > 0) {
-      const current = queue.shift()!;
-
-      if (hasShow(current.node)) {
-        const shouldShow = await this.handleShowNode(current.node, variables, current.parent);
-
-        if (!shouldShow) {
-          continue;
-        }
-      }
-
-      if (isRepeatNode(current.node)) {
-        await this.handleEachNode(current.node, variables, current.parent);
-      }
-
-      if (isVariableNode(current.node)) {
-        this.processVariableNodeTypes(current.node);
-      }
-
-      if (current.node.content) {
-        for (const childNode of current.node.content) {
-          queue.push({ node: childNode, parent: current.node });
-        }
-      }
-    }
-
-    return node;
-  }
-
-  private async handleShowNode(
-    node: MailyJSONContent & { attrs: { [MailyAttrsEnum.SHOW_IF_KEY]: string } },
-    variables: FullPayloadForRender,
-    parent?: MailyJSONContent
-  ): Promise<boolean> {
-    const shouldShow = await this.evaluateShowCondition(variables, node);
-    if (!shouldShow && parent?.content) {
-      parent.content = parent.content.filter((pNode) => pNode !== node);
-    }
-
-    delete (node.attrs as Record<string, string>)[MailyAttrsEnum.SHOW_IF_KEY];
-
-    return shouldShow;
-  }
-
-  private async handleEachNode(
-    node: MailyJSONContent & { attrs: { [MailyAttrsEnum.EACH_KEY]: string } },
-    variables: FullPayloadForRender,
-    parent?: MailyJSONContent
-  ): Promise<void> {
-    const newContent = await this.multiplyForEachNode(node, variables);
-
-    if (parent?.content) {
-      const nodeIndex = parent.content.indexOf(node);
-      parent.content = [...parent.content.slice(0, nodeIndex), ...newContent, ...parent.content.slice(nodeIndex + 1)];
-    } else {
-      node.content = newContent;
-    }
-  }
-
-  private async evaluateShowCondition(
-    variables: FullPayloadForRender,
-    node: MailyJSONContent & { attrs: { [MailyAttrsEnum.SHOW_IF_KEY]: string } }
-  ): Promise<boolean> {
-    const { [MailyAttrsEnum.SHOW_IF_KEY]: showIfKey } = node.attrs;
-    const parsedShowIfValue = await this.liquidEngine.parseAndRender(showIfKey, variables);
-
-    return this.stringToBoolean(parsedShowIfValue);
-  }
-
-  private processVariableNodeTypes(node: MailyJSONContent) {
-    node.type = 'text'; // set 'variable' to 'text' to for Liquid to recognize it
-    node.text = node.attrs?.id || '';
-  }
-
-  /**
-   * For 'each' node, multiply the content by the number of items in the iterable array
-   * and add indexes to the placeholders. If iterations attribute is set, limits the number
-   * of iterations to that value, otherwise renders all items.
-   *
-   * @example
-   * node:
-   * {
-   *   type: 'each',
-   *   attrs: {
-   *     each: '{{ payload.comments }}',
-   *     iterations: 2 // Optional - limits to first 2 items only
-   *   },
-   *   content: [
-   *     { type: 'variable', text: '{{ payload.comments.author }}' }
-   *   ]
-   * }
-   *
-   * variables:
-   * { payload: { comments: [{ author: 'John Doe' }, { author: 'Jane Doe' }] } }
-   *
-   * result:
-   * [
-   *   { type: 'text', text: '{{ payload.comments[0].author }}' },
-   *   { type: 'text', text: '{{ payload.comments[1].author }}' }
-   * ]
-   *
-   */
-  private async multiplyForEachNode(
-    node: MailyJSONContent & { attrs: { [MailyAttrsEnum.EACH_KEY]: string } },
-    variables: FullPayloadForRender
-  ): Promise<MailyJSONContent[]> {
-    const iterablePath = node.attrs[MailyAttrsEnum.EACH_KEY];
-    const iterations = node.attrs[MailyAttrsEnum.ITERATIONS_KEY];
-    const forEachNodes = node.content || [];
-    const iterableArray = await this.getIterableArray(iterablePath, variables);
-    const limitedIterableArray = iterations ? iterableArray.slice(0, iterations) : iterableArray;
-
-    return limitedIterableArray.flatMap((_, index) => this.processForEachNodes(forEachNodes, iterablePath, index));
-  }
-
-  private async getIterableArray(iterablePath: string, variables: FullPayloadForRender): Promise<unknown[]> {
-    // evalValue returns the real JS array; avoids a lossy " <-> ' JSON round-trip that
-    // breaks on apostrophes in string values (e.g. digest events with `John's order`).
-    const cleanPath = iterablePath.replace(/\{\{|\}\}/g, '').trim();
-
-    let value: unknown;
-    try {
-      value = await this.liquidEngine.evalValue(cleanPath, variables);
-    } catch (error) {
-      throw new Error(
-        `Failed to resolve iterable value for "${iterablePath}": ${error instanceof Error ? error.message : String(error)}`
-      );
-    }
-
-    if (!Array.isArray(value)) {
-      throw new Error(`Iterable "${iterablePath}" is not an array`);
-    }
-
-    return value;
-  }
-
-  private processForEachNodes(
-    nodes: MailyJSONContent[],
-    iterablePath: string,
-    index: number
-  ): Array<MailyJSONContent | MailyJSONMarks> {
-    return nodes.map((node) => {
-      const processedNode = structuredClone(node);
-
-      if (isVariableNode(processedNode)) {
-        this.processVariableNodeTypes(processedNode);
-        if (processedNode.text) {
-          processedNode.text = this.addIndexToLiquidExpression(processedNode.text, iterablePath, index);
-        }
-
-        return processedNode;
-      }
-
-      if (isButtonNode(processedNode)) {
-        if (processedNode.attrs?.text) {
-          processedNode.attrs.text = this.addIndexToLiquidExpression(processedNode.attrs.text, iterablePath, index);
-        }
-
-        if (processedNode.attrs?.url) {
-          processedNode.attrs.url = this.addIndexToLiquidExpression(processedNode.attrs.url, iterablePath, index);
-        }
-
-        return processedNode;
-      }
-
-      if (isImageNode(processedNode)) {
-        if (processedNode.attrs?.src) {
-          processedNode.attrs.src = this.addIndexToLiquidExpression(processedNode.attrs.src, iterablePath, index);
-        }
-
-        if (processedNode.attrs?.externalLink) {
-          processedNode.attrs.externalLink = this.addIndexToLiquidExpression(
-            processedNode.attrs.externalLink,
-            iterablePath,
-            index
-          );
-        }
-
-        return processedNode;
-      }
-
-      if (isLinkNode(processedNode)) {
-        if (processedNode.attrs?.href) {
-          processedNode.attrs.href = this.addIndexToLiquidExpression(processedNode.attrs.href, iterablePath, index);
-        }
-
-        return processedNode;
-      }
-
-      if (processedNode.content?.length) {
-        processedNode.content = this.processForEachNodes(processedNode.content, iterablePath, index);
-      }
-
-      if (processedNode.marks?.length) {
-        processedNode.marks = this.processForEachNodes(
-          processedNode.marks,
-          iterablePath,
-          index
-        ) as Array<MailyJSONMarks>;
-      }
-
-      return processedNode;
-    });
-  }
-
-  /**
-   * Add the index to the liquid expression if it doesn't already have an array index
-   *
-   * @example
-   * text: '{{ payload.comments.author }}'
-   * iterablePath: '{{ payload.comments }}'
-   * index: 0
-   * result: '{{ payload.comments[0].author }}'
-   */
-  private addIndexToLiquidExpression(text: string, iterablePath: string, index: number): string {
-    const cleanPath = iterablePath.replace(/\{\{|\}\}/g, '').trim();
-    const liquidMatch = text.match(/\{\{\s*(.*?)\s*\}\}/);
-
-    if (!liquidMatch) return text;
-
-    const [path, ...filters] = liquidMatch[1].split('|').map((part) => part.trim());
-    if (path.includes('[')) return text;
-
-    const newPath = path.replace(cleanPath, `${cleanPath}[${index}]`);
-
-    return filters.length ? `{{ ${newPath} | ${filters.join(' | ')} }}` : `{{ ${newPath} }}`;
-  }
-
-  private stringToBoolean(value: string): boolean {
-    const normalized = value.toLowerCase().trim();
-    if (normalized === 'false' || normalized === 'null' || normalized === 'undefined') return false;
-
-    try {
-      return Boolean(JSON.parse(normalized));
-    } catch {
-      return Boolean(normalized);
-    }
-  }
-
   private async appendNovuBranding(
     html: string,
     organizationId: string,
@@ -942,87 +643,6 @@ export class EmailOutputRendererUsecase extends BaseTranslationRendererUsecase {
     return html.slice(0, lastIndex) + NOVU_BRANDING_HTML + html.slice(lastIndex);
   }
 
-  private deepEscapePayloadStrings(payload: FullPayloadForRender): FullPayloadForRender {
-    return this.deepEscapeObject(payload) as FullPayloadForRender;
-  }
-
-  private deepEscapeObject(obj: unknown): unknown {
-    if (obj === null || obj === undefined) {
-      return obj;
-    }
-
-    if (typeof obj === 'string') {
-      return this.escapeStringForJson(obj);
-    }
-
-    if (typeof obj === 'number' || typeof obj === 'boolean') {
-      return obj;
-    }
-
-    if (Array.isArray(obj)) {
-      return obj.map((item) => this.deepEscapeObject(item));
-    }
-
-    if (typeof obj === 'object') {
-      const escapedObj: Record<string, unknown> = {};
-      for (const [key, value] of Object.entries(obj)) {
-        escapedObj[key] = this.deepEscapeObject(value);
-      }
-
-      return escapedObj;
-    }
-
-    return obj;
-  }
-
-  private escapeStringForJson(str: string): string {
-    return str
-      .replace(/\\/g, '\\\\') // Escape backslashes
-      .replace(/"/g, '\\"') // Escape quotes
-      .replace(/\n/g, '\\n') // Escape newlines
-      .replace(/\r/g, '\\r') // Escape carriage returns
-      .replace(/\t/g, '\\t'); // Escape tabs
-  }
-
-  private unescapeJsonString(str: string): string {
-    return str
-      .replace(/\\t/g, '\t')
-      .replace(/\\r/g, '\r')
-      .replace(/\\n/g, '\n')
-      .replace(/\\"/g, '"')
-      .replace(/\\'/g, "'")
-      .replace(/\\\\/g, '\\');
-  }
-
-  private deepUnescapeTranslationStrings(obj: unknown): unknown {
-    if (obj === null || obj === undefined) {
-      return obj;
-    }
-
-    if (typeof obj === 'string') {
-      return this.unescapeJsonString(obj);
-    }
-
-    if (typeof obj === 'number' || typeof obj === 'boolean') {
-      return obj;
-    }
-
-    if (Array.isArray(obj)) {
-      return obj.map((item) => this.deepUnescapeTranslationStrings(item));
-    }
-
-    if (typeof obj === 'object') {
-      const unescapedObj: Record<string, unknown> = {};
-      for (const [key, value] of Object.entries(obj)) {
-        unescapedObj[key] = this.deepUnescapeTranslationStrings(value);
-      }
-
-      return unescapedObj;
-    }
-
-    return obj;
-  }
-
   private cleanupRenderedHtml(html: string): string {
     /*
      * Convert paragraphs that contain only whitespace characters to empty paragraphs to prevent Gmail clipping.
@@ -1031,4 +651,22 @@ export class EmailOutputRendererUsecase extends BaseTranslationRendererUsecase {
      */
     return html.replace(/<p([^>]*)>\s+<\/p>/g, '<p$1></p>');
   }
+}
+
+function injectRenderedPreheader(html: string, preheader: string | undefined): string {
+  const trimmed = preheader?.trim();
+  if (!trimmed || !html) {
+    return html;
+  }
+
+  const escaped = trimmed.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const spacer = '&nbsp;&zwnj;'.repeat(50);
+  const block = `<div style="display: none; max-height: 0px; overflow: hidden;">${escaped}${spacer}</div>`;
+
+  if (!/<body\b[^<>]*?>/i.test(html)) {
+    return `${block}${html}`;
+  }
+
+  // Replacer function, not a string: the block carries user content and `$&`/`$'` would otherwise be expanded.
+  return html.replace(/<body\b[^<>]*?>/i, (bodyTag) => `${bodyTag}${block}`);
 }

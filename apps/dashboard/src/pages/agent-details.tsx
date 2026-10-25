@@ -1,4 +1,3 @@
-import { FeatureFlagsKeysEnum } from '@novu/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { RiArrowLeftSLine, RiRobot2Line } from 'react-icons/ri';
@@ -13,13 +12,19 @@ import {
   listAgentIntegrations,
 } from '@/api/agents';
 import { NovuApiError } from '@/api/api.client';
+import { WebChatDrawer } from '@/components/agents/web-chat-panel';
 import { AgentDetailsHeader } from '@/components/agents/agent-details-header';
 import { AgentIntegrationsTab } from '@/components/agents/agent-integrations-tab';
 import { AgentOverviewTab } from '@/components/agents/agent-overview-tab';
 import { AgentSetupModal } from '@/components/agents/agent-setup-modal';
+import { AgentExceedsPlanBanner } from '@/components/agents/agents-plan-limit-banner';
 import { DeleteAgentDialog } from '@/components/agents/delete-agent-dialog';
+import {
+  getWebChatIntegrationLink,
+  hasAgentInboundConnection,
+} from '@/components/agents/is-agent-integration-connected';
+import { ConnectSubscriberProvider } from '@/components/connect/connect-subscriber-provider';
 import { DashboardLayout } from '@/components/dashboard-layout';
-import { useSetConnectBreadcrumbLeaf } from '@/components/dashboard-shell/use-connect-breadcrumb';
 import { PageMeta } from '@/components/page-meta';
 import { Badge } from '@/components/primitives/badge';
 import {
@@ -34,13 +39,16 @@ import { CompactButton } from '@/components/primitives/button-compact';
 import { Skeleton } from '@/components/primitives/skeleton';
 import { showErrorToast, showSuccessToast } from '@/components/primitives/sonner-helpers';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/primitives/tabs';
+import TruncatedText from '@/components/truncated-text';
 import { requireEnvironment, useEnvironment } from '@/context/environment/hooks';
+import { useWebChatPreview } from '@/hooks/use-web-chat-preview';
 import { useAgentRoutes } from '@/hooks/use-agent-routes';
-import { useCurrentApp } from '@/hooks/use-current-app';
-import { useFeatureFlag } from '@/hooks/use-feature-flag';
+import { useAreConversationalAgentsAvailable } from '@/hooks/use-are-conversational-agents-available';
 import { useTelemetry } from '@/hooks/use-telemetry';
-import { APP_IDS } from '@/utils/apps';
+import { QueryKeys } from '@/utils/query-keys';
 import {
+  WEB_CHAT_PREVIEW_PARAM,
+  AGENT_DETAILS_CHAT_TAB,
   AGENT_DETAILS_DEFAULT_TAB,
   AGENT_DETAILS_TABS,
   type AgentDetailsTab,
@@ -92,14 +100,13 @@ export function AgentDetailsPage() {
   const location = useLocation();
   const queryClient = useQueryClient();
   const { currentEnvironment, readOnly } = useEnvironment();
-  const isConversationalAgentsEnabled = useFeatureFlag(FeatureFlagsKeysEnum.IS_CONVERSATIONAL_AGENTS_ENABLED, false);
-  const currentApp = useCurrentApp();
-  const isConnectApp = currentApp === APP_IDS.CONNECT;
+  const areAgentsAvailable = useAreConversationalAgentsAvailable();
   const agentRoutes = useAgentRoutes();
   const [agentToDelete, setAgentToDelete] = useState<AgentResponse | null>(null);
   const [setupModalDismissed, setSetupModalDismissed] = useState(false);
   const track = useTelemetry();
   const lastAgentDetailsTelemetryKey = useRef<string | null>(null);
+  const { isOpen: isChatPreviewOpen, setPreviewOpen } = useWebChatPreview();
 
   const agentsListPath = buildRoute(agentRoutes.list, {
     environmentSlug: currentEnvironment?.slug ?? '',
@@ -108,41 +115,28 @@ export function AgentDetailsPage() {
   const agentQuery = useQuery({
     queryKey: getAgentDetailQueryKey(currentEnvironment?._id, agentIdentifier),
     queryFn: () => getAgent(requireEnvironment(currentEnvironment, 'No environment selected'), agentIdentifier),
-    enabled: Boolean(currentEnvironment && agentIdentifier && isConversationalAgentsEnabled),
+    enabled: Boolean(currentEnvironment && agentIdentifier && areAgentsAvailable),
   });
 
-  let agentBreadcrumbLabel: string | null = null;
-
-  if (agentQuery.error instanceof NovuApiError && agentQuery.error.status === 404) {
-    agentBreadcrumbLabel = 'Not found';
-  } else if (agentQuery.data) {
-    agentBreadcrumbLabel = agentQuery.data.name;
-  }
-
-  const connectBreadcrumbLeaf = useMemo(() => {
-    if (!isConnectApp || !agentBreadcrumbLabel) return null;
-
-    return {
-      label: agentBreadcrumbLabel,
-      icon: <RiRobot2Line className="text-text-sub size-4 shrink-0" aria-hidden />,
-    };
-  }, [isConnectApp, agentBreadcrumbLabel]);
-
-  useSetConnectBreadcrumbLeaf(connectBreadcrumbLeaf);
-
   const deleteMutation = useMutation({
-    mutationFn: ({ identifier, deleteFromProvider }: { identifier: string; deleteFromProvider?: boolean }) =>
-      deleteAgent(requireEnvironment(currentEnvironment, 'No environment selected'), identifier, { deleteFromProvider }),
-    onSuccess: async (_, { identifier }) => {
+    mutationFn: ({
+      identifier,
+      deleteFromProvider,
+    }: {
+      identifier: string;
+      name: string;
+      deleteFromProvider?: boolean;
+    }) =>
+      deleteAgent(requireEnvironment(currentEnvironment, 'No environment selected'), identifier, {
+        deleteFromProvider,
+      }),
+    onSuccess: async (_, { identifier, name }) => {
       setAgentToDelete(null);
-      showSuccessToast('Agent deleted', 'The agent was removed.');
-      track(
-        isConnectApp
-          ? TelemetryEvent.CONNECT_AGENT_DELETED_FROM_DASHBOARD
-          : TelemetryEvent.AGENT_DELETED_FROM_DASHBOARD,
-        { agentIdentifier: identifier }
-      );
+      showSuccessToast(`Deleted agent: ${name.length > 40 ? `${name.slice(0, 40)}…` : name}`);
+      track(TelemetryEvent.AGENT_DELETED_FROM_DASHBOARD, { agentIdentifier: identifier });
       await queryClient.invalidateQueries({ queryKey: [AGENTS_LIST_QUERY_KEY] });
+      await queryClient.invalidateQueries({ queryKey: [QueryKeys.fetchWorkflows] });
+      await queryClient.invalidateQueries({ queryKey: [QueryKeys.fetchWorkflow] });
       navigate(agentsListPath);
     },
     onError: (err: Error) => {
@@ -160,7 +154,7 @@ export function AgentDetailsPage() {
         agentIdentifier,
         limit: 100,
       }),
-    enabled: Boolean(currentEnvironment && agentIdentifier && isConversationalAgentsEnabled),
+    enabled: Boolean(currentEnvironment && agentIdentifier && areAgentsAvailable),
   });
 
   const hasConnectedIntegration = useMemo(() => {
@@ -169,6 +163,14 @@ export function AgentDetailsPage() {
 
     return links.some((link) => Boolean(link.connectedAt));
   }, [agentIntegrationsQuery.data?.data]);
+
+  const webChatLink = useMemo(
+    () => getWebChatIntegrationLink(agentIntegrationsQuery.data?.data),
+    [agentIntegrationsQuery.data?.data]
+  );
+  const webChatIntegrationIdentifier = webChatLink?.integration.identifier;
+  const hasWebChat = Boolean(webChatIntegrationIdentifier);
+  const showAddToAppCallouts = webChatLink != null && !hasAgentInboundConnection(webChatLink.connectedAt);
 
   const isProductionEnv = readOnly;
   const agent = agentQuery.data;
@@ -184,7 +186,7 @@ export function AgentDetailsPage() {
   const currentTab = integrationIdentifier ? 'integrations' : parseAgentDetailsTab(agentTabParam);
 
   useEffect(() => {
-    if (!isConversationalAgentsEnabled || !agentIdentifier || !agentQuery.data) {
+    if (!areAgentsAvailable || !agentIdentifier || !agentQuery.data) {
       return;
     }
 
@@ -195,42 +197,43 @@ export function AgentDetailsPage() {
 
     lastAgentDetailsTelemetryKey.current = dedupeKey;
 
-    track(
-      isConnectApp ? TelemetryEvent.CONNECT_AGENT_DETAILS_PAGE_VISITED : TelemetryEvent.AGENT_DETAILS_PAGE_VISITED,
-      {
-        agentIdentifier: agentQuery.data.identifier,
-        tab: currentTab,
-        integrationIdentifier: integrationIdentifier ?? undefined,
-      }
-    );
+    track(TelemetryEvent.AGENT_DETAILS_PAGE_VISITED, {
+      agentIdentifier: agentQuery.data.identifier,
+      tab: currentTab,
+      integrationIdentifier: integrationIdentifier ?? undefined,
+    });
 
     if (integrationIdentifier) {
-      track(
-        isConnectApp
-          ? TelemetryEvent.CONNECT_AGENT_INTEGRATION_GUIDE_VIEWED
-          : TelemetryEvent.AGENT_INTEGRATION_GUIDE_VIEWED,
-        {
-          agentIdentifier: agentQuery.data.identifier,
-          integrationIdentifier,
-        }
-      );
+      track(TelemetryEvent.AGENT_INTEGRATION_GUIDE_VIEWED, {
+        agentIdentifier: agentQuery.data.identifier,
+        integrationIdentifier,
+      });
     }
-  }, [
-    agentIdentifier,
-    agentQuery.data,
-    currentTab,
-    integrationIdentifier,
-    isConnectApp,
-    isConversationalAgentsEnabled,
-    track,
-  ]);
+  }, [agentIdentifier, agentQuery.data, currentTab, integrationIdentifier, areAgentsAvailable, track]);
 
-  if (!isConversationalAgentsEnabled) {
+  if (!areAgentsAvailable) {
     return <Navigate to={agentsListPath} replace />;
   }
 
   if (!agentIdentifier) {
     return <Navigate to={agentsListPath} replace />;
+  }
+
+  if (agentTabParam === AGENT_DETAILS_CHAT_TAB && currentEnvironment?.slug) {
+    const params = new URLSearchParams(location.search);
+    params.set(WEB_CHAT_PREVIEW_PARAM, '1');
+    const query = params.toString();
+
+    return (
+      <Navigate
+        replace
+        to={`${buildRoute(agentRoutes.detailsTab, {
+          environmentSlug: currentEnvironment.slug,
+          agentIdentifier: encodeURIComponent(agentIdentifier),
+          agentTab: AGENT_DETAILS_DEFAULT_TAB,
+        })}${query ? `?${query}` : ''}`}
+      />
+    );
   }
 
   if (agentTabParam && currentEnvironment?.slug && !isValidAgentDetailsTab(agentTabParam)) {
@@ -306,7 +309,7 @@ export function AgentDetailsPage() {
             ) : (
               <BreadcrumbPage className="flex min-w-0 items-center gap-1.5">
                 <RiRobot2Line className="text-text-sub size-4 shrink-0" aria-hidden />
-                <span className="truncate">{breadcrumbCurrentLabel}</span>
+                <TruncatedText className="min-w-0 max-w-[40ch]">{breadcrumbCurrentLabel}</TruncatedText>
                 <Badge color="gray" size="sm" variant="lighter" className="shrink-0">
                   BETA
                 </Badge>
@@ -348,6 +351,12 @@ export function AgentDetailsPage() {
           <>
             <AgentDetailsHeader agent={agent} isLoading={false} onRequestDelete={setAgentToDelete} />
 
+            {agent.exceedsPlanLimit ? (
+              <div className="px-4 pb-2 md:px-6">
+                <AgentExceedsPlanBanner />
+              </div>
+            ) : null}
+
             <Tabs value={currentTab} onValueChange={handleTabChange} className="-mx-2 w-full">
               <TabsList align="start" variant="regular" className="border-t-transparent px-4 py-0! md:px-6">
                 <TabsTrigger variant="regular" value="overview" size="xl">
@@ -359,14 +368,36 @@ export function AgentDetailsPage() {
               </TabsList>
 
               <TabsContent value="overview" className="outline-none">
-                <AgentOverviewTab agent={agent} />
+                <ConnectSubscriberProvider>
+                  <AgentOverviewTab agent={agent} />
+                </ConnectSubscriberProvider>
               </TabsContent>
               <TabsContent value="integrations" className="outline-none">
                 {currentTab === 'integrations' ? (
-                  <AgentIntegrationsTab agent={agent} integrationIdentifier={integrationIdentifier} />
+                  <ConnectSubscriberProvider>
+                    <AgentIntegrationsTab agent={agent} integrationIdentifier={integrationIdentifier} />
+                  </ConnectSubscriberProvider>
                 ) : null}
               </TabsContent>
             </Tabs>
+
+            {hasWebChat ? (
+              <WebChatDrawer
+                open={isChatPreviewOpen}
+                onOpenChange={setPreviewOpen}
+                agent={agent}
+                showAddToAppCallouts={showAddToAppCallouts}
+                addToAppHref={
+                  currentEnvironment?.slug && webChatIntegrationIdentifier
+                    ? buildRoute(agentRoutes.integrationDetail, {
+                        environmentSlug: currentEnvironment.slug,
+                        agentIdentifier: encodeURIComponent(agent.identifier),
+                        integrationIdentifier: encodeURIComponent(webChatIntegrationIdentifier),
+                      })
+                    : undefined
+                }
+              />
+            ) : null}
 
             <DeleteAgentDialog
               open={Boolean(agentToDelete)}
@@ -377,7 +408,11 @@ export function AgentDetailsPage() {
               }}
               onConfirm={({ deleteFromProvider }) => {
                 if (agentToDelete) {
-                  deleteMutation.mutate({ identifier: agentToDelete.identifier, deleteFromProvider });
+                  deleteMutation.mutate({
+                    identifier: agentToDelete.identifier,
+                    name: agentToDelete.name,
+                    deleteFromProvider,
+                  });
                 }
               }}
               agentName={agentToDelete?.name ?? ''}

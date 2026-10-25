@@ -20,9 +20,11 @@ export type AuthContextType = {
   organization: BetterAuthOrganization | null;
   memberRole: MemberRoleEnum | null;
   isLoaded: boolean;
+  isSessionLoaded: boolean;
   signOut: () => Promise<void>;
   getToken: () => Promise<string | null>;
   refreshSession: () => Promise<void>;
+  refreshOrganization: () => Promise<void>;
   has: (params: { permission: PermissionsEnum } | { role: MemberRoleEnum }) => boolean;
   isAutoLoginPending: boolean;
   isAutoLoginFailed: boolean;

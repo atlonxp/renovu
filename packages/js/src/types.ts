@@ -48,12 +48,14 @@ export enum ChannelType {
   SMS = 'sms',
   CHAT = 'chat',
   PUSH = 'push',
+  TOOL = 'tool',
 }
 
 export enum WebSocketEvent {
   RECEIVED = 'notification_received',
   UNREAD = 'unread_count_changed',
   UNSEEN = 'unseen_count_changed',
+  AGENT_EVENT = 'agent_event',
 }
 
 export enum SocketType {
@@ -214,6 +216,7 @@ export type ChannelPreference = {
   in_app?: boolean;
   chat?: boolean;
   push?: boolean;
+  tool?: boolean;
 };
 
 export type PaginatedResponse<T = unknown> = {

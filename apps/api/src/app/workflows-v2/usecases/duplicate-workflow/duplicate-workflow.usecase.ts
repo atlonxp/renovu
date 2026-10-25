@@ -4,6 +4,7 @@ import {
   GetWorkflowUseCase,
   InstrumentUsecase,
   PinoLogger,
+  ResolveAgentInboundAddresses,
   StepResponseDto,
   UpsertStepDataCommand,
   UpsertWorkflowCommand,
@@ -28,7 +29,8 @@ export class DuplicateWorkflowUseCase {
     private preferencesRepository: PreferencesRepository,
     private upsertWorkflowUseCase: UpsertWorkflowUseCase,
     private duplicateLocalesUseCase: DuplicateLocales,
-    private logger: PinoLogger
+    private logger: PinoLogger,
+    private resolveAgentInboundAddresses: ResolveAgentInboundAddresses
   ) {
     this.logger.setContext(this.constructor.name);
   }
@@ -48,6 +50,14 @@ export class DuplicateWorkflowUseCase {
 
     const preferences = await this.getWorkflowPreferences(workflow._id, command.user.environmentId);
     const duplicateWorkflowDto = await this.buildDuplicateWorkflowDto(workflow, command.overrides, preferences);
+
+    if (duplicateWorkflowDto.agent) {
+      await this.resolveAgentInboundAddresses.validateWorkflowAgentConfig({
+        agent: duplicateWorkflowDto.agent,
+        environmentId: command.user.environmentId,
+        organizationId: command.user.organizationId,
+      });
+    }
 
     const duplicatedWorkflow = await this.upsertWorkflowUseCase.execute(
       UpsertWorkflowCommand.create({
@@ -93,6 +103,7 @@ export class DuplicateWorkflowUseCase {
       payloadSchema: originWorkflow.payloadSchema || null,
       validatePayload: originWorkflow.validatePayload,
       severity: originWorkflow.severity,
+      agent: originWorkflow.agent ?? null,
     };
   }
 
@@ -101,6 +112,8 @@ export class DuplicateWorkflowUseCase {
       name: step.name ?? '',
       type: step.type,
       controlValues: step.controls?.values ?? null,
+      providerOverrides: step.providerOverrides ?? null,
+      integrationOverrides: step.integrationOverrides ?? null,
       stepId: step.stepId,
       slug: step.slug,
     }));

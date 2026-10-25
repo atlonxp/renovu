@@ -3,6 +3,7 @@ import {
   EmailProviderIdEnum,
   emailProviders as emailProviderConfigs,
   type IIntegration,
+  isAgentInboxProvider,
 } from '@novu/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
@@ -46,8 +47,10 @@ type OutboundInstanceItem = {
 const DEMO_PROVIDER_CONFIG = emailProviderConfigs.find((p) => p.id === EmailProviderIdEnum.Novu);
 const DEMO_PROVIDER_DISPLAY_NAME = DEMO_PROVIDER_CONFIG?.displayName ?? 'Novu Email';
 
-const EXCLUDED_OUTBOUND_PROVIDERS = new Set<string>([EmailProviderIdEnum.NovuAgent, EmailProviderIdEnum.Novu]);
-const OUTBOUND_EMAIL_PROVIDERS = emailProviderConfigs.filter((p) => !EXCLUDED_OUTBOUND_PROVIDERS.has(p.id));
+// Agent inboxes are inbound-only, and the Novu demo provider is not selectable as a sender.
+const OUTBOUND_EMAIL_PROVIDERS = emailProviderConfigs.filter(
+  (p) => !isAgentInboxProvider(p.id) && p.id !== EmailProviderIdEnum.Novu
+);
 
 function DemoBadge() {
   return (
@@ -61,7 +64,7 @@ function buildOutboundItems(allIntegrations: IIntegration[] | undefined): Outbou
   const integrationsByProvider = new Map<string, IIntegration[]>();
   for (const i of allIntegrations ?? []) {
     if (i.channel !== ChannelTypeEnum.EMAIL) continue;
-    if (EXCLUDED_OUTBOUND_PROVIDERS.has(i.providerId)) continue;
+    if (isAgentInboxProvider(i.providerId) || i.providerId === EmailProviderIdEnum.Novu) continue;
     const list = integrationsByProvider.get(i.providerId) ?? [];
     list.push(i);
     integrationsByProvider.set(i.providerId, list);
@@ -396,18 +399,18 @@ export function OutboundProviderSelect({
               aria-label={hideLabel ? 'Send emails via, select email provider' : undefined}
               disabled={isBusy}
               className={cn(
-                'border-stroke-soft bg-bg-white flex h-7 w-full items-center justify-between overflow-hidden rounded-md border px-1.5 py-1 shadow-xs disabled:opacity-60',
+                'border-stroke-soft bg-bg-white flex h-8 w-full items-center justify-between overflow-hidden rounded-md border px-1.5 py-1 shadow-xs disabled:opacity-60',
                 !hideLabel && 'max-w-[320px]'
               )}
             >
               {selected ? (
-                <div className="flex min-w-0 items-center gap-1">
+                <div className="flex items-center gap-1">
                   <ProviderIcon
                     providerId={selected.providerId}
                     providerDisplayName={selected.displayName}
                     className="size-4 shrink-0"
                   />
-                  <span className="text-text-strong text-label-xs min-w-0 truncate font-medium leading-4">
+                  <span className="text-text-strong text-label-xs truncate font-medium leading-4">
                     {selected.displayName}
                   </span>
                   {selected.isDemo ? <DemoBadge /> : null}

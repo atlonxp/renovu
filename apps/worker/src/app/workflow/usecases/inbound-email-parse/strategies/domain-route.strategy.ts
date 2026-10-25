@@ -1,20 +1,41 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import {
-  getSharedAgentDomain,
+  getConfiguredSharedInboxDomains,
   InboundDomainRouteDelivery,
   isAgentSharedInboxEnabled,
+  isValidAgentEmailSlugPrefix,
   PinoLogger,
   parseAgentSharedInboxLocalPart,
+  resolveAgentInboxDomain,
+  resolvePublishedAgentEmailSlug,
 } from '@novu/application-generic';
 import {
   AgentIntegrationRepository,
   AgentRepository,
   DomainRepository,
   DomainRouteRepository,
+  type IntegrationEntity,
   IntegrationRepository,
 } from '@novu/dal';
-import { DomainRouteTypeEnum, DomainStatusEnum } from '@novu/shared';
+import { DomainRouteTypeEnum, DomainStatusEnum, splitAgentReplyLocalPart } from '@novu/shared';
 import { InboundEmailParseCommand } from '../inbound-email-parse.command';
+import {
+  getDeliveryFailureDiagnostics,
+  INBOUND_UNMATCHED_ROUTE_MESSAGE,
+  InboundParseDroppedError,
+  InboundParseOutcome,
+  InboundParseProcessingError,
+  InboundParseStrategy,
+  inboundTransactionIdFromMessageId,
+  toCustomerDeliveryFailureMessage,
+} from '../inbound-parse-outcome';
+
+type ResolvedDomainRouteContext = {
+  organizationId: string;
+  environmentId: string;
+  transactionId: string;
+  strategy: InboundParseStrategy;
+};
 
 @Injectable()
 export class DomainRouteStrategy {
@@ -30,23 +51,27 @@ export class DomainRouteStrategy {
     this.logger.setContext(this.constructor.name);
   }
 
-  async execute(command: InboundEmailParseCommand): Promise<void> {
-    const toAddress = command.to[0].address;
+  async execute(
+    command: InboundEmailParseCommand,
+    recipientAddress = command.to[0].address
+  ): Promise<InboundParseOutcome | undefined> {
+    const toAddress = recipientAddress;
 
     this.logger.info({ toAddress }, 'Processing domain-route email');
 
     const [rawLocalPart, rawDomainName] = toAddress.split('@');
     const localPart = rawLocalPart?.toLowerCase();
     const domainName = rawDomainName?.toLowerCase();
+    const { strippedLocalPart, originToken } = localPart
+      ? splitAgentReplyLocalPart(localPart)
+      : { strippedLocalPart: localPart, originToken: null };
 
     if (!domainName) {
       this.throwError(`No domain found for address ${toAddress}`);
     }
 
-    if (isAgentSharedInboxEnabled() && domainName === getSharedAgentDomain()) {
-      await this.deliverSharedAgentInbox(command, toAddress, localPart);
-
-      return;
+    if (isAgentSharedInboxEnabled() && getConfiguredSharedInboxDomains().includes(domainName)) {
+      return this.deliverSharedAgentInbox(command, toAddress, strippedLocalPart, originToken, domainName);
     }
 
     const domain = await this.domainRepository.findByName(domainName);
@@ -55,108 +80,172 @@ export class DomainRouteStrategy {
       this.throwError(`No domain found for address ${toAddress}`);
     }
 
+    // Tenant context is resolved from the verified domain; failures from this
+    // point on carry it so the centralized emit point can write a request log row.
+    const baseResolved = {
+      organizationId: domain._organizationId,
+      environmentId: domain._environmentId,
+      transactionId: inboundTransactionIdFromMessageId(command.messageId),
+    };
+
     if (domain.status !== DomainStatusEnum.VERIFIED) {
-      this.throwError(`Domain ${domain.name} is not verified`);
+      this.fail({ ...baseResolved, strategy: 'domain-route' }, 422, `Domain ${domain.name} is not verified`);
     }
 
     if (!domain.mxRecordConfigured) {
-      this.throwError(`Domain ${domain.name} does not have MX records configured`);
+      this.fail(
+        { ...baseResolved, strategy: 'domain-route' },
+        422,
+        `Domain ${domain.name} does not have MX records configured`
+      );
     }
 
+    const addressCandidates = Array.from(
+      new Set([localPart, strippedLocalPart, '*'].filter((value): value is string => Boolean(value)))
+    );
     const routes = await this.domainRouteRepository.findByDomainAndAddresses({
       domainId: domain._id,
       environmentId: domain._environmentId,
       organizationId: domain._organizationId,
-      addresses: [localPart, '*'],
+      addresses: addressCandidates,
     });
-    const route = routes.find((r) => r.address === localPart) ?? routes.find((r) => r.address === '*');
+    let route = localPart ? routes.find((r) => r.address === localPart) : undefined;
+
+    if (!route && strippedLocalPart && strippedLocalPart !== localPart) {
+      route = routes.find((r) => r.address === strippedLocalPart);
+    }
+
+    if (!route) {
+      route = routes.find((r) => r.address === '*');
+    }
 
     if (!route) {
       this.logger.info({ toAddress, domain: domain.name }, 'No route matched the inbound email');
 
-      return;
+      return { ...baseResolved, strategy: 'domain-route', status: 422, message: INBOUND_UNMATCHED_ROUTE_MESSAGE };
     }
 
-    const mail = this.commandToMail(command);
+    const mail = this.commandToMail(command, toAddress);
 
     if (route.type === DomainRouteTypeEnum.WEBHOOK) {
-      await this.inboundDomainRouteDelivery.deliverToWebhook({
-        environmentId: domain._environmentId,
-        organizationId: domain._organizationId,
-        domain,
-        route,
-        mail,
-      });
+      const resolved: ResolvedDomainRouteContext = { ...baseResolved, strategy: 'domain-route' };
+
+      try {
+        await this.inboundDomainRouteDelivery.deliverToWebhook({
+          environmentId: domain._environmentId,
+          organizationId: domain._organizationId,
+          domain,
+          route,
+          mail,
+        });
+      } catch (err) {
+        this.failDelivery(resolved, err);
+      }
 
       this.logger.info({ toAddress, domain: domain.name }, 'Fired email.received webhook event');
 
-      return;
+      return { ...resolved, status: 200 };
     }
 
     if (route.type === DomainRouteTypeEnum.AGENT) {
-      await this.inboundDomainRouteDelivery.deliverToAgent({
-        domain,
-        route,
-        mail,
-        toAddress,
-      });
+      const resolved: ResolvedDomainRouteContext = { ...baseResolved, strategy: 'agent' };
 
-      this.logger.info({ toAddress, domain: domain.name }, 'Fired email.received agent event');
+      try {
+        await this.inboundDomainRouteDelivery.deliverToAgent({
+          domain,
+          route,
+          mail,
+          toAddress,
+          originToken: originToken ?? undefined,
+        });
+      } catch (err) {
+        this.failDelivery(resolved, err);
+      }
+
+      this.logger.info(
+        { toAddress, domain: domain.name, messageId: command.messageId, dkim: command.dkim, spf: command.spf },
+        'Fired email.received agent event'
+      );
+
+      return { ...resolved, status: 200 };
     }
+
+    return { ...baseResolved, strategy: 'domain-route', status: 422, message: `Unsupported route type: ${route.type}` };
+  }
+
+  private fail(resolved: ResolvedDomainRouteContext, status: number, message: string): never {
+    this.logger.error({ err: message }, 'Error processing domain-route email');
+    const customerMessage = toCustomerDeliveryFailureMessage(status, message);
+    throw new InboundParseProcessingError(message, { ...resolved, status, message: customerMessage });
+  }
+
+  private failDelivery(resolved: ResolvedDomainRouteContext, err: unknown): never {
+    const diagnostics = getDeliveryFailureDiagnostics(err);
+
+    this.logger.error(
+      {
+        err,
+        statusCode: diagnostics.statusCode,
+        responseBody: diagnostics.responseBody,
+        organizationId: resolved.organizationId,
+        environmentId: resolved.environmentId,
+        transactionId: resolved.transactionId,
+        strategy: resolved.strategy,
+      },
+      'Inbound domain-route delivery failed'
+    );
+
+    const customerMessage = toCustomerDeliveryFailureMessage(502, diagnostics.message);
+
+    throw new InboundParseProcessingError(diagnostics.message, { ...resolved, status: 502, message: customerMessage });
   }
 
   /**
-   * Inbound email arrived at the shared agent domain (e.g. `agentconnect.sh`).
-   * The local-part shape is `{slug}-{inboxRoutingKey}` (see
-   * `parseAgentSharedInboxLocalPart`). We resolve the owning NovuAgent
-   * integration via its `credentials.inboxRoutingKey` (backed by a partial
-   * unique index, cross-tenant), then join through `AgentIntegration` to find
-   * the agent, then reuse the existing `InboundDomainRouteDelivery.deliverToAgent`
-   * pipeline — which enforces `Integration.active=true` and signs/forwards the
-   * payload to the API webhook just like the standard per-tenant flow.
+   * Inbound email arrived at a shared agent domain (`agentconnect.sh`, or the
+   * Agent Inbox domain). A local-part of `{slug}-{inboxRoutingKey}` resolves
+   * via `credentials.inboxRoutingKey`. Anything else, and a key that belongs
+   * to another domain, is looked up as a vanity Agent Inbox handle: the whole
+   * local-part on this domain. Then we join through `AgentIntegration` and
+   * reuse `InboundDomainRouteDelivery.deliverToAgent`.
+   *
+   * The matched domain has to be the one pinned on that integration. A Connect
+   * agent is not reachable on the Agent Inbox domain, and an Agent Inbox agent
+   * pinned to the new domain is not reachable on `agentconnect.sh`. Rows with
+   * no pin still accept the Connect domain.
    *
    * Unknown routing keys, malformed local-parts, missing links, and agents
-   * whose NovuAgent integration is disabled all result in silently dropping
+   * whose inbox integration is disabled all result in silently dropping
    * the message (after logging).
    */
   private async deliverSharedAgentInbox(
     command: InboundEmailParseCommand,
     toAddress: string,
-    localPart: string | undefined
-  ): Promise<void> {
+    localPart: string | undefined,
+    originToken: string | null,
+    domainName: string
+  ): Promise<InboundParseOutcome | undefined> {
     if (!localPart) {
       this.logger.info({ toAddress }, 'Shared agent domain: missing local part - dropping');
-
-      return;
+      throw new InboundParseDroppedError('Shared agent domain: missing local part');
     }
 
-    const parsed = parseAgentSharedInboxLocalPart(localPart);
-    if (!parsed) {
-      this.logger.info(
-        { toAddress, localPart },
-        'Shared agent domain: local part did not match {slug}-{inboxRoutingKey} - dropping'
-      );
-
-      return;
-    }
-
-    const integration = await this.integrationRepository.findAgentInboundByInboxRoutingKey(parsed.inboxRoutingKey);
-    if (!integration) {
-      this.logger.info(
-        { toAddress, inboxRoutingKey: parsed.inboxRoutingKey },
-        'Shared agent domain: no integration found for routing key - dropping'
-      );
-
-      return;
-    }
+    const { integration, vanity, parsed } = await this.findSharedAgentInbox(toAddress, localPart, domainName);
+    // The slug has to be the agent's own, checked in two phases: a stored prefix
+    // settles it before any further lookups, while the published fallback is
+    // derived from the agent and so has to wait until the agent is loaded.
+    // A vanity address was looked up by the whole local-part, so the slug already matches.
+    const storedSlug = vanity ? localPart : integration.credentials?.emailSlugPrefix;
+    const hasAuthoritativeSlug = typeof storedSlug === 'string' && isValidAgentEmailSlugPrefix(storedSlug);
 
     if (integration.active === false) {
       this.logger.info(
         { toAddress, integrationId: integration._id },
         'Shared agent domain: integration is inactive - dropping'
       );
-
-      return;
+      throw new InboundParseDroppedError('Shared agent domain: integration is inactive', {
+        organizationId: integration._organizationId,
+        environmentId: integration._environmentId,
+      });
     }
 
     if (integration.credentials?.sharedInboxDisabled) {
@@ -164,8 +253,10 @@ export class DomainRouteStrategy {
         { toAddress, integrationId: integration._id },
         'Shared agent domain: shared inbox disabled for this agent - dropping'
       );
-
-      return;
+      throw new InboundParseDroppedError('Shared agent domain: shared inbox disabled for this agent', {
+        organizationId: integration._organizationId,
+        environmentId: integration._environmentId,
+      });
     }
 
     const link = await this.agentIntegrationRepository.findOne(
@@ -181,8 +272,10 @@ export class DomainRouteStrategy {
         { toAddress, integrationId: integration._id },
         'Shared agent domain: no agent link found for integration - dropping'
       );
-
-      return;
+      throw new InboundParseDroppedError('Shared agent domain: no agent link found for integration', {
+        organizationId: integration._organizationId,
+        environmentId: integration._environmentId,
+      });
     }
 
     const agent = await this.agentRepository.findByIdForWebhook(link._agentId);
@@ -191,19 +284,45 @@ export class DomainRouteStrategy {
         { toAddress, agentId: link._agentId },
         'Shared agent domain: no agent found for link - dropping'
       );
-
-      return;
+      throw new InboundParseDroppedError('Shared agent domain: no agent found for link', {
+        organizationId: integration._organizationId,
+        environmentId: integration._environmentId,
+      });
     }
 
     if (agent.active === false) {
       this.logger.info({ toAddress, agentId: agent._id }, 'Shared agent domain: agent is inactive - dropping');
-
-      return;
+      throw new InboundParseDroppedError('Shared agent domain: agent is inactive', {
+        organizationId: agent._organizationId,
+        environmentId: agent._environmentId,
+      });
     }
+
+    // Phase two of the slug check: no stored prefix, so the agent decides.
+    if (!vanity && parsed && !hasAuthoritativeSlug) {
+      const publishedSlug = resolvePublishedAgentEmailSlug(storedSlug, agent);
+      if (publishedSlug !== parsed.slug) {
+        this.logger.info(
+          { toAddress, integrationId: integration._id, slug: parsed.slug, publishedSlug },
+          'Shared agent domain: slug does not match the published inbox address - dropping'
+        );
+        throw new InboundParseDroppedError('Shared agent domain: slug does not match the published inbox address', {
+          organizationId: agent._organizationId,
+          environmentId: agent._environmentId,
+        });
+      }
+    }
+
+    const resolved: ResolvedDomainRouteContext = {
+      organizationId: agent._organizationId,
+      environmentId: agent._environmentId,
+      transactionId: inboundTransactionIdFromMessageId(command.messageId),
+      strategy: 'agent',
+    };
 
     const syntheticDomain = {
       _id: agent._id,
-      name: getSharedAgentDomain(),
+      name: domainName,
       status: DomainStatusEnum.VERIFIED,
       mxRecordConfigured: true,
       _environmentId: agent._environmentId,
@@ -228,10 +347,17 @@ export class DomainRouteStrategy {
       await this.inboundDomainRouteDelivery.deliverToAgent({
         domain: syntheticDomain,
         route: syntheticRoute,
-        mail: this.commandToMail(command),
+        mail: this.commandToMail(command, toAddress),
         toAddress,
+        originToken: originToken ?? undefined,
+        integrationId: integration._id,
       });
-      this.logger.info({ toAddress, agentId: agent._id }, 'Forwarded shared-domain inbound email to agent webhook');
+      this.logger.info(
+        { toAddress, agentId: agent._id, messageId: command.messageId, dkim: command.dkim, spf: command.spf },
+        'Forwarded shared-domain inbound email to agent webhook'
+      );
+
+      return { ...resolved, status: 200 };
     } catch (err) {
       // BadRequestException is thrown by InboundDomainRouteDelivery for non-retriable
       // routing failures (no integration linked, integration inactive, missing secret,
@@ -244,14 +370,69 @@ export class DomainRouteStrategy {
           'Shared agent domain: deliverToAgent rejected - dropping (integration inactive or misconfigured)'
         );
 
-        return;
+        return { ...resolved, status: 422, message: 'Shared agent delivery rejected' };
       }
 
-      throw err;
+      this.failDelivery(resolved, err);
     }
   }
 
-  private commandToMail(command: InboundEmailParseCommand) {
+  /**
+   * A `{slug}-{key}` whose key belongs to this domain is authoritative: a slug
+   * mismatch drops the mail. Anything else is a vanity handle, the whole local-part.
+   */
+  private async findSharedAgentInbox(
+    toAddress: string,
+    localPart: string,
+    domainName: string
+  ): Promise<{
+    integration: IntegrationEntity;
+    vanity: boolean;
+    parsed: ReturnType<typeof parseAgentSharedInboxLocalPart>;
+  }> {
+    const parsed = parseAgentSharedInboxLocalPart(localPart);
+    const keyed = parsed
+      ? await this.integrationRepository.findAgentInboundByInboxRoutingKey(parsed.inboxRoutingKey)
+      : null;
+    const keyedHere = keyed && domainName === resolveAgentInboxDomain(keyed.credentials) ? keyed : null;
+
+    if (keyedHere && parsed) {
+      this.dropWhenKeyedSlugDiffers(keyedHere, parsed, toAddress);
+
+      return { integration: keyedHere, vanity: false, parsed };
+    }
+
+    const integration = await this.integrationRepository.findAgentInboundByVanitySlug(localPart, domainName);
+    if (!integration) {
+      this.logger.info({ toAddress, localPart }, 'Shared agent domain: no inbox for this address - dropping');
+      throw new InboundParseDroppedError('Shared agent domain: no inbox for this address');
+    }
+
+    return { integration, vanity: true, parsed };
+  }
+
+  private dropWhenKeyedSlugDiffers(
+    integration: IntegrationEntity,
+    parsed: { slug: string; inboxRoutingKey: string },
+    toAddress: string
+  ): void {
+    const storedSlug = integration.credentials?.emailSlugPrefix;
+    const authoritative = typeof storedSlug === 'string' && isValidAgentEmailSlugPrefix(storedSlug);
+    if (!authoritative || storedSlug === parsed.slug) {
+      return;
+    }
+
+    this.logger.info(
+      { toAddress, integrationId: integration._id, slug: parsed.slug },
+      'Shared agent domain: slug does not match the integration - dropping'
+    );
+    throw new InboundParseDroppedError('Shared agent domain: slug does not match the integration', {
+      organizationId: integration._organizationId,
+      environmentId: integration._environmentId,
+    });
+  }
+
+  private commandToMail(command: InboundEmailParseCommand, recipientAddress: string) {
     return {
       from: command.from,
       to: command.to,
@@ -265,6 +446,11 @@ export class DomainRouteStrategy {
       references: command.references,
       date: command.date,
       cc: command.cc,
+      bcc: getBccRecipients(command, recipientAddress),
+      // Forward the inbound-mail DKIM/SPF verdicts so the agent runtime can
+      // reject identity resolution for spoofed (unverified) senders.
+      dkim: command.dkim,
+      spf: command.spf,
     };
   }
 
@@ -272,4 +458,23 @@ export class DomainRouteStrategy {
     this.logger.error({ err: error }, 'Error processing domain-route email');
     throw new BadRequestException(error);
   }
+}
+
+function getBccRecipients(command: InboundEmailParseCommand, recipientAddress: string) {
+  const normalizedRecipientAddress = recipientAddress.trim().toLowerCase();
+  const visibleRecipients = [...(command.to ?? []), ...(command.cc ?? [])];
+  const isVisibleRecipient = visibleRecipients.some(
+    (recipient) =>
+      recipient &&
+      typeof recipient === 'object' &&
+      'address' in recipient &&
+      typeof recipient.address === 'string' &&
+      recipient.address.trim().toLowerCase() === normalizedRecipientAddress
+  );
+
+  if (isVisibleRecipient) {
+    return undefined;
+  }
+
+  return [{ address: recipientAddress, name: '' }];
 }

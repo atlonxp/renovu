@@ -7,6 +7,7 @@ import {
   ConversationRepository,
   ConversationStatusEnum,
 } from '@novu/dal';
+import { AgentSubscriberAccessEnum } from '@novu/shared';
 import { UserSession } from '@novu/testing';
 import { expect } from 'chai';
 
@@ -33,6 +34,7 @@ describe('Conversations API - /conversations #novu-v2', () => {
       name: 'E2E Conversations Agent',
       identifier: `conv-agent-${Date.now()}`,
       active: true,
+      behavior: { subscriberAccess: AgentSubscriberAccessEnum.RESTRICTED },
       _environmentId: session.environment._id,
       _organizationId: session.organization._id,
     });
@@ -373,6 +375,54 @@ describe('Conversations API - /conversations #novu-v2', () => {
         .query({ before: '000000000000000000000001', after: '000000000000000000000002' });
 
       expect(res.status).to.equal(400);
+    });
+  });
+
+  describe('API key access (MCP / external API)', () => {
+    it('should list conversations with an API key', async () => {
+      await seedConversation({ title: 'ApiKey listed' });
+
+      const res = await session.testAgent.get('/v1/conversations').set('authorization', `ApiKey ${session.apiKey}`);
+
+      expect(res.status).to.equal(200);
+      expect(res.body.data).to.be.an('array').with.length.of.at.least(1);
+    });
+
+    it('should get a conversation and its activities with an API key', async () => {
+      const conversation = await seedConversation({ title: 'ApiKey get' });
+      await seedActivity(conversation._id, { content: 'ApiKey activity' });
+
+      const getRes = await session.testAgent
+        .get(`/v1/conversations/${conversation.identifier}`)
+        .set('authorization', `ApiKey ${session.apiKey}`);
+
+      expect(getRes.status).to.equal(200);
+      expect(getRes.body.data.identifier).to.equal(conversation.identifier);
+
+      const activitiesRes = await session.testAgent
+        .get(`/v1/conversations/${conversation.identifier}/activities`)
+        .set('authorization', `ApiKey ${session.apiKey}`);
+
+      expect(activitiesRes.status).to.equal(200);
+      expect(activitiesRes.body.data).to.be.an('array').with.length(1);
+      expect(activitiesRes.body.data[0].content).to.equal('ApiKey activity');
+    });
+
+    it('should reject API key writes', async () => {
+      const conversation = await seedConversation();
+
+      const patchRes = await session.testAgent
+        .patch(`/v1/conversations/${conversation.identifier}`)
+        .set('authorization', `ApiKey ${session.apiKey}`)
+        .send({ title: 'should not apply' });
+
+      expect(patchRes.status).to.equal(401);
+
+      const deleteRes = await session.testAgent
+        .delete(`/v1/conversations/${conversation.identifier}`)
+        .set('authorization', `ApiKey ${session.apiKey}`);
+
+      expect(deleteRes.status).to.equal(401);
     });
   });
 });

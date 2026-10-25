@@ -1,10 +1,50 @@
-import { Select, TextInput } from '@inkjs/ui';
+import { PasswordInput, Select, TextInput } from '@inkjs/ui';
 import { AWS_CLAUDE_COMMERCIAL_REGIONS } from '@novu/shared';
 import { Box, Text, useInput } from 'ink';
 // biome-ignore lint/correctness/noUnusedImports: classic-JSX linter falls back here because tsconfig.json excludes ui/.
 import React from 'react';
-import { channelDisplayName, isDashboardOnlyChannel } from '../dashboard-urls';
-import type { AgentRuntimeChoice, ChannelChoice } from '../types';
+import { CONNECT_CHANNEL_PICKER_OPTIONS } from '../connect-channel-picker-options';
+import { CONNECT_MODE_PICKER_SUBTITLE, CONNECT_MODE_PICKER_TITLE } from '../connect-mode-options';
+import {
+  type ConnectSuccessDestination,
+  channelDisplayName,
+  isDashboardOnlyChannel,
+  resolveConnectSuccessDestination,
+  UNCLAIMED_KEYLESS_HINT,
+} from '../dashboard-urls';
+import { ConnectUserCancelledError } from '../errors';
+import { resolveBridgeSetupFollowUpMessage } from '../pipeline/bridge/setup-outcome-message';
+import { LLM_AUTH_PICKER_SUBTITLE, LLM_AUTH_PICKER_TITLE } from '../pipeline/llm-auth/llm-auth-options';
+import type { ChannelChoice } from '../types';
+import { BridgeReconcilePhaseContent, isBridgeReconcilePhase } from './bridge-reconcile-phase-content';
+import { CopyableLink } from './copyable-link';
+import { GroupedConnectModeSelect } from './grouped-connect-mode-select';
+import { LlmAuthPicker } from './llm-auth-picker';
+import {
+  WebChatHandoffContent,
+  WebChatInkSuccessContent,
+  WebChatSetupPickContent,
+} from './phase-content/web-chat-phases';
+import { EmailReadyContent, EmailWaitingContent } from './phase-content/email';
+import {
+  SendblueCredentialContent,
+  SendblueIntroContent,
+  SendblueTestPhoneContent,
+  SendblueTestWaitingContent,
+  SendblueWebhookManualContent,
+} from './phase-content/sendblue';
+import { PasteSlackConfigTokenContent, SlackOAuthReadyContent, WaitingSlackContent } from './phase-content/slack';
+import {
+  PickTelegramTokenDeliveryContent,
+  TelegramIntroContent,
+  TelegramLinkTokenContent,
+  TelegramTestContent,
+} from './phase-content/telegram';
+import {
+  WhatsAppSignupReadyContent,
+  WhatsAppSignupWaitingContent,
+  WhatsAppTestContent,
+} from './phase-content/whatsapp';
 import { PreviewGeneratedContent } from './preview-generated-content';
 import type { ConnectStore } from './store';
 import { WelcomeContent } from './welcome-content';
@@ -30,6 +70,10 @@ export function PhaseContent({
   onChannelHover: (channel: ChannelChoice | null) => void;
   previewMorphComplete: boolean;
 }): React.ReactElement {
+  if (isBridgeReconcilePhase(phase)) {
+    return BridgeReconcilePhaseContent({ phase });
+  }
+
   switch (phase.kind) {
     case 'welcome':
       return <WelcomeContent onContinue={phase.resolve} />;
@@ -39,10 +83,7 @@ export function PhaseContent({
         <Box flexDirection="column" gap={1}>
           <Text color="cyan">{phase.status}</Text>
           {phase.dashboardUrl ? (
-            <Box flexDirection="column">
-              <Text dimColor>If your browser didn't open, visit:</Text>
-              <Text color="cyan">{phase.dashboardUrl}</Text>
-            </Box>
+            <CopyableLink url={phase.dashboardUrl} hint="If your browser didn't open, visit:" />
           ) : null}
         </Box>
       );
@@ -53,14 +94,30 @@ export function PhaseContent({
     case 'loading-integrations':
       return <Text color="cyan">Looking up agent runtime integrations…</Text>;
 
-    case 'pick-runtime':
+    case 'pick-llm-auth':
       return (
         <Box flexDirection="column" gap={1}>
           <Box flexDirection="column">
-            <Text bold>Where do you want the agent to run?</Text>
-            <Text dimColor>Choose the agent runtime. Novu connects it to Slack, email, and more.</Text>
+            <Text bold>{LLM_AUTH_PICKER_TITLE}</Text>
+            <Text dimColor>{LLM_AUTH_PICKER_SUBTITLE}</Text>
           </Box>
-          <RuntimeSelect onChange={(value) => phase.resolve(value)} />
+          <LlmAuthPicker
+            connectMode={phase.connectMode}
+            onChange={(value) => phase.resolve(value)}
+            onCancel={() => phase.reject(new ConnectUserCancelledError())}
+          />
+          <Text color="cyan">Enter · select · Esc · cancel</Text>
+        </Box>
+      );
+
+    case 'pick-connect-mode':
+      return (
+        <Box flexDirection="column" gap={1}>
+          <Box flexDirection="column">
+            <Text bold>{CONNECT_MODE_PICKER_TITLE}</Text>
+            <Text dimColor>{CONNECT_MODE_PICKER_SUBTITLE}</Text>
+          </Box>
+          <GroupedConnectModeSelect onChange={(value) => phase.resolve(value)} />
         </Box>
       );
 
@@ -98,8 +155,16 @@ export function PhaseContent({
         <Box flexDirection="column" gap={1}>
           <Text bold>{phase.title}</Text>
           {phase.hint ? <Text dimColor>{phase.hint}</Text> : null}
+          {phase.verificationError ? (
+            <Text color="yellow">Credentials were rejected: {phase.verificationError}</Text>
+          ) : null}
           <Box borderStyle="round" paddingX={1}>
-            <TextInput placeholder={phase.placeholder} onSubmit={(value) => phase.resolve(value)} />
+            {/* Secrets mask by default; callers opt out with `secret: false` for non-sensitive values. */}
+            {phase.secret === false ? (
+              <TextInput placeholder={phase.placeholder} onSubmit={(value) => phase.resolve(value)} />
+            ) : (
+              <PasswordInput placeholder={phase.placeholder} onSubmit={(value) => phase.resolve(value)} />
+            )}
           </Box>
           <Text dimColor>Press Enter to submit.</Text>
         </Box>
@@ -160,10 +225,7 @@ export function PhaseContent({
           ) : null}
           <Text dimColor>e.g. a customer-support agent that books demos and escalates billing questions.</Text>
           <Box borderStyle="round" paddingX={1}>
-            <TextInput
-              placeholder="Describe what your agent should do…"
-              onSubmit={(value) => phase.resolve(value)}
-            />
+            <TextInput placeholder="Describe what your agent should do…" onSubmit={(value) => phase.resolve(value)} />
           </Box>
           <Text dimColor>Press Enter to submit. Minimum 8 characters.</Text>
         </Box>
@@ -181,67 +243,52 @@ export function PhaseContent({
       return <Text color="cyan">{`Creating agent "${phase.name}"…`}</Text>;
 
     case 'pick-channel': {
-      const options: Array<{ label: string; value: ChannelChoice }> = [
-        { label: 'Slack (recommended)', value: 'slack' },
-        { label: 'Telegram', value: 'telegram' },
-        { label: 'Email', value: 'email' },
-        { label: 'WhatsApp', value: 'whatsapp' },
-        { label: 'Microsoft Teams', value: 'teams' },
-        { label: 'Skip — set up later in dashboard', value: 'skip' },
-      ];
+      const options = [...CONNECT_CHANNEL_PICKER_OPTIONS];
 
       return (
         <Box flexDirection="column" gap={1} alignItems="flex-start">
           <Text bold wrap="wrap">
             Pick a channel to connect this agent to
           </Text>
-          <ChannelSelect
-            options={options}
-            onChange={(value) => phase.resolve(value)}
-            onHighlight={onChannelHover}
-          />
+          <ChannelSelect options={options} onChange={(value) => phase.resolve(value)} onHighlight={onChannelHover} />
         </Box>
       );
     }
 
+    case 'adding-whatsapp':
+      return <Text color="cyan">Linking WhatsApp to your agent…</Text>;
+
+    case 'whatsapp-signup-ready':
+      return <WhatsAppSignupReadyContent signupUrl={phase.signupUrl} onContinue={phase.resolve} />;
+
+    case 'whatsapp-signup-waiting':
+      return <WhatsAppSignupWaitingContent phase={phase} />;
+
+    case 'whatsapp-test':
+      return <WhatsAppTestContent phase={phase} />;
+
     case 'adding-slack':
       return <Text color="cyan">Linking Slack to your agent…</Text>;
 
-    case 'paste-slack-token':
-      return (
-        <Box flexDirection="column" gap={1}>
-          <Text bold>Paste a Slack App Configuration Token</Text>
-          <Text dimColor>
-            Your Slack integration has no OAuth credentials yet. Novu can create the Slack app for you from a manifest
-            if you paste a short-lived configuration token.
-          </Text>
-          <Box flexDirection="column">
-            <Text dimColor>1. Open </Text>
-            <Text color="cyan">https://api.slack.com/apps</Text>
-            <Text dimColor>2. Scroll to the bottom of the page</Text>
-            <Text dimColor>3. Generate an App Configuration Token</Text>
-            <Text dimColor>4. Copy the access token (starts with xoxe.xoxp-)</Text>
-          </Box>
-          {phase.retry ? (
-            <Text color="yellow">Previous token was rejected by Slack. Generate a fresh one and try again.</Text>
-          ) : null}
-          <Box borderStyle="round" paddingX={1}>
-            <TextInput
-              placeholder="xoxe.xoxp-…"
-              onSubmit={(value) => {
-                const trimmed = value.trim();
-                if (!trimmed) {
-                  phase.reject(new Error('No Slack App Configuration Token provided.'));
+    case 'adding-web-chat':
+      return <Text color="cyan">Linking Web Chat to your agent…</Text>;
 
-                  return;
-                }
-                phase.resolve(trimmed);
-              }}
-            />
-          </Box>
-          <Text dimColor>The token is sent to your Novu API once, used to create the Slack app, then discarded.</Text>
+    case 'web-chat-handoff':
+      return <WebChatHandoffContent dashboardUrl={phase.dashboardUrl} onContinue={phase.resolve} />;
+
+    case 'pick-web-chat-setup':
+      return <WebChatSetupPickContent projectKind={phase.projectKind} onResolve={phase.resolve} />;
+
+    case 'scaffolding-web-chat':
+      return (
+        <Box flexDirection="column" gap={1} alignItems="center">
+          <Text color="cyan">Scaffolding your Web Chat example app…</Text>
+          <Text dimColor>Installing dependencies — this may take a minute.</Text>
         </Box>
       );
+
+    case 'paste-slack-token':
+      return <PasteSlackConfigTokenContent phase={phase} />;
 
     case 'running-slack-quick-setup':
       return <Text color="cyan">Creating Slack app from manifest…</Text>;
@@ -256,16 +303,7 @@ export function PhaseContent({
       );
 
     case 'waiting-slack':
-      return (
-        <Box flexDirection="column" gap={1}>
-          <Text bold>Authorize Slack to finish setup</Text>
-          <Box flexDirection="column">
-            <Text dimColor>Opened in your browser. If nothing happened, visit:</Text>
-            <Text color="cyan">{phase.authorizeUrl}</Text>
-          </Box>
-          <Text dimColor>Waiting for Slack authorization…</Text>
-        </Box>
-      );
+      return <WaitingSlackContent phase={phase} />;
 
     case 'adding-email':
       return <Text color="cyan">Linking Email to your agent…</Text>;
@@ -275,22 +313,14 @@ export function PhaseContent({
         <EmailReadyContent
           inboundAddress={phase.inboundAddress}
           mailtoUrl={phase.mailtoUrl}
+          sendFromEmail={phase.sendFromEmail}
           onContinue={phase.resolve}
+          onBack={phase.onBack}
         />
       );
 
     case 'email-waiting':
-      return (
-        <Box flexDirection="column" gap={1}>
-          <Text bold color="cyan">
-            Send any message to your agent
-          </Text>
-          <Box flexDirection="column" paddingY={1}>
-            <Text bold>{phase.inboundAddress}</Text>
-          </Box>
-          <Text dimColor>Waiting for your email to arrive…</Text>
-        </Box>
-      );
+      return <EmailWaitingContent phase={phase} />;
 
     case 'adding-telegram':
       return <Text color="cyan">Linking Telegram to your agent…</Text>;
@@ -298,42 +328,44 @@ export function PhaseContent({
     case 'telegram-intro':
       return <TelegramIntroContent botfatherQr={phase.botfatherQr} onContinue={phase.resolve} />;
 
+    case 'pick-telegram-token-delivery':
+      return <PickTelegramTokenDeliveryContent phase={phase} />;
+
     case 'telegram-link-token':
-      return (
-        <Box flexDirection="column" gap={1}>
-          <Text bold color="cyan">
-            Step 2 of 3 · Save your bot token
-          </Text>
-          <Text dimColor>
-            Scan with your phone to open a page where you can paste the BotFather token. We'll handle registering the
-            webhook for you.
-          </Text>
-          <Text>{phase.mobileQr}</Text>
-          <Box flexDirection="column">
-            <Text dimColor>Or open this on your phone:</Text>
-            <Text color="cyan">{phase.mobileUrl}</Text>
-          </Box>
-          <Text dimColor>Waiting for your bot token…</Text>
-        </Box>
-      );
+      return <TelegramLinkTokenContent phase={phase} />;
 
     case 'telegram-test':
+      return <TelegramTestContent phase={phase} />;
+
+    case 'adding-sendblue':
+      return <Text color="cyan">Linking iMessage (Sendblue) to your agent…</Text>;
+
+    case 'sendblue-intro':
+      return <SendblueIntroContent dashboardUrl={phase.dashboardUrl} onContinue={phase.resolve} />;
+
+    case 'sendblue-credential':
+      return <SendblueCredentialContent phase={phase} />;
+
+    case 'configuring-sendblue-webhook':
+      return <Text color="cyan">Registering your Sendblue receive webhook…</Text>;
+
+    case 'sendblue-webhook-manual':
       return (
-        <Box flexDirection="column" gap={1}>
-          <Text bold color="cyan">
-            Step 3 of 3 · Say hello to your bot
-          </Text>
-          <Text dimColor>
-            Scan to open <Text color="white">@{phase.botUsername}</Text> in Telegram and tap Start.
-          </Text>
-          <Text>{phase.deepLinkQr}</Text>
-          <Box flexDirection="column">
-            <Text dimColor>Or open this link:</Text>
-            <Text color="cyan">{phase.deepLinkUrl}</Text>
-          </Box>
-          <Text dimColor>Waiting for /start in Telegram…</Text>
-        </Box>
+        <SendblueWebhookManualContent
+          callbackUrl={phase.callbackUrl}
+          webhookSecret={phase.webhookSecret}
+          onContinue={phase.resolve}
+        />
       );
+
+    case 'sendblue-test-phone':
+      return <SendblueTestPhoneContent phase={phase} />;
+
+    case 'sending-sendblue-test':
+      return <Text color="cyan">Sending a test iMessage…</Text>;
+
+    case 'sendblue-test-waiting':
+      return <SendblueTestWaitingContent phase={phase} />;
 
     case 'sending-welcome':
       return <Text color="cyan">Asking your agent to say hello…</Text>;
@@ -353,56 +385,28 @@ export function PhaseContent({
     case 'error':
       return <Text color="red">✗ {phase.message}</Text>;
 
-    default:
+    default: {
+      const _exhaustive: never = phase;
+
       return <Text />;
+    }
   }
 }
 
-function RuntimeSelect({
-  onChange,
-}: {
-  onChange: (value: AgentRuntimeChoice) => void;
-}): React.ReactElement {
-  const options: Array<{ value: AgentRuntimeChoice; title: string; detail?: string }> = [
-    { value: 'demo', title: 'Demo Credentials', detail: '10 conversations per month' },
-    { value: 'claude', title: 'Claude Managed Agents' },
-    { value: 'claude-aws', title: 'AWS Claude Managed Agents' },
-  ];
-  const [idx, setIdx] = React.useState(0);
-
-  useInput((_input, key) => {
-    if (key.upArrow) {
-      setIdx((current) => (current - 1 + options.length) % options.length);
-    } else if (key.downArrow) {
-      setIdx((current) => (current + 1) % options.length);
-    } else if (key.return) {
-      onChange(options[idx].value);
-    }
-  });
-
-  return (
-    <Box flexDirection="column">
-      {options.map((opt, i) => {
-        const isSelected = i === idx;
-
-        return (
-          <Text key={opt.value}>
-            <Text color={isSelected ? 'cyan' : undefined}>
-              {isSelected ? '› ' : '  '}
-              {opt.title}
-            </Text>
-            {opt.detail ? <Text dimColor>{` · ${opt.detail}`}</Text> : null}
-          </Text>
-        );
-      })}
-    </Box>
-  );
-}
-
-const DASHBOARD_CHANNEL_HINT =
-  'Onboarding for this channel is currently only available in the Novu Connect UI.';
+/**
+ * Per-channel picker hints. Channels without an entry render no hint;
+ * dashboard-only channels additionally get the `↗` glyph via
+ * {@link isDashboardOnlyChannel}.
+ */
+const CHANNEL_HINTS: Partial<Record<ChannelChoice, string>> = {
+  teams: 'Onboarding for this channel is currently only available in the Novu Connect UI.',
+  whatsapp:
+    'Opens Meta signup in your browser — the CLI resumes automatically. Falls back to the Novu Connect UI when unavailable.',
+};
 /** Keeps the picker + hint from widening the centered layout when the hint appears. */
 const CHANNEL_PICKER_WIDTH = 48;
+/** WhatsApp hint wraps to 3 lines — reserve that height always so Ink incremental diffs don't shrink. */
+const CHANNEL_HINT_RESERVED_LINES = 3;
 
 function ChannelSelect({
   options,
@@ -413,37 +417,41 @@ function ChannelSelect({
   onChange: (value: ChannelChoice) => void;
   onHighlight: (value: ChannelChoice | null) => void;
 }): React.ReactElement {
+  const uniqueOptions = options.filter(
+    (opt, index, arr) => arr.findIndex((candidate) => candidate.value === opt.value) === index
+  );
   const [idx, setIdx] = React.useState(0);
 
   // Seed the parent with the initial highlight so the orb doesn't sit on
   // white for a frame before the user touches the arrow keys.
   React.useEffect(() => {
-    onHighlight(options[0]?.value ?? null);
+    onHighlight(uniqueOptions[0]?.value ?? null);
     // We only want to fire on mount; subsequent highlights flow through useInput.
     // biome-ignore lint/correctness/useExhaustiveDependencies: intentional mount-only effect
   }, []);
 
   useInput((_input, key) => {
     if (key.upArrow) {
-      const next = (idx - 1 + options.length) % options.length;
+      const next = (idx - 1 + uniqueOptions.length) % uniqueOptions.length;
       setIdx(next);
-      onHighlight(options[next].value);
+      onHighlight(uniqueOptions[next].value);
     } else if (key.downArrow) {
-      const next = (idx + 1) % options.length;
+      const next = (idx + 1) % uniqueOptions.length;
       setIdx(next);
-      onHighlight(options[next].value);
+      onHighlight(uniqueOptions[next].value);
     } else if (key.return) {
-      onChange(options[idx].value);
+      onChange(uniqueOptions[idx].value);
     }
   });
 
-  const highlighted = options[idx]?.value ?? null;
-  const showDashboardHint = highlighted !== null && isDashboardOnlyChannel(highlighted);
+  const highlighted = uniqueOptions[idx]?.value ?? null;
+  const channelHint = highlighted !== null ? CHANNEL_HINTS[highlighted] : undefined;
+  const hintLines = buildChannelHintLines(channelHint);
 
   return (
     <Box flexDirection="column" gap={1} alignItems="flex-start">
       <Box flexDirection="column" alignItems="flex-start">
-        {options.map((opt, i) => {
+        {uniqueOptions.map((opt, i) => {
           const isSelected = i === idx;
           const opensInDashboard = isDashboardOnlyChannel(opt.value);
           const prefix = isSelected ? '› ' : '  ';
@@ -458,19 +466,50 @@ function ChannelSelect({
         })}
       </Box>
       <Box flexDirection="column" width={CHANNEL_PICKER_WIDTH}>
-        {showDashboardHint ? (
-          <Text dimColor wrap="wrap">
-            {DASHBOARD_CHANNEL_HINT}
+        {hintLines.map((line, lineIndex) => (
+          <Text key={lineIndex} dimColor={Boolean(channelHint && line.trim().length > 0)}>
+            {line.length > 0 ? line : ' '}
           </Text>
-        ) : (
-          <>
-            <Text> </Text>
-            <Text> </Text>
-          </>
-        )}
+        ))}
       </Box>
     </Box>
   );
+}
+
+function buildChannelHintLines(channelHint: string | undefined): string[] {
+  const lines = channelHint ? wrapHintLines(channelHint, CHANNEL_PICKER_WIDTH) : [];
+
+  while (lines.length < CHANNEL_HINT_RESERVED_LINES) {
+    lines.push('');
+  }
+
+  return lines.slice(0, CHANNEL_HINT_RESERVED_LINES);
+}
+
+function wrapHintLines(text: string, width: number): string[] {
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let current = '';
+
+  for (const word of words) {
+    const candidate = current.length === 0 ? word : `${current} ${word}`;
+    if (candidate.length <= width) {
+      current = candidate;
+      continue;
+    }
+
+    if (current.length > 0) {
+      lines.push(current);
+    }
+
+    current = word;
+  }
+
+  if (current.length > 0) {
+    lines.push(current);
+  }
+
+  return lines;
 }
 function GeneratingContent(): React.ReactElement {
   const [elapsed, setElapsed] = React.useState(0);
@@ -506,118 +545,6 @@ function truncateInline(text: string, maxLength: number): string {
   return `${text.slice(0, maxLength - 1)}…`;
 }
 
-function SlackOAuthReadyContent({
-  appCreated,
-  authorizeUrl,
-  onContinue,
-}: {
-  appCreated: boolean;
-  authorizeUrl: string;
-  onContinue: () => void;
-}): React.ReactElement {
-  useInput((_input, key) => {
-    if (key.return || _input === ' ') onContinue();
-  });
-
-  return (
-    <Box flexDirection="column" gap={1}>
-      {appCreated ? (
-        <>
-          <Text bold color="green">
-            Slack app created successfully
-          </Text>
-          <Text dimColor>
-            Novu created a Slack app for your agent. Next, add it to your workspace so your team can talk to the agent
-            in Slack.
-          </Text>
-        </>
-      ) : (
-        <>
-          <Text bold color="cyan">
-            Connect Slack to your agent
-          </Text>
-          <Text dimColor>Authorize Novu to install the Slack app in your workspace.</Text>
-        </>
-      )}
-      <Text dimColor>{`OAuth link: ${authorizeUrl.slice(0, 80)}${authorizeUrl.length > 80 ? '…' : ''}`}</Text>
-      <Text color="cyan">Press Enter to open Slack and add the app to your workspace →</Text>
-    </Box>
-  );
-}
-
-function EmailReadyContent({
-  inboundAddress,
-  mailtoUrl,
-  onContinue,
-}: {
-  inboundAddress: string;
-  mailtoUrl: string;
-  onContinue: () => void;
-}): React.ReactElement {
-  useInput((_input, key) => {
-    if (key.return || _input === ' ') onContinue();
-  });
-
-  return (
-    <Box flexDirection="column" gap={1}>
-      <Text bold color="cyan">
-        Your agent has an inbox
-      </Text>
-      <Text dimColor>Send any email to the address below — your agent will read it and reply to your inbox.</Text>
-      <Box flexDirection="column" paddingY={1}>
-        <Text bold>{inboundAddress}</Text>
-      </Box>
-      <Text dimColor>{`mailto link: ${mailtoUrl.slice(0, 80)}${mailtoUrl.length > 80 ? '…' : ''}`}</Text>
-      <Text color="cyan">Press Enter to open a pre-filled draft in your default mail client →</Text>
-    </Box>
-  );
-}
-
-function TelegramIntroContent({
-  botfatherQr,
-  onContinue,
-}: {
-  botfatherQr: string;
-  onContinue: () => void;
-}): React.ReactElement {
-  useInput((_input, key) => {
-    if (key.return || _input === ' ') {
-      onContinue();
-    }
-  });
-
-  return (
-    <Box flexDirection="column" gap={1}>
-      <Text bold color="cyan">
-        Step 1 of 3 · Create your Telegram bot
-      </Text>
-      <Box flexDirection="column">
-        <Text>
-          <Text color="white" bold>
-            1.
-          </Text>{' '}
-          Open Telegram and message <Text color="cyan">@BotFather</Text>.
-        </Text>
-        <Text>
-          <Text color="white" bold>
-            2.
-          </Text>{' '}
-          Run <Text color="magenta">/newbot</Text>, choose a name and username.
-        </Text>
-        <Text>
-          <Text color="white" bold>
-            3.
-          </Text>{' '}
-          Keep the BotFather chat open — you'll paste the token from there in the next step.
-        </Text>
-      </Box>
-      <Text dimColor>Or scan to open BotFather on your phone:</Text>
-      <Text>{botfatherQr}</Text>
-      <Text dimColor>Press Enter when you have your bot token →</Text>
-    </Box>
-  );
-}
-
 function DashboardChannelReadyContent({
   channel,
   agentDetailsUrl,
@@ -640,7 +567,7 @@ function DashboardChannelReadyContent({
         {channelLabel} setup is not available in the CLI yet. Press Enter to open your agent in Novu Connect and finish
         connecting there.
       </Text>
-      <Text color="cyan">{agentDetailsUrl}</Text>
+      <CopyableLink url={agentDetailsUrl} hint="Or open this link:" />
       <Text dimColor>Press Enter to open Novu Connect →</Text>
     </Box>
   );
@@ -651,15 +578,75 @@ function SuccessView({
 }: {
   phase: Extract<ReturnType<ConnectStore['phase']['get']>, { kind: 'success' }>;
 }): React.ReactElement {
-  const { agent, connectDashboardUrl, environmentSlug, connectedChannel, dashboardRedirectChannel } = phase;
-  const agentUrl = environmentSlug
-    ? `${connectDashboardUrl}/env/${environmentSlug}/connect/agents/${encodeURIComponent(agent.identifier)}`
-    : `${connectDashboardUrl}/connect/agents/${encodeURIComponent(agent.identifier)}`;
+  const {
+    agent,
+    connectDashboardUrl,
+    environmentSlug,
+    connectedChannel,
+    dashboardRedirectChannel,
+    isKeyless,
+    claimUrl,
+    connectMode,
+    chatSdkOutcome,
+    aiSdkOutcome,
+    langChainOutcome,
+    webChatOutcome,
+    embedPrompt,
+    embedPromptFile,
+    resolveDismiss,
+    customCodeOutcome,
+  } = phase;
+
+  const successResult = {
+    agent,
+    dashboardUrl: phase.dashboardUrl,
+    connectDashboardUrl,
+    environmentSlug,
+    connectedChannel,
+    dashboardRedirectChannel,
+    isKeyless,
+    claimUrl,
+    connectMode,
+    chatSdkOutcome,
+    aiSdkOutcome,
+    langChainOutcome,
+    customCodeOutcome,
+    webChatOutcome,
+    webChatHandoff: phase.webChatHandoff,
+  };
+
+  const webChatInk = WebChatInkSuccessContent({
+    result: successResult,
+    embedPrompt,
+    embedPromptFile,
+    onDismiss: resolveDismiss,
+  });
+
+  if (webChatInk) {
+    return webChatInk;
+  }
+
+  const scaffoldMessage = resolveBridgeSetupFollowUpMessage(connectMode, {
+    chatSdk: chatSdkOutcome,
+    aiSdk: aiSdkOutcome,
+    langChain: langChainOutcome,
+    customCode: customCodeOutcome,
+  });
+  const destination = resolveConnectSuccessDestination({
+    connectDashboardUrl,
+    environmentSlug,
+    agentIdentifier: agent.identifier,
+    isKeyless,
+    claimUrl,
+  });
 
   const channelLabel = (() => {
     if (connectedChannel === 'slack') return 'Slack';
     if (connectedChannel === 'telegram') return 'Telegram';
     if (connectedChannel === 'email') return 'Email';
+    if (connectedChannel === 'sendblue') return 'iMessage (Sendblue)';
+    if (connectedChannel === 'whatsapp') return 'WhatsApp';
+    if (connectedChannel === 'web-chat') return 'Web Chat';
 
     return null;
   })();
@@ -673,11 +660,33 @@ function SuccessView({
           <Text bold>Agent:</Text> {agent.name} <Text dimColor>({agent.identifier})</Text>
         </Text>
         {renderSuccessChannelMessage(channelLabel, redirectChannelLabel)}
-        <Text>
-          <Text bold>Dashboard:</Text> {agentUrl}
-        </Text>
+        {scaffoldMessage ? <Text color="cyan">{scaffoldMessage}</Text> : null}
+        {renderSuccessNextStep(destination)}
       </Box>
     </Box>
+  );
+}
+
+function renderSuccessNextStep(destination: ConnectSuccessDestination): React.ReactElement {
+  if (destination.kind === 'claim') {
+    return (
+      <>
+        <Text>
+          <Text bold>Claim your agent:</Text> {destination.url}
+        </Text>
+        <Text dimColor>Sign up to move your agent and conversation into your own account.</Text>
+      </>
+    );
+  }
+
+  if (destination.kind === 'unclaimed') {
+    return <Text dimColor>{UNCLAIMED_KEYLESS_HINT}</Text>;
+  }
+
+  return (
+    <Text>
+      <Text bold>Dashboard:</Text> {destination.url}
+    </Text>
   );
 }
 
@@ -690,9 +699,7 @@ function renderSuccessChannelMessage(
   }
 
   if (redirectChannelLabel) {
-    return (
-      <Text color="cyan">Finish {redirectChannelLabel} setup in Novu Connect — we opened it for you.</Text>
-    );
+    return <Text color="cyan">Finish {redirectChannelLabel} setup in Novu Connect — we opened it for you.</Text>;
   }
 
   return <Text dimColor>No channel connected. Run `npx novu connect` again to wire one up.</Text>;

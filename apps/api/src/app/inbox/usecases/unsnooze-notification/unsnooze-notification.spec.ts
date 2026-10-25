@@ -1,9 +1,16 @@
 import { NotFoundException } from '@nestjs/common';
-import { CreateExecutionDetails, CreateExecutionDetailsCommand, PinoLogger } from '@novu/application-generic';
+import {
+  CreateExecutionDetails,
+  CreateExecutionDetailsCommand,
+  DeferReasonEnum,
+  EventBridgeSchedulerService,
+  PinoLogger,
+} from '@novu/application-generic';
 import { JobEntity, JobRepository, MessageEntity, MessageRepository } from '@novu/dal';
 import { ChannelTypeEnum, JobStatusEnum, SeverityLevelEnum } from '@novu/shared';
 import { expect } from 'chai';
 import sinon from 'sinon';
+import { GetSubscriber } from '../../../subscribers/usecases/get-subscriber';
 import { InboxNotificationDto } from '../../dtos/inbox-notification.dto';
 import { MarkNotificationAsCommand } from '../mark-notification-as/mark-notification-as.command';
 import { MarkNotificationAs } from '../mark-notification-as/mark-notification-as.usecase';
@@ -24,6 +31,8 @@ describe('UnsnoozeNotification', () => {
   let jobRepositoryMock: sinon.SinonStubbedInstance<JobRepository>;
   let createExecutionDetailsMock: sinon.SinonStubbedInstance<CreateExecutionDetails>;
   let markNotificationAsMock: sinon.SinonStubbedInstance<MarkNotificationAs>;
+  let getSubscriberMock: sinon.SinonStubbedInstance<GetSubscriber>;
+  let schedulerServiceMock: sinon.SinonStubbedInstance<EventBridgeSchedulerService>;
 
   const snoozedUntil = new Date();
   snoozedUntil.setHours(snoozedUntil.getHours() + 1);
@@ -77,6 +86,9 @@ describe('UnsnoozeNotification', () => {
     jobRepositoryMock = sinon.createStubInstance(JobRepository);
     createExecutionDetailsMock = sinon.createStubInstance(CreateExecutionDetails);
     markNotificationAsMock = sinon.createStubInstance(MarkNotificationAs);
+    getSubscriberMock = sinon.createStubInstance(GetSubscriber);
+    schedulerServiceMock = sinon.createStubInstance(EventBridgeSchedulerService);
+    schedulerServiceMock.deleteSchedule.resolves();
 
     sinon.stub(MarkNotificationAsCommand, 'create').returns({
       environmentId: validEnvId,
@@ -97,12 +109,15 @@ describe('UnsnoozeNotification', () => {
       messageRepositoryMock as any,
       jobRepositoryMock as any,
       markNotificationAsMock as any,
-      createExecutionDetailsMock as any
+      createExecutionDetailsMock as any,
+      getSubscriberMock as any,
+      schedulerServiceMock as any
     );
 
     jobRepositoryMock.findOneAndDelete.resolves(mockJob);
     markNotificationAsMock.execute.resolves(mockNotification);
     createExecutionDetailsMock.execute.resolves();
+    getSubscriberMock.execute.resolves({ _id: validSubscriberId } as any);
     messageRepositoryMock.findOne.resolves(mockMessage);
   });
 
@@ -129,6 +144,9 @@ describe('UnsnoozeNotification', () => {
 
     expect(result).to.deep.equal(mockNotification);
     expect(jobRepositoryMock.findOneAndDelete.calledOnce).to.be.true;
+    // Matches DELAYED (current) and PENDING (unsnooze jobs created before the DELAYED switch)
+    const deleteQuery = jobRepositoryMock.findOneAndDelete.firstCall.args[0];
+    expect(deleteQuery.status).to.deep.equal({ $in: [JobStatusEnum.DELAYED, JobStatusEnum.PENDING] });
     expect(markNotificationAsMock.execute.calledOnce).to.be.true;
 
     // Verify that markNotificationAs was called with the correct args
@@ -140,6 +158,37 @@ describe('UnsnoozeNotification', () => {
 
     // Verify that createExecutionDetails was called
     expect(createExecutionDetailsMock.execute.calledOnce).to.be.true;
+  });
+
+  it('should delete the snooze schedule so a stale fire cannot churn on SQS', async () => {
+    const command = createCommand();
+
+    await unsnoozeNotification.execute(command);
+
+    expect(schedulerServiceMock.deleteSchedule.calledOnce).to.be.true;
+    expect(schedulerServiceMock.deleteSchedule.firstCall.args[0]).to.deep.equal({
+      deferReason: DeferReasonEnum.SNOOZE,
+      organizationId: validOrgId,
+      scheduleId: validJobId,
+    });
+  });
+
+  it('should still unsnooze when deleting the schedule fails', async () => {
+    const command = createCommand();
+    schedulerServiceMock.deleteSchedule.rejects(new Error('AccessDeniedException'));
+
+    const result = await unsnoozeNotification.execute(command);
+
+    expect(result).to.deep.equal(mockNotification);
+  });
+
+  it('should not attempt a schedule delete when there was no scheduled job', async () => {
+    const command = createCommand();
+    jobRepositoryMock.findOneAndDelete.resolves(null);
+
+    await unsnoozeNotification.execute(command);
+
+    expect(schedulerServiceMock.deleteSchedule.called).to.be.false;
   });
 
   it('should handle missing scheduled job gracefully', async () => {

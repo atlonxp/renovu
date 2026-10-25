@@ -335,6 +335,7 @@ function defaultStepName(type: StepTypeEnum): string {
     [StepTypeEnum.SMS]: 'SMS',
     [StepTypeEnum.PUSH]: 'Push notification',
     [StepTypeEnum.CHAT]: 'Chat message',
+    [StepTypeEnum.TOOL]: 'Tool step',
     [StepTypeEnum.DELAY]: 'Delay',
     [StepTypeEnum.DIGEST]: 'Digest',
     [StepTypeEnum.THROTTLE]: 'Throttle',

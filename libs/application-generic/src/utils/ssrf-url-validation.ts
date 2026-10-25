@@ -9,11 +9,11 @@
 // inlined copy so backend code has a single import path through
 // `@novu/application-generic`.
 //
-// Drift hazard: any change to the policy regexes, blocked hostname set,
-// SsrfBlockedError shape, redirect state machine, or DNS handling MUST land in
-// both files. A behavioural drift test in `packages/shared` exercises both
-// implementations against the same inputs to fail loudly if they ever
-// diverge — see `packages/shared/src/utils/safe-outbound-http-drift.spec.ts`.
+// Drift hazard: URL policy, redirect state machine, and DNS handling MUST stay
+// in lockstep between packages/shared and this mirror. Private IP classification
+// is canonical in @novu/shared/utils/private-ip-classification and re-exported here.
+// Runtime require() needs compiled dist output; nx build ordering (^build) builds
+// @novu/shared before application-generic.
 //
 // New code should prefer `safeOutboundRequest` / `safeOutboundJsonRequest`,
 // which enforce the policy at connect time and re-validate every redirect.
@@ -21,8 +21,22 @@
 import * as dns from 'node:dns';
 import * as http from 'node:http';
 import * as https from 'node:https';
+import { isIP } from 'node:net';
 import { Readable } from 'node:stream';
 import { LRUCache } from 'lru-cache';
+
+type PrivateIpClassificationModule = typeof import('@novu/shared/dist/cjs/utils/private-ip-classification');
+type OutboundSsrfAllowListModule = typeof import('@novu/shared/dist/cjs/utils/outbound-ssrf-allow-list');
+
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { isPrivateIp, isLinkLocalIp, normalizeHostnameForLookup } =
+  require('@novu/shared/utils/private-ip-classification') as PrivateIpClassificationModule;
+
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { isAddressAllowedByOutboundAllowList, isHostnameAllowedByOutboundAllowList, isOutboundAddressAllowed } =
+  require('@novu/shared/utils/outbound-ssrf-allow-list') as OutboundSsrfAllowListModule;
+
+export { isPrivateIp, isLinkLocalIp, normalizeHostnameForLookup };
 
 export function normalizeOutboundHttpUrl(raw: string): string | null {
   const trimmed = raw.trim();
@@ -62,33 +76,6 @@ const DNS_CACHE = new LRUCache<string, dns.LookupAddress[]>({
   max: 500,
   ttl: 1000 * 60 * 5,
 });
-
-export function isPrivateIp(ip: string): boolean {
-  const sharedAddressSecondOctet = '(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])';
-  const privateRanges = [
-    /^0\.0\.0\.0$/i,
-    /^127\./,
-    /^10\./,
-    /^172\.(1[6-9]|2[0-9]|3[01])\./,
-    /^192\.168\./,
-    /^169\.254\./,
-    /* RFC6598 shared address space (100.64.0.0/10) — cloud metadata, CGNAT */
-    new RegExp(`^100\\.${sharedAddressSecondOctet}\\.`),
-    /^::ffff:127\./i,
-    /^::ffff:10\./i,
-    /^::ffff:172\.(1[6-9]|2[0-9]|3[01])\./i,
-    /^::ffff:192\.168\./i,
-    /^::ffff:169\.254\./i,
-    new RegExp(`^::ffff:100\\.${sharedAddressSecondOctet}\\.`, 'i'),
-    /^::1$/i,
-    /^f[cd][0-9a-f]{2}:/i,
-    /^::ffff:f[cd][0-9a-f]{2}:/i,
-    /^fe[89ab][0-9a-f]:/i,
-    /^::ffff:fe[89ab][0-9a-f]:/i,
-  ];
-
-  return privateRanges.some((range) => range.test(ip));
-}
 
 const BLOCKED_HOSTNAMES = new Set(['localhost', 'metadata.google.internal']);
 
@@ -141,6 +128,19 @@ export function assertSafeOutboundUrl(input: string | URL): URL {
     throw new SsrfBlockedError('BLOCKED_HOSTNAME', `Requests to "${hostname}" are not allowed.`, { hostname });
   }
 
+  const normalized = normalizeHostnameForLookup(hostname);
+  const literalFamily = isIP(normalized);
+
+  if (literalFamily !== 0) {
+    if (isLinkLocalIp(normalized) || (isPrivateIp(normalized) && !isOutboundAddressAllowed(normalized, normalized))) {
+      throw new SsrfBlockedError(
+        'PRIVATE_IP',
+        `Requests to private or reserved IP addresses are not allowed (resolved: ${normalized}).`,
+        { hostname: normalized, resolvedAddress: normalized }
+      );
+    }
+  }
+
   return parsed;
 }
 
@@ -148,31 +148,51 @@ export async function resolvePublicAddresses(
   hostname: string,
   options: { useCache?: boolean } = {}
 ): Promise<dns.LookupAddress[]> {
-  const lower = hostname.toLowerCase();
+  const normalized = normalizeHostnameForLookup(hostname);
   let addresses: dns.LookupAddress[] | undefined;
 
   if (options.useCache) {
-    addresses = DNS_CACHE.get(lower);
+    addresses = DNS_CACHE.get(normalized);
   }
 
   if (!addresses) {
-    try {
-      addresses = await dns.promises.lookup(lower, { all: true });
-    } catch {
-      throw new SsrfBlockedError('DNS_LOOKUP_FAILED', `Unable to resolve hostname "${lower}".`, { hostname: lower });
+    const literalFamily = isIP(normalized);
+
+    if (literalFamily !== 0) {
+      addresses = [{ address: normalized, family: literalFamily }];
+    } else {
+      try {
+        addresses = await dns.promises.lookup(normalized, { all: true });
+      } catch {
+        throw new SsrfBlockedError('DNS_LOOKUP_FAILED', `Unable to resolve hostname "${normalized}".`, {
+          hostname: normalized,
+        });
+      }
     }
 
     if (options.useCache) {
-      DNS_CACHE.set(lower, addresses);
+      DNS_CACHE.set(normalized, addresses);
     }
   }
 
   for (const { address } of addresses) {
+    if (isLinkLocalIp(address)) {
+      throw new SsrfBlockedError(
+        'PRIVATE_IP',
+        `Requests to private or reserved IP addresses are not allowed (resolved: ${address}).`,
+        { hostname: normalized, resolvedAddress: address }
+      );
+    }
+
+    if (isHostnameAllowedByOutboundAllowList(normalized) || isAddressAllowedByOutboundAllowList(address)) {
+      continue;
+    }
+
     if (isPrivateIp(address)) {
       throw new SsrfBlockedError(
         'PRIVATE_IP',
         `Requests to private or reserved IP addresses are not allowed (resolved: ${address}).`,
-        { hostname: lower, resolvedAddress: address }
+        { hostname: normalized, resolvedAddress: address }
       );
     }
   }
@@ -242,52 +262,24 @@ export interface SafeOutboundResponse {
   body: Buffer;
 }
 
+export interface SafeOutboundStreamRequestOptions extends Omit<SafeOutboundRequestOptions, 'maxResponseBytes'> {
+  /** Socket idle timeout once the response headers arrived; `timeoutMs` applies until then. */
+  idleTimeoutMs?: number;
+}
+
+export interface SafeOutboundStreamResponse {
+  statusCode: number;
+  statusMessage: string;
+  headers: http.IncomingHttpHeaders;
+  /** Unread response body; consume or `resume()` it so the socket is released. */
+  body: Readable;
+}
+
 export interface SafeOutboundJsonResponse<T = unknown> {
   statusCode: number;
   statusMessage: string;
   headers: http.IncomingHttpHeaders;
   body: T;
-}
-
-function getTestAllowList(): Set<string> {
-  const raw = process.env.NOVU_SAFE_OUTBOUND_TEST_ALLOW_IPS;
-  if (!raw) return new Set<string>();
-
-  return new Set(
-    raw
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean)
-  );
-}
-
-async function resolveWithTestAllowList(hostname: string): Promise<dns.LookupAddress[]> {
-  const allowList = getTestAllowList();
-  if (allowList.size === 0) {
-    return resolvePublicAddresses(hostname);
-  }
-
-  let addresses: dns.LookupAddress[];
-  try {
-    addresses = await dns.promises.lookup(hostname.toLowerCase(), { all: true });
-  } catch {
-    throw new SsrfBlockedError('DNS_LOOKUP_FAILED', `Unable to resolve hostname "${hostname}".`, {
-      hostname,
-    });
-  }
-
-  for (const { address } of addresses) {
-    if (allowList.has(address)) continue;
-    if (isPrivateIp(address)) {
-      throw new SsrfBlockedError(
-        'PRIVATE_IP',
-        `Requests to private or reserved IP addresses are not allowed (resolved: ${address}).`,
-        { hostname, resolvedAddress: address }
-      );
-    }
-  }
-
-  return addresses;
 }
 
 const SENSITIVE_HEADER_PATTERNS = [
@@ -299,10 +291,29 @@ const SENSITIVE_HEADER_PATTERNS = [
   /-hmac/i,
 ];
 
+const TRACE_PROPAGATION_HEADER_PATTERNS = [
+  /^traceparent$/i,
+  /^tracestate$/i,
+  /^baggage$/i,
+  /^b3$/i,
+  /^x-b3-/i,
+  /^newrelic$/i,
+  /^x-newrelic-/i,
+  /^sentry-trace$/i,
+];
+
 function stripSensitiveHeaders(headers: Record<string, string | undefined>): void {
   for (const key of Object.keys(headers)) {
     if (SENSITIVE_HEADER_PATTERNS.some((re) => re.test(key))) {
       delete headers[key];
+    }
+  }
+}
+
+function stripTracePropagationHeaders(request: http.ClientRequest): void {
+  for (const header of request.getHeaderNames()) {
+    if (TRACE_PROPAGATION_HEADER_PATTERNS.some((re) => re.test(header))) {
+      request.removeHeader(header);
     }
   }
 }
@@ -370,18 +381,19 @@ interface PinnedRequestParams {
   headers: Record<string, string | undefined>;
   body: SafeOutboundRequestOptions['body'];
   timeoutMs: number;
-  maxResponseBytes: number;
+  idleTimeoutMs?: number;
   rejectUnauthorized: boolean;
 }
 
-function performPinnedRequest(params: PinnedRequestParams): Promise<SafeOutboundResponse> {
-  const { parsed, address, method, headers, body, timeoutMs, maxResponseBytes, rejectUnauthorized } = params;
+/** Resolves once the response headers arrive; the body is left unread. */
+function openPinnedRequest(params: PinnedRequestParams): Promise<http.IncomingMessage> {
+  const { parsed, address, method, headers, body, timeoutMs, idleTimeoutMs, rejectUnauthorized } = params;
   const isHttps = parsed.protocol === 'https:';
   const transport = isHttps ? https : http;
 
   const requestHeaders = buildOutboundHeaders(headers, parsed, body);
 
-  return new Promise<SafeOutboundResponse>((resolve, reject) => {
+  return new Promise<http.IncomingMessage>((resolve, reject) => {
     const requestOptions: http.RequestOptions & { servername?: string; rejectUnauthorized?: boolean } = {
       protocol: parsed.protocol,
       hostname: address.address,
@@ -398,39 +410,29 @@ function performPinnedRequest(params: PinnedRequestParams): Promise<SafeOutbound
       requestOptions.rejectUnauthorized = rejectUnauthorized;
     }
 
+    let activeTimeoutMs = timeoutMs;
+    let response: http.IncomingMessage | undefined;
     const req = transport.request(requestOptions, (res) => {
-      const chunks: Buffer[] = [];
-      let total = 0;
-      let aborted = false;
-
-      res.on('data', (chunk: Buffer) => {
-        if (aborted) return;
-        total += chunk.length;
-        if (total > maxResponseBytes) {
-          aborted = true;
-          res.destroy();
-          reject(new Error(`Response exceeded maximum size of ${maxResponseBytes} bytes.`));
-
-          return;
-        }
-        chunks.push(chunk);
-      });
-
-      res.on('end', () => {
-        if (aborted) return;
-        resolve({
-          statusCode: res.statusCode ?? 0,
-          statusMessage: res.statusMessage ?? '',
-          headers: res.headers,
-          body: Buffer.concat(chunks, total),
-        });
-      });
-
-      res.on('error', reject);
+      response = res;
+      if (idleTimeoutMs !== undefined) {
+        activeTimeoutMs = idleTimeoutMs;
+        req.setTimeout(idleTimeoutMs);
+      }
+      resolve(res);
     });
 
+    stripTracePropagationHeaders(req);
+
     req.on('timeout', () => {
-      req.destroy(new Error(`Request to ${parsed.hostname} timed out after ${timeoutMs}ms.`));
+      const timeoutError: NodeJS.ErrnoException = new Error(
+        `Request to ${parsed.hostname} timed out after ${activeTimeoutMs}ms.`
+      );
+      // Tag the error so callers (e.g. HttpClientService retry logic) can treat
+      // socket timeouts as a retryable transport failure, matching the `got` path.
+      timeoutError.code = 'ETIMEDOUT';
+      // Once headers arrived the caller reads the body, so the timeout must surface there.
+      response?.destroy(timeoutError);
+      req.destroy(timeoutError);
     });
     req.on('error', reject);
 
@@ -456,15 +458,46 @@ function performPinnedRequest(params: PinnedRequestParams): Promise<SafeOutbound
   });
 }
 
+function readBody(res: Readable, maxResponseBytes: number): Promise<Buffer> {
+  return new Promise<Buffer>((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let total = 0;
+    let aborted = false;
+
+    res.on('data', (chunk: Buffer) => {
+      if (aborted) return;
+      total += chunk.length;
+      if (total > maxResponseBytes) {
+        aborted = true;
+        res.destroy();
+        reject(new Error(`Response exceeded maximum size of ${maxResponseBytes} bytes.`));
+
+        return;
+      }
+      chunks.push(chunk);
+    });
+
+    res.on('end', () => {
+      if (aborted) return;
+      resolve(Buffer.concat(chunks, total));
+    });
+
+    res.on('error', reject);
+  });
+}
+
 export async function safeOutboundRequest(options: SafeOutboundRequestOptions): Promise<SafeOutboundResponse> {
+  const { body, ...response } = await safeOutboundStreamRequest(options);
+
+  return { ...response, body: await readBody(body, options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES) };
+}
+
+/** Like `safeOutboundRequest`, but resolves on the response headers with the body unread (e.g. for SSE). */
+export async function safeOutboundStreamRequest(
+  options: SafeOutboundStreamRequestOptions
+): Promise<SafeOutboundStreamResponse> {
   const maxRedirects = options.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
-  const initialOriginHost = (() => {
-    try {
-      return new URL(options.url as string | URL).host.toLowerCase();
-    } catch {
-      return null;
-    }
-  })();
+  const initialOriginHost = originHost(options.url);
 
   let currentUrl: string | URL = options.url;
   let currentMethod: SafeOutboundMethod = options.method ?? 'GET';
@@ -479,24 +512,22 @@ export async function safeOutboundRequest(options: SafeOutboundRequestOptions): 
       currentBody = undefined;
     }
 
-    const addresses = await resolveWithTestAllowList(parsed.hostname);
-    const chosen = addresses[0];
-    if (!chosen) {
-      throw new SsrfBlockedError('DNS_LOOKUP_FAILED', `Unable to resolve hostname "${parsed.hostname}".`, {
-        hostname: parsed.hostname,
-      });
-    }
-
-    const response = await performPinnedRequest({
+    const res = await openPinnedRequest({
       parsed,
-      address: chosen,
+      address: await resolvePinnedAddress(parsed.hostname),
       method: currentMethod,
       headers: currentHeaders,
       body: currentBody,
       timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-      maxResponseBytes: options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES,
+      idleTimeoutMs: options.idleTimeoutMs,
       rejectUnauthorized: options.rejectUnauthorized ?? true,
     });
+    const response: SafeOutboundStreamResponse = {
+      statusCode: res.statusCode ?? 0,
+      statusMessage: res.statusMessage ?? '',
+      headers: res.headers,
+      body: res,
+    };
 
     const status = response.statusCode;
 
@@ -507,25 +538,13 @@ export async function safeOutboundRequest(options: SafeOutboundRequestOptions): 
         return response;
       }
 
+      res.destroy();
       const nextUrl = new URL(location, parsed.toString());
-
-      // 307 and 308 are method-preserving redirects: the upstream is asking us
-      // to replay the original method+body against the new target. If the new
-      // target is on a different origin, we cannot safely strip the body or
-      // downgrade the method without changing semantics, and silently blanking
-      // the body would mask the cross-origin attempt from the caller. Treat it
-      // as a hard stop so the caller can decide what to do.
-      if ((status === 307 || status === 308) && initialOriginHost && nextUrl.host.toLowerCase() !== initialOriginHost) {
-        throw new SsrfBlockedError(
-          'CROSS_ORIGIN_METHOD_PRESERVING_REDIRECT',
-          `Refusing to follow ${status} redirect from ${parsed.host} to ${nextUrl.host}: method-preserving redirects across origin boundaries are not allowed.`,
-          { hostname: nextUrl.hostname }
-        );
-      }
+      assertNoCrossOriginMethodPreservingRedirect(status, parsed, nextUrl, initialOriginHost);
 
       currentUrl = nextUrl;
 
-      if (status === 303 || ((status === 301 || status === 302) && currentMethod === 'POST')) {
+      if (redirectsToGet(status, currentMethod)) {
         currentMethod = 'GET';
         currentBody = undefined;
       }
@@ -537,6 +556,51 @@ export async function safeOutboundRequest(options: SafeOutboundRequestOptions): 
   }
 
   throw new SsrfBlockedError('INVALID_URL', `Maximum redirect count (${maxRedirects}) exceeded.`);
+}
+
+async function resolvePinnedAddress(hostname: string) {
+  const [chosen] = await resolvePublicAddresses(hostname);
+  if (!chosen) {
+    throw new SsrfBlockedError('DNS_LOOKUP_FAILED', `Unable to resolve hostname "${hostname}".`, { hostname });
+  }
+
+  return chosen;
+}
+
+function originHost(url: string | URL): string | null {
+  try {
+    return new URL(url).host.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+// 307 and 308 are method-preserving redirects: the upstream is asking us
+// to replay the original method+body against the new target. If the new
+// target is on a different origin, we cannot safely strip the body or
+// downgrade the method without changing semantics, and silently blanking
+// the body would mask the cross-origin attempt from the caller. Treat it
+// as a hard stop so the caller can decide what to do.
+function assertNoCrossOriginMethodPreservingRedirect(
+  status: number,
+  current: URL,
+  nextUrl: URL,
+  initialOriginHost: string | null
+): void {
+  const preservesMethod = status === 307 || status === 308;
+  if (!preservesMethod || !initialOriginHost || nextUrl.host.toLowerCase() === initialOriginHost) {
+    return;
+  }
+
+  throw new SsrfBlockedError(
+    'CROSS_ORIGIN_METHOD_PRESERVING_REDIRECT',
+    `Refusing to follow ${status} redirect from ${current.host} to ${nextUrl.host}: method-preserving redirects across origin boundaries are not allowed.`,
+    { hostname: nextUrl.hostname }
+  );
+}
+
+function redirectsToGet(status: number, method: SafeOutboundMethod): boolean {
+  return status === 303 || ((status === 301 || status === 302) && method === 'POST');
 }
 
 export async function safeOutboundJsonRequest<T = unknown>(
@@ -570,6 +634,15 @@ export async function safeOutboundJsonRequest<T = unknown>(
       parsed = response.body.length === 0 ? undefined : JSON.parse(response.body.toString('utf8'));
     } catch {
       // Leave parsed as string if JSON parsing fails.
+    }
+  } else if (typeof parsed === 'string') {
+    const trimmed = parsed.trim();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch {
+        // Leave parsed as string if JSON parsing fails.
+      }
     }
   }
 

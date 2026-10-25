@@ -15,6 +15,9 @@ describe('SinchSmsProvider', () => {
   let provider: SinchSmsProvider;
 
   beforeEach(() => {
+    // The provider builds its client through `createProviderHttpClient`, so point the
+    // instance's `post` back at the module-level mock these tests already assert on.
+    vi.mocked(axios.create).mockReturnValue({ post: axios.post } as never);
     provider = new SinchSmsProvider(mockConfig);
     vi.clearAllMocks();
   });
@@ -106,6 +109,16 @@ describe('SinchSmsProvider', () => {
         expect.any(Object),
         expect.any(Object)
       );
+    });
+
+    it('should reject invalid regions', () => {
+      expect(
+        () =>
+          new SinchSmsProvider({
+            ...mockConfig,
+            region: 'evil.com#@sinch.com',
+          })
+      ).toThrow(/Invalid Sinch region/);
     });
   });
 });

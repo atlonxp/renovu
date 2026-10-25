@@ -5,6 +5,7 @@ import {
   ConditionsFilterCommand,
   CreateExecutionDetails,
   CreateExecutionDetailsCommand,
+  CreateStepConditionEvaluationDetail,
   DetailEnum,
   GetPreferences,
   GetSubscriberTemplatePreference,
@@ -20,6 +21,7 @@ import {
 } from '@novu/application-generic';
 import {
   ContextRepository,
+  EnvironmentEntity,
   EnvironmentRepository,
   EnvironmentVariableRepository,
   JobEntity,
@@ -55,6 +57,7 @@ import { SendMessageEmail } from './send-message-email.usecase';
 import { SendMessageInApp } from './send-message-in-app.usecase';
 import { SendMessagePush } from './send-message-push.usecase';
 import { SendMessageSms } from './send-message-sms.usecase';
+import { SendMessageTool } from './send-message-tool.usecase';
 import { SendMessageResult, SendMessageStatus } from './send-message-type.usecase';
 import { Throttle } from './throttle';
 
@@ -66,6 +69,7 @@ export class SendMessage {
     private sendMessageInApp: SendMessageInApp,
     private sendMessageChat: SendMessageChat,
     private sendMessagePush: SendMessagePush,
+    private sendMessageTool: SendMessageTool,
     private digest: Digest,
     private createExecutionDetails: CreateExecutionDetails,
     private getSubscriberTemplatePreferenceUsecase: GetSubscriberTemplatePreference,
@@ -82,12 +86,13 @@ export class SendMessage {
     private environmentVariableRepository: EnvironmentVariableRepository,
     private environmentRepository: EnvironmentRepository,
     private executeBridgeJob: ExecuteBridgeJob,
-    private inMemoryLRUCacheService: InMemoryLRUCacheService
+    private inMemoryLRUCacheService: InMemoryLRUCacheService,
+    private createStepConditionEvaluationDetail: CreateStepConditionEvaluationDetail
   ) {}
 
   @InstrumentUsecase()
   public async execute(command: SendMessageCommand): Promise<SendMessageResult> {
-    const variables = await this.buildVariables(command);
+    const { compileContext: variables, environment } = await this.buildVariables(command);
 
     const stepType = command.step?.template?.type;
 
@@ -142,6 +147,17 @@ export class SendMessage {
       };
     }
 
+    // Emitted only after every skip gate (conditions, preferences, bridge skip)
+    // has passed. Channel-level skips further down (e.g. missing email or push
+    // token) are reported by their own execution details.
+    if (command.job.step.filters?.length) {
+      await this.createStepConditionEvaluationDetail.execute({
+        job: command.job,
+        conditions: stepCondition.conditions,
+        passed: true,
+      });
+    }
+
     let severity = command.severity;
     const { overrides } = command;
     if (stepType !== StepTypeEnum.TRIGGER && overrides?.severity && overrides.severity !== severity) {
@@ -168,6 +184,7 @@ export class SendMessage {
       compileContext: variables,
       bridgeData: bridgeResponse,
       severity,
+      environment,
     });
 
     switch (stepType) {
@@ -188,6 +205,9 @@ export class SendMessage {
       }
       case StepTypeEnum.PUSH: {
         return await this.sendMessagePush.execute(sendMessageChannelCommand);
+      }
+      case StepTypeEnum.TOOL: {
+        return await this.sendMessageTool.execute(sendMessageChannelCommand);
       }
       case StepTypeEnum.DIGEST: {
         return await this.digest.execute(command);
@@ -419,7 +439,9 @@ export class SendMessage {
   }
 
   @Instrument()
-  private async buildVariables(command: SendMessageCommand): Promise<ICompileContext> {
+  private async buildVariables(
+    command: SendMessageCommand
+  ): Promise<{ compileContext: ICompileContext; environment: EnvironmentEntity }> {
     const [subscriber, actor, tenant, context, envVars, environmentEntity] = await Promise.all([
       this.getSubscriberBySubscriberId({
         subscriberId: command.subscriberId,
@@ -450,7 +472,7 @@ export class SendMessage {
       ...environmentSystemVars,
     };
 
-    return {
+    const compileContext: ICompileContext = {
       subscriber,
       payload: command.payload,
       step: {
@@ -463,11 +485,14 @@ export class SendMessage {
       ...(context && { context }),
       env,
     };
+
+    return { compileContext, environment: environmentEntity };
   }
 
   @Instrument()
   private async getEnvironmentVariables(command: SendMessageCommand): Promise<Record<string, string>> {
-    const cacheKey = `${command.organizationId}:${command.environmentId}`;
+    const includeSecrets = shouldIncludeEnvironmentSecrets(command.job?.type);
+    const cacheKey = `${command.organizationId}:${command.environmentId}:${includeSecrets ? 'full' : 'masked'}`;
 
     return this.inMemoryLRUCacheService.get(
       InMemoryLRUCacheStore.ENVIRONMENT_VARIABLES,
@@ -479,7 +504,7 @@ export class SendMessage {
             command.environmentId
           );
 
-          return resolveEnvironmentVariables(rawEnvVars);
+          return resolveEnvironmentVariables(rawEnvVars, { includeSecrets });
         } catch (error) {
           Logger.warn(
             { err: error, organizationId: command.organizationId, environmentId: command.environmentId },
@@ -544,7 +569,14 @@ export class SendMessage {
   }
 
   private isChannelStep(job: JobEntity) {
-    const channels = [StepTypeEnum.IN_APP, StepTypeEnum.EMAIL, StepTypeEnum.SMS, StepTypeEnum.PUSH, StepTypeEnum.CHAT];
+    const channels = [
+      StepTypeEnum.IN_APP,
+      StepTypeEnum.EMAIL,
+      StepTypeEnum.SMS,
+      StepTypeEnum.PUSH,
+      StepTypeEnum.CHAT,
+      StepTypeEnum.TOOL,
+    ];
 
     return !!channels.find((channel) => channel === job.type);
   }
@@ -608,4 +640,13 @@ function requiresBridgeExecution(stepType: StepTypeEnum | undefined): boolean {
   if (!stepType) return false;
 
   return ![StepTypeEnum.TRIGGER, StepTypeEnum.DIGEST, StepTypeEnum.DELAY, StepTypeEnum.HTTP_REQUEST].includes(stepType);
+}
+
+/**
+ * Secret env vars stay masked for channel message rendering (email, SMS, etc.)
+ * so plaintext never reaches subscribers or the activity UI. Only outbound
+ * server-side steps that authenticate with those secrets may resolve them.
+ */
+function shouldIncludeEnvironmentSecrets(stepType: StepTypeEnum | string | undefined): boolean {
+  return stepType === StepTypeEnum.HTTP_REQUEST || stepType === StepTypeEnum.CUSTOM;
 }

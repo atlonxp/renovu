@@ -1,6 +1,6 @@
 {
   "name": "@novu/react-native",
-  "version": "3.16.0",
+  "version": "3.19.0",
   "repository": "https://github.com/novuhq/novu",
   "description": "Novu's React Native SDK for building custom inbox notification experiences",
   "author": "",
@@ -38,7 +38,7 @@
     "release:preview": "pnpx pkg-pr-new publish"
   },
   "devDependencies": {
-    "@arethetypeswrong/cli": "^0.17.4",
+    "@arethetypeswrong/cli": "^0.18.5",
     "@types/node": "^22.0.0",
     "@types/react": "*",
     "@types/react-dom": "*",

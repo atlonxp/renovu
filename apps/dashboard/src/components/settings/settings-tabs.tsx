@@ -9,26 +9,25 @@ import {
   PermissionsEnum,
 } from '@novu/shared';
 import { motion } from 'motion/react';
-import { useEffect, useMemo } from 'react';
+import { useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { BillingRestrictedState } from '@/components/billing/billing-restricted-state';
 import { Plan } from '@/components/billing/plan';
 import { Card } from '@/components/primitives/card';
 import { InlineToast } from '@/components/primitives/inline-toast';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/primitives/tabs';
 import { OrganizationSettings } from '@/components/settings/organization-settings';
-import { EE_AUTH_PROVIDER, IS_SELF_HOSTED } from '@/config';
+import { EE_AUTH_PROVIDER, IS_CLOUD } from '@/config';
 import { useFeatureFlag } from '@/hooks/use-feature-flag';
 import { useFetchSubscription } from '@/hooks/use-fetch-subscription';
 import { useHasPermission } from '@/hooks/use-has-permission';
 import { TeamMembers } from '@/utils/better-auth/components/team-members';
 import { UserProfile as BetterAuthUserProfile } from '@/utils/better-auth/index';
 import { ROUTES } from '@/utils/routes';
+import { getRequiredTierLabelForFeature } from '@/utils/upgrade-tier';
 
-// Pin Clerk's post-leave/delete redirect to the local `/auth/organization-list`. Without this,
-// Clerk falls back to `<ClerkProvider signInUrl>`, which on the Connect host points at
-// Platform's sign-in — so deleting a Connect org would kick the user out of Connect even when
-// they still have Connect work to do. Keeping it same-host lets `AuthProvider` clear any cross-
-// product org Clerk auto-activates and lets the picker render this product's empty state.
+// Pin Clerk's post-leave/delete redirect to the local `/auth/organization-list` so `AuthProvider`
+// can clear any org Clerk auto-activates and let the picker render the empty state.
 const AFTER_LEAVE_ORG_URL = ROUTES.SIGNUP_ORGANIZATION_LIST;
 
 const FADE_ANIMATION = {
@@ -51,14 +50,12 @@ type SettingsTabsProps = {
    * this URL we default to the account tab.
    */
   rootRoute: string;
-  // Hides the Billing tab and its inline upgrade prompts. Used by Connect.
-  hideBilling?: boolean;
 };
 
 const getClerkComponentAppearance = (isRbacEnabled: boolean): ClerkAppearanceTheme => ({
   variables: {
     colorPrimary: 'hsl(var(--bg-surface))',
-    colorText: 'rgba(82, 88, 102, 0.95)',
+    colorForeground: 'rgba(82, 88, 102, 0.95)',
     fontSize: '14px',
   },
   elements: {
@@ -122,7 +119,7 @@ function resolveCurrentTab(pathname: string, routes: SettingsTabRoutes, rootRout
   return entry?.[0] ?? 'account';
 }
 
-export function SettingsTabs({ routes, rootRoute, hideBilling = false }: SettingsTabsProps) {
+export function SettingsTabs({ routes, rootRoute }: SettingsTabsProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const { subscription } = useFetchSubscription();
@@ -134,15 +131,11 @@ export function SettingsTabs({ routes, rootRoute, hideBilling = false }: Setting
   const clerkAppearance = useMemo(() => getClerkComponentAppearance(isRbacEnabled), [isRbacEnabled]);
   const UserProfile = EE_AUTH_PROVIDER === 'clerk' ? ClerkUserProfile : BetterAuthUserProfile;
 
-  const canShowBilling = !IS_SELF_HOSTED && hasBillingPermission && !hideBilling;
+  const canShowBillingTab = IS_CLOUD;
+  const canManageBilling = IS_CLOUD && hasBillingPermission;
+  const brandingTierLabel = getRequiredTierLabelForFeature(FeatureNameEnum.PLATFORM_REMOVE_NOVU_BRANDING_BOOLEAN);
 
   const currentTab = resolveCurrentTab(location.pathname, routes, rootRoute);
-
-  useEffect(() => {
-    if (currentTab === 'billing' && !canShowBilling) {
-      navigate(routes.account, { replace: true });
-    }
-  }, [currentTab, canShowBilling, navigate, routes.account]);
 
   const handleTabChange = (value: string) => {
     switch (value as SettingsTab) {
@@ -156,7 +149,7 @@ export function SettingsTabs({ routes, rootRoute, hideBilling = false }: Setting
         navigate(routes.team);
         break;
       case 'billing':
-        if (canShowBilling) {
+        if (canShowBillingTab) {
           navigate(routes.billing);
         }
 
@@ -177,7 +170,7 @@ export function SettingsTabs({ routes, rootRoute, hideBilling = false }: Setting
           Team
         </TabsTrigger>
 
-        {canShowBilling && (
+        {canShowBillingTab && (
           <TabsTrigger variant="regular" value="billing" size="xl">
             Billing
           </TabsTrigger>
@@ -185,7 +178,7 @@ export function SettingsTabs({ routes, rootRoute, hideBilling = false }: Setting
       </TabsList>
 
       <div
-        className={`mx-auto mt-1 px-1.5 ${currentTab === 'billing' && canShowBilling ? 'max-w-[1400px]' : 'max-w-[700px]'}`}
+        className={`mx-auto mt-1 px-1.5 ${currentTab === 'billing' && canShowBillingTab ? 'max-w-[1400px]' : 'max-w-[700px]'}`}
       >
         <TabsContent value="account" className="rounded-lg">
           <motion.div {...FADE_ANIMATION}>
@@ -210,11 +203,15 @@ export function SettingsTabs({ routes, rootRoute, hideBilling = false }: Setting
           <motion.div {...FADE_ANIMATION}>
             <Card className="border-none shadow-none">
               <div className="pb-6 pt-4 flex flex-col">
-                {subscription?.apiServiceLevel === ApiServiceLevelEnum.FREE && canShowBilling && (
+                {subscription?.apiServiceLevel === ApiServiceLevelEnum.FREE && canManageBilling && (
                   <InlineToast
                     title="Tip:"
-                    description="Hide Novu branding from your notification channels by upgrading to a paid plan."
-                    ctaLabel="Upgrade Plan"
+                    description={
+                      brandingTierLabel
+                        ? `Hide Novu branding from your notification channels by upgrading to the ${brandingTierLabel} plan.`
+                        : 'Hide Novu branding from your notification channels by upgrading to a paid plan.'
+                    }
+                    ctaLabel={brandingTierLabel ? `Upgrade to ${brandingTierLabel}` : 'Upgrade Plan'}
                     onCtaClick={() => navigate(`${routes.billing}?utm_source=organization_settings_upgrade_prompt`)}
                     className="mb-4"
                     variant="tip"
@@ -230,7 +227,7 @@ export function SettingsTabs({ routes, rootRoute, hideBilling = false }: Setting
           <motion.div {...FADE_ANIMATION}>
             <Card className="border-none shadow-none">
               <div className={`pb-6 pt-4 flex flex-col ${isRbacEnabled ? 'show-role-column' : 'hide-role-column'}`}>
-                {isRbacEnabledFlag && !isRbacEnabled && canShowBilling && (
+                {isRbacEnabledFlag && !isRbacEnabled && canManageBilling && (
                   <InlineToast
                     title="Tip:"
                     description="Get role-based access control and add unlimited members by upgrading."
@@ -252,12 +249,12 @@ export function SettingsTabs({ routes, rootRoute, hideBilling = false }: Setting
           </motion.div>
         </TabsContent>
 
-        {canShowBilling && (
+        {canShowBillingTab && (
           <TabsContent value="billing" className="rounded-lg">
             <motion.div {...FADE_ANIMATION}>
               <Card className="border-none shadow-none">
                 <div className="pb-6 pt-4 flex flex-col">
-                  <Plan />
+                  {canManageBilling ? <Plan /> : <BillingRestrictedState />}
                 </div>
               </Card>
             </motion.div>

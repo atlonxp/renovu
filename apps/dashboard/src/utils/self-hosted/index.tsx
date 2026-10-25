@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import React from 'react';
 import { getOrganizations, switchOrganization } from '@/api/organization';
 import { QueryKeys } from '@/utils/query-keys';
-import { AuthContextProvider, useAuth } from './auth.resource';
+import { AuthContextProvider } from './auth.resource';
 import {
   ClerkLoaded,
   OrganizationList,
@@ -15,9 +15,11 @@ import {
   SignUp,
   UserProfile,
 } from './components';
-import { getJwtToken, isJwtValid, setAuthToken } from './jwt-manager';
+import { clearAuth, getJwtToken, isJwtValid, setAuthToken } from './jwt-manager';
 import { OrganizationSwitcher } from './organization-switcher';
 import { OrganizationContextProvider, useOrganization } from './organization.resource';
+import { Show } from './show';
+import { useAuth } from './use-auth';
 import { UserButton } from './user-button';
 import { UserContextProvider, useUser } from './user.resource';
 
@@ -31,8 +33,14 @@ export type {
 } from './types';
 
 export {
-  AuthContextProvider, ClerkLoaded, OrganizationContextProvider, OrganizationList,
-  OrganizationProfile, OrganizationSwitcher, RedirectToSignIn,
+  AuthContextProvider,
+  ClerkLoaded,
+  OrganizationContextProvider,
+  OrganizationList,
+  OrganizationProfile,
+  OrganizationSwitcher,
+  RedirectToSignIn,
+  Show,
   SignedIn,
   SignedOut, SignIn,
   SignUp, UserButton, UserProfile
@@ -64,7 +72,10 @@ async function performOrganizationSwitch(organizationId: string): Promise<void> 
 }
 
 export const useClerk = () => {
+  const { isLoaded } = useAuth();
+
   return {
+    loaded: isLoaded,
     setActive: async (args?: { organization?: string; session?: string | null }) => {
       const orgId = args?.organization;
       if (!orgId) {
@@ -73,6 +84,10 @@ export const useClerk = () => {
         return;
       }
       await performOrganizationSwitch(orgId);
+    },
+    signOut: async (opts?: { redirectUrl?: string }) => {
+      clearAuth();
+      window.location.assign(opts?.redirectUrl ?? '/auth/sign-in');
     },
   };
 };

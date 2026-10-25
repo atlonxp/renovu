@@ -1,18 +1,78 @@
-import { ENDPOINT_TYPES } from '@novu/stateless';
-import { expect, test } from 'vitest';
+import { CardElement, ENDPOINT_TYPES } from '@novu/stateless';
+import { describe, expect, test, vi } from 'vitest';
 import { axiosSpy } from '../../../utils/test/spy-axios';
+import { safeOutboundJsonSpy } from '../../../utils/test/spy-safe-outbound';
 import { SlackProvider } from './slack.provider';
 
+// The runtime `esmImport` uses `new Function('return import(...)')` so the CJS build can load
+// the ESM-only chat adapter. That indirection has no dynamic-import callback under Vitest, so
+// swap it for a transform-aware dynamic import that resolves the real adapter.
+vi.mock('../../../utils/esm-import', () => ({
+  esmImport: (specifier: string) => import(/* @vite-ignore */ specifier),
+}));
+
+const richCard: CardElement = {
+  type: 'card',
+  children: [
+    { type: 'text', content: 'Deployment succeeded', style: 'bold' },
+    { type: 'divider' },
+    {
+      type: 'actions',
+      children: [{ type: 'link-button', label: 'View run', url: 'https://novu.co/run/1' }],
+    },
+  ],
+};
+
+describe('SlackProvider.render', () => {
+  test('serializes a CardElement to Block Kit blocks + fallback text', async () => {
+    const provider = new SlackProvider();
+    const result = await provider.render(richCard);
+
+    expect(Array.isArray(result.nativePayload.blocks)).toBe(true);
+    expect((result.nativePayload.blocks as unknown[]).length).toBeGreaterThan(0);
+    expect(typeof result.content).toBe('string');
+    expect(result.content.length).toBeGreaterThan(0);
+    expect(result.validation).toEqual([]);
+  });
+});
+
+test('should deliver a rendered card as Block Kit blocks over webhook', async () => {
+  const { mockSafeOutboundJsonRequest } = safeOutboundJsonSpy({
+    body: 'ok',
+  });
+
+  const provider = new SlackProvider();
+  // The worker renders the card once, before send, and hands the native payload to the provider.
+  const rendered = await provider.render(richCard);
+  await provider.sendMessage({
+    channelData: {
+      endpoint: {
+        url: 'https://hooks.slack.com/services/test',
+      },
+      type: ENDPOINT_TYPES.WEBHOOK,
+      identifier: 'test-webhook-identifier',
+    },
+    content: rendered.content,
+    nativePayload: rendered.nativePayload,
+  });
+
+  const call = mockSafeOutboundJsonRequest.mock.calls[0][0];
+  expect(call.url).toBe('https://hooks.slack.com/services/test');
+  expect(Array.isArray(call.body.blocks)).toBe(true);
+  expect((call.body.blocks as unknown[]).length).toBeGreaterThan(0);
+  expect(typeof call.body.text).toBe('string');
+});
+
 test('should trigger Slack webhook correctly', async () => {
-  const { mockPost } = axiosSpy({
-    data: 'ok', // Webhooks return plain text "ok"
+  const { mockSafeOutboundJsonRequest } = safeOutboundJsonSpy({
+    body: 'ok',
   });
 
   const provider = new SlackProvider();
   const result = await provider.sendMessage({
     channelData: {
       endpoint: {
-        url: 'webhookUrl',
+        url: 'https://hooks.slack.com/services/test',
       },
       type: ENDPOINT_TYPES.WEBHOOK,
       identifier: 'test-webhook-identifier',
@@ -20,17 +80,22 @@ test('should trigger Slack webhook correctly', async () => {
     content: 'chat message',
   });
 
-  expect(mockPost).toHaveBeenCalledWith('webhookUrl', {
-    text: 'chat message',
-    blocks: undefined,
+  expect(mockSafeOutboundJsonRequest).toHaveBeenCalledWith({
+    url: 'https://hooks.slack.com/services/test',
+    method: 'POST',
+    headers: undefined,
+    body: {
+      text: 'chat message',
+      blocks: undefined,
+    },
   });
   expect(result.id).toBeDefined();
   expect(result.date).toBeDefined();
 });
 
 test('should trigger Slack webhook correctly with _passthrough', async () => {
-  const { mockPost } = axiosSpy({
-    data: 'ok',
+  const { mockSafeOutboundJsonRequest } = safeOutboundJsonSpy({
+    body: 'ok',
   });
 
   const provider = new SlackProvider();
@@ -40,7 +105,7 @@ test('should trigger Slack webhook correctly with _passthrough', async () => {
         type: ENDPOINT_TYPES.WEBHOOK,
         identifier: 'test-webhook-identifier',
         endpoint: {
-          url: 'webhookUrl',
+          url: 'https://hooks.slack.com/services/test',
         },
       },
       content: 'chat message',
@@ -54,9 +119,14 @@ test('should trigger Slack webhook correctly with _passthrough', async () => {
     }
   );
 
-  expect(mockPost).toHaveBeenCalledWith('webhookUrl', {
-    text: 'chat message _passthrough',
-    blocks: undefined,
+  expect(mockSafeOutboundJsonRequest).toHaveBeenCalledWith({
+    url: 'https://hooks.slack.com/services/test',
+    method: 'POST',
+    headers: undefined,
+    body: {
+      text: 'chat message _passthrough',
+      blocks: undefined,
+    },
   });
   expect(result.id).toBeDefined();
   expect(result.date).toBeDefined();
@@ -103,8 +173,8 @@ test('should handle Slack API error correctly', async () => {
 });
 
 test('should handle Slack webhook error response correctly', async () => {
-  const { mockPost } = axiosSpy({
-    data: 'invalid_payload', // Webhook returns error message instead of "ok"
+  safeOutboundJsonSpy({
+    body: 'invalid_payload',
   });
 
   const provider = new SlackProvider();
@@ -113,7 +183,7 @@ test('should handle Slack webhook error response correctly', async () => {
     provider.sendMessage({
       channelData: {
         endpoint: {
-          url: 'webhookUrl',
+          url: 'https://hooks.slack.com/services/test',
         },
         type: ENDPOINT_TYPES.WEBHOOK,
         identifier: 'test-webhook-identifier',
@@ -121,18 +191,14 @@ test('should handle Slack webhook error response correctly', async () => {
       content: 'chat message',
     })
   ).rejects.toThrow('Slack Webhook Error');
-
-  expect(mockPost).toHaveBeenCalledWith('webhookUrl', {
-    text: 'chat message',
-    blocks: undefined,
-  });
 });
 
 test('should handle Slack webhook HTTP error correctly', async () => {
-  const { mockPost } = axiosSpy();
+  const { mockSafeOutboundJsonRequest } = safeOutboundJsonSpy({
+    body: 'ok',
+  });
 
-  // Simulate axios throwing for HTTP 400 (bad request)
-  mockPost.mockRejectedValueOnce(new Error('Request failed with status code 400'));
+  mockSafeOutboundJsonRequest.mockRejectedValueOnce(new Error('Request failed with status code 400'));
 
   const provider = new SlackProvider();
 
@@ -140,7 +206,7 @@ test('should handle Slack webhook HTTP error correctly', async () => {
     provider.sendMessage({
       channelData: {
         endpoint: {
-          url: 'webhookUrl',
+          url: 'https://hooks.slack.com/services/test',
         },
         type: ENDPOINT_TYPES.WEBHOOK,
         identifier: 'test-webhook-identifier',
@@ -148,24 +214,22 @@ test('should handle Slack webhook HTTP error correctly', async () => {
       content: 'chat message',
     })
   ).rejects.toThrow('Request failed with status code 400');
-
-  expect(mockPost).toHaveBeenCalledWith('webhookUrl', {
-    text: 'chat message',
-    blocks: undefined,
-  });
 });
 
-test('should trigger Slack app correctly with OAuth', async () => {
+test('should trigger Slack app correctly with OAuth and return the message ts as id', async () => {
   const { mockPost } = axiosSpy({
     data: {
       ok: true,
       channel: 'C1234567890',
       ts: '1234567890.123456',
     },
+    headers: {
+      'x-slack-req-id': 'req-channel-1',
+    },
   });
 
   const provider = new SlackProvider();
-  await provider.sendMessage({
+  const result = await provider.sendMessage({
     channelData: {
       token: 'xoxb-token-123',
       type: ENDPOINT_TYPES.SLACK_CHANNEL,
@@ -191,4 +255,67 @@ test('should trigger Slack app correctly with OAuth', async () => {
       },
     }
   );
+  expect(result.id).toBe('C1234567890:1234567890.123456');
+});
+
+test('should echo the DM conversation from Slack response channel, not the user id we posted to', async () => {
+  const { mockPost } = axiosSpy({
+    data: {
+      ok: true,
+      channel: 'D999888777',
+      ts: '1777837477.371619',
+    },
+    headers: {
+      'x-slack-req-id': 'req-dm-1',
+    },
+  });
+
+  const provider = new SlackProvider();
+  const result = await provider.sendMessage({
+    channelData: {
+      token: 'xoxb-token-123',
+      type: ENDPOINT_TYPES.SLACK_USER,
+      identifier: 'test-slack-user-identifier',
+      endpoint: {
+        userId: 'U1234567890',
+      },
+    },
+    content: 'direct message via app',
+  });
+
+  expect(mockPost).toHaveBeenCalledWith(
+    'https://slack.com/api/chat.postMessage',
+    {
+      text: 'direct message via app',
+      blocks: undefined,
+      channel: 'U1234567890',
+    },
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer xoxb-token-123',
+      },
+    }
+  );
+  expect(result.id).toBe('D999888777:1777837477.371619');
+});
+
+test('should not echo a channel for Slack webhook sends', async () => {
+  safeOutboundJsonSpy({
+    body: 'ok',
+  });
+
+  const provider = new SlackProvider();
+  const result = await provider.sendMessage({
+    channelData: {
+      endpoint: {
+        url: 'https://hooks.slack.com/services/test',
+      },
+      type: ENDPOINT_TYPES.WEBHOOK,
+      identifier: 'test-webhook-identifier',
+    },
+    content: 'chat message',
+  });
+
+  expect(result.channel).toBeUndefined();
 });

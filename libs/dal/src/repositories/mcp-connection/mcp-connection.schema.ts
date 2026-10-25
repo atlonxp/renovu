@@ -1,3 +1,4 @@
+import { MCP_TOKEN_ENDPOINT_AUTH_METHODS } from '@novu/shared';
 import mongoose, { Schema } from 'mongoose';
 
 import { schemaOptions } from '../schema-default.options';
@@ -65,6 +66,39 @@ const oauthStateSchema = new Schema({
     required: false,
   },
   /**
+   * Opaque nonce carried in the compact signed OAuth `state` parameter.
+   * See `mcp-oauth-state.ts` / Campfire 512-char `state` limit.
+   */
+  stateNonce: {
+    type: Schema.Types.String,
+    required: false,
+  },
+  /**
+   * Fat callback fields (conversation / tool / platform resume) kept off
+   * the authorize URL so AS state-length limits are not exceeded.
+   */
+  callbackContext: {
+    type: new Schema(
+      {
+        agentId: { type: Schema.Types.String, required: true },
+        agentMcpServerId: { type: Schema.Types.String, required: true },
+        subscriberId: { type: Schema.Types.String, required: true },
+        mcpId: { type: Schema.Types.String, required: true },
+        scope: { type: Schema.Types.String, required: true },
+        conversationId: { type: Schema.Types.String, required: false },
+        userId: { type: Schema.Types.String, required: false },
+        source: { type: Schema.Types.String, required: false },
+        toolUseId: { type: Schema.Types.String, required: false },
+        agentIdentifier: { type: Schema.Types.String, required: false },
+        integrationIdentifier: { type: Schema.Types.String, required: false },
+        platform: { type: Schema.Types.String, required: false },
+        platformThreadId: { type: Schema.Types.String, required: false },
+      },
+      { _id: false }
+    ),
+    required: false,
+  },
+  /**
    * `novu-app` mode only: AS `token_endpoint` copied from the catalog at
    * authorize time so the callback can do the token exchange without a
    * persistent `oauthClient` row. Cleared with the rest of `oauthState`
@@ -80,6 +114,18 @@ const oauthStateSchema = new Schema({
    * ephemeral `oauthClient` shape for vault push.
    */
   authorizationEndpoint: {
+    type: Schema.Types.String,
+    required: false,
+  },
+  connectCardMessageId: {
+    type: Schema.Types.String,
+    required: false,
+  },
+  connectCardPlatform: {
+    type: Schema.Types.String,
+    required: false,
+  },
+  connectCardThreadId: {
     type: Schema.Types.String,
     required: false,
   },
@@ -127,28 +173,18 @@ const oauthClientSchema = new Schema(
       type: [Schema.Types.String],
       required: false,
     },
+    tokenEndpointAuthMethod: {
+      type: Schema.Types.String,
+      required: false,
+      enum: MCP_TOKEN_ENDPOINT_AUTH_METHODS,
+    },
+    redirectUri: {
+      type: Schema.Types.String,
+      required: false,
+    },
     registeredAt: {
       type: Schema.Types.Date,
       required: true,
-    },
-  },
-  { _id: false }
-);
-
-const toolTrustSchema = new Schema(
-  {
-    serverDefault: {
-      type: Schema.Types.String,
-      required: false,
-      enum: ['always_ask', 'always_allow'],
-    },
-    tools: {
-      type: Schema.Types.Map,
-      of: {
-        type: Schema.Types.String,
-        enum: ['always_ask', 'always_allow'],
-      },
-      required: false,
     },
   },
   { _id: false }
@@ -231,7 +267,7 @@ const mcpConnectionSchema = new Schema<McpConnectionDBModel>(
     authMode: {
       type: Schema.Types.String,
       required: true,
-      enum: ['dcr', 'novu-app', 'user-app'],
+      enum: ['dcr', 'novu-app', 'user-app', 'provider-managed'],
     },
     status: {
       type: Schema.Types.String,
@@ -252,10 +288,6 @@ const mcpConnectionSchema = new Schema<McpConnectionDBModel>(
     },
     lastError: {
       type: lastErrorSchema,
-      required: false,
-    },
-    toolTrust: {
-      type: toolTrustSchema,
       required: false,
     },
     connectedAt: {

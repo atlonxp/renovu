@@ -1,3 +1,96 @@
+## v2.21.1 (2026-08-31)
+
+### 🩹 Fixes
+
+- **novu:** omit apiUrl in merged Web Chat scaffold for US Cloud fixes NV-8731 ([#12512](https://github.com/novuhq/novu/pull/12512))
+
+### ❤️ Thank You
+
+- Adam Chmara @ChmaraX
+
+## v2.21.0 (2026-08-31)
+
+### 🚀 Features
+
+- **novu,shared:** upgrade connect Agent Chat template to dashboard structure fixes NV-8680 ([#12453](https://github.com/novuhq/novu/pull/12453))
+- **api-service,framework:** agents vision and file support fixes NV-7810 ([#12423](https://github.com/novuhq/novu/pull/12423))
+- **api-service:** structured workflow-origin hydration for agents fixes NV-8608 ([#12371](https://github.com/novuhq/novu/pull/12371))
+- **novu:** add Agent Chat channel to npx novu connect fixes NV-8593 ([#12393](https://github.com/novuhq/novu/pull/12393))
+- **docs:** add Tool channel information in framework fixes DOC-434 ([#12394](https://github.com/novuhq/novu/pull/12394))
+- **shared:** chat provider content overrides with Slack schema fixes NV-8397 ([#12103](https://github.com/novuhq/novu/pull/12103))
+- **dashboard,api-service,js,react,framework:** novu copilot agent for slack fixes NV-8316 ([#11973](https://github.com/novuhq/novu/pull/11973))
+- **dashboard,novu:** add scannable wa.me QR code to WhatsApp inbound test step fixes NV-8330 ([#11996](https://github.com/novuhq/novu/pull/11996))
+- **shared:** add Tool channel with PagerDuty, Opsgenie and Webhook providers fixes NV-8284 ([#11923](https://github.com/novuhq/novu/pull/11923))
+- **api-service,dashboard,novu:** CLI WhatsApp connect via tokenized Meta Embedded Signup fixes NV-8312 ([#11969](https://github.com/novuhq/novu/pull/11969))
+- **api-service:** unify agents Mixpanel activation funnel fixes NV-8322 ([#11977](https://github.com/novuhq/novu/pull/11977))
+- **novu:** add Sendblue (iMessage) to Novu Connect CLI fixes NV-8241 ([#11920](https://github.com/novuhq/novu/pull/11920))
+- **novu:** add novu_docs tool approval demo to connect scaffolds fixes NV-8302 ([#11945](https://github.com/novuhq/novu/pull/11945))
+- **novu:** power scaffolded agents via API key or subscription fixes NV-8289 ([#11938](https://github.com/novuhq/novu/pull/11938))
+- **api-service,dashboard:** agent subscriber-access diagram parity fixes NV-8288 ([#11932](https://github.com/novuhq/novu/pull/11932))
+
+### 🩹 Fixes
+
+- **dashboard,novu,shared:** pin Agent Chat connect flags and skip picker fixes NV-8704 ([#12469](https://github.com/novuhq/novu/pull/12469))
+- **novu,shared:** pin scaffold SDK packages to npm next on staging/local fixes NV-8680 ([#12455](https://github.com/novuhq/novu/pull/12455))
+- **dashboard,novu:** improve novu connect dashboard commands fixes NV-8636 ([#12413](https://github.com/novuhq/novu/pull/12413))
+- **js:** point CLI connect agent links to valid dashboard route fixes NV-8598 ([#12342](https://github.com/novuhq/novu/pull/12342))
+- **docs:** enhance agent communication documentation with new channels and capabilities ([#12188](https://github.com/novuhq/novu/pull/12188))
+- **novu:** resolve LangChain Turbopack dynamic import failure fixes NV-8430 ([#12126](https://github.com/novuhq/novu/pull/12126))
+- **shared:** use logged-in user id instead of connect: subscriber prefix fixes NV-8328 ([#11992](https://github.com/novuhq/novu/pull/11992))
+- **novu:** allow exiting connect LLM auth picker and OAuth screens (fixes NV-8298) ([#11941](https://github.com/novuhq/novu/pull/11941))
+- **novu:** respect --no-studio to skip dashboard open fixes NV-8286 ([#11929](https://github.com/novuhq/novu/pull/11929))
+
+### ❤️ Thank You
+
+- Adam Chmara @ChmaraX
+- Dima Grossman @scopsy
+- George Djabarov @djabarovgeorge
+- Nikita Grossman @nikitagrossman
+- Pawan Jain
+- Paweł Tymczuk @LetItRock
+
+## v2.19.0 (2026-07-13)
+
+### 🚀 Features
+
+- **novu:** first-class LangChain support in npx novu connect fixes NV-8243 ([#11888](https://github.com/novuhq/novu/pull/11888))
+- **providers:** add Webex Messaging OAuth support fixes NV-8272 ([#11633](https://github.com/novuhq/novu/pull/11633))
+- **framework:** support AI SDK v7 in @novu/framework/ai-sdk fixes NV-8222 ([#11860](https://github.com/novuhq/novu/pull/11860))
+- **dashboard:** replace legacy local studio with Local environment mode fixes NV-8242 ([#11847](https://github.com/novuhq/novu/pull/11847))
+- **novu:** AI SDK connect template + existing-project reconcile fixes NV-8223 ([#11846](https://github.com/novuhq/novu/pull/11846))
+- **cli:** add --version flag to the CLI ([#11817](https://github.com/novuhq/novu/pull/11817))
+- **dashboard:** email agent whats-next guide and simplified setup fixes NV-8115 ([#11706](https://github.com/novuhq/novu/pull/11706))
+- **novu:** align connect runtime picker with dashboard onboarding fixes NV-8135 ([#11682](https://github.com/novuhq/novu/pull/11682))
+- **dashboard:** improve agent onboarding setup UX and CLI auth fixes NV-8125 ([#11655](https://github.com/novuhq/novu/pull/11655))
+- **api-service,js,react:** Telegram subscriber-link SDK + shared linking module fixes NV-8095 ([#11619](https://github.com/novuhq/novu/pull/11619))
+- **root:** sort selected items to top in agent creation multi-select fixes NV-8076 ([#11601](https://github.com/novuhq/novu/pull/11601))
+- **root:** add Chat SDK brain to novu connect fixes NV-8067 ([#11595](https://github.com/novuhq/novu/pull/11595))
+- **novu:** default connect to dashboard OAuth, add --keyless flag fixes NV-8048 ([#11566](https://github.com/novuhq/novu/pull/11566))
+- **novu:** surface keyless claim link in connect onboarding flow fixes NV-8036 ([#11530](https://github.com/novuhq/novu/pull/11530))
+- **novu,dashboard,shared:** connect --login and dashboard onboarding auth signal fixes NV-8020 ([#11523](https://github.com/novuhq/novu/pull/11523))
+- **novu:** secure setup links for Slack/Telegram secrets fixes NV-8008 ([#11506](https://github.com/novuhq/novu/pull/11506))
+- **novu:** telegram QR PNG handoff and --ci channel guard fixes NV-8007 ([#11505](https://github.com/novuhq/novu/pull/11505))
+- **novu:** agent-optimized connect --help fixes NV-8007 ([#11504](https://github.com/novuhq/novu/pull/11504))
+
+### 🩹 Fixes
+
+- **root:** bump vitest devDependency range to ^4.1.0 to close advisories fixes NV-8196 ([#11785](https://github.com/novuhq/novu/pull/11785))
+- **root:** resolve high esbuild vulnerability fixes NV-8040 ([#11554](https://github.com/novuhq/novu/pull/11554))
+- **novu:** fall back to dashboard auth when keyless AI limit is hit fixes NV-8027 ([#11537](https://github.com/novuhq/novu/pull/11537))
+- **novu:** restore in-terminal token entry for interactive connect fixes NV-8026 ([#11536](https://github.com/novuhq/novu/pull/11536))
+- rc ([d19deca4f5](https://github.com/novuhq/novu/commit/d19deca4f5))
+- **novu:** harden keyless session bootstrap and CI handoff events ([#11489](https://github.com/novuhq/novu/pull/11489))
+- **novu:** fallback to dashboard auth when keyless demo limits are hit fixes NV-7993 ([#11484](https://github.com/novuhq/novu/pull/11484))
+
+### ❤️ Thank You
+
+- Adam Chmara @ChmaraX
+- Andrew @andrewk2929
+- Dima Grossman @scopsy
+- George Djabarov @djabarovgeorge
+- Paweł Tymczuk @LetItRock
+- Rahul Jain
+
 ## 2.8.0 (2026-03-27)
 
 ### 🚀 Features

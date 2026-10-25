@@ -31,6 +31,7 @@ import sinon from 'sinon';
 import { AuthService } from '../../../auth/services/auth.service';
 import { GenerateUniqueApiKey } from '../../../environments-v1/usecases/generate-unique-api-key/generate-unique-api-key.usecase';
 import { CreateNovuIntegrations } from '../../../integrations/usecases/create-novu-integrations/create-novu-integrations.usecase';
+import { KeylessAbuseGuardService } from '../../../keyless/keyless-abuse-guard.service';
 import { GetOrganizationSettings } from '../../../organization/usecases/get-organization-settings/get-organization-settings.usecase';
 import { SubscriberSessionResponseDto } from '../../dtos/subscriber-session-response.dto';
 import { AnalyticsEventsEnum } from '../../utils';
@@ -87,6 +88,7 @@ describe('Session', () => {
   let messageRepository: sinon.SinonStubbedInstance<MessageRepository>;
   let getSubscriberSchedule: sinon.SinonStubbedInstance<GetSubscriberSchedule>;
   let updatePreferencesUsecase: sinon.SinonStubbedInstance<UpdatePreferences>;
+  let keylessAbuseGuard: sinon.SinonStubbedInstance<KeylessAbuseGuardService>;
 
   beforeEach(() => {
     environmentRepository = sinon.createStubInstance(EnvironmentRepository);
@@ -112,6 +114,7 @@ describe('Session', () => {
     messageRepository = sinon.createStubInstance(MessageRepository);
     getSubscriberSchedule = sinon.createStubInstance(GetSubscriberSchedule);
     updatePreferencesUsecase = sinon.createStubInstance(UpdatePreferences);
+    keylessAbuseGuard = sinon.createStubInstance(KeylessAbuseGuardService);
 
     session = new Session(
       environmentRepository as any,
@@ -136,7 +139,8 @@ describe('Session', () => {
       logger as any,
       featureFlagsService as any,
       getSubscriberSchedule as any,
-      updatePreferencesUsecase as any
+      updatePreferencesUsecase as any,
+      keylessAbuseGuard as any
     );
 
     messageRepository.getCountBySeverity.resolves(mockSeverityCounts);
@@ -165,7 +169,7 @@ describe('Session', () => {
 
     environmentRepository.findEnvironmentByIdentifier.resolves(environment as any);
     organizationRepository.findById.resolves(organization as any);
-    selectIntegration.execute.resolves({ ...mockIntegration, credentials: { hmac: false } });
+    selectIntegration.execute.resolves({ integration: { ...mockIntegration, credentials: { hmac: false } } });
     createSubscriber.execute.resolves(subscriber as any);
     notificationsCount.execute.resolves(notificationCount);
     authService.getSubscriberWidgetToken.resolves(token);
@@ -202,7 +206,7 @@ describe('Session', () => {
 
     environmentRepository.findEnvironmentByIdentifier.resolves(legacyProdNamed as any);
     organizationRepository.findById.resolves(organization as any);
-    selectIntegration.execute.resolves({ ...mockIntegration, credentials: { hmac: false } });
+    selectIntegration.execute.resolves({ integration: { ...mockIntegration, credentials: { hmac: false } } });
     createSubscriber.execute.resolves(subscriber as any);
     notificationsCount.execute.resolves(notificationCount);
     authService.getSubscriberWidgetToken.resolves(token);
@@ -288,7 +292,7 @@ describe('Session', () => {
       name: 'Development',
     } as any);
     organizationRepository.findById.resolves(organization as any);
-    selectIntegration.execute.resolves(mockIntegration);
+    selectIntegration.execute.resolves({ integration: mockIntegration });
     createSubscriber.execute.resolves(subscriber as any);
     notificationsCount.execute.resolves(notificationCount);
     authService.getSubscriberWidgetToken.resolves(token);
@@ -323,7 +327,7 @@ describe('Session', () => {
 
     environmentRepository.findEnvironmentByIdentifier.resolves(environment as any);
     organizationRepository.findById.resolves(organization as any);
-    selectIntegration.execute.resolves({ ...mockIntegration, credentials: { hmac: false } });
+    selectIntegration.execute.resolves({ integration: { ...mockIntegration, credentials: { hmac: false } } });
     createSubscriber.execute.resolves(subscriber as any);
     notificationsCount.execute.resolves(notificationCount);
     authService.getSubscriberWidgetToken.resolves(token);
@@ -363,7 +367,7 @@ describe('Session', () => {
     const token = 'token';
 
     environmentRepository.findEnvironmentByIdentifier.resolves(environment as any);
-    selectIntegration.execute.resolves(integration);
+    selectIntegration.execute.resolves({ integration });
     organizationRepository.findById.resolves(organization as any);
     createSubscriber.execute.resolves(subscriber as any);
     notificationsCount.execute.resolves(notificationCount);
@@ -410,7 +414,7 @@ describe('Session', () => {
 
     organizationRepository.findById.resolves(organization as any);
     environmentRepository.findEnvironmentByIdentifier.resolves(environment as any);
-    selectIntegration.execute.resolves(integration);
+    selectIntegration.execute.resolves({ integration });
     createSubscriber.execute.resolves(subscriber as any);
     notificationsCount.execute.resolves(notificationCount);
     authService.getSubscriberWidgetToken.resolves(token);
@@ -463,7 +467,7 @@ describe('Session', () => {
 
     environmentRepository.findEnvironmentByIdentifier.resolves(environment as any);
     organizationRepository.findById.resolves(organization as any);
-    selectIntegration.execute.resolves({ ...mockIntegration, credentials: { hmac: false } });
+    selectIntegration.execute.resolves({ integration: { ...mockIntegration, credentials: { hmac: false } } });
     createSubscriber.execute.resolves(subscriber as any);
     notificationsCount.execute.resolves(notificationCount);
     authService.getSubscriberWidgetToken.resolves(token);
@@ -513,7 +517,7 @@ describe('Session', () => {
 
     environmentRepository.findEnvironmentByIdentifier.resolves(environment as any);
     organizationRepository.findById.resolves(organization as any);
-    selectIntegration.execute.resolves(mockIntegration);
+    selectIntegration.execute.resolves({ integration: mockIntegration });
     createSubscriber.execute.resolves(subscriber as any);
     notificationsCount.execute.resolves(notificationCount);
     authService.getSubscriberWidgetToken.resolves(token);
@@ -533,7 +537,7 @@ describe('Session', () => {
     expect(
       validateContextHmacEncryptionStub.calledWith(
         sinon.match({
-          apiKey: environment.apiKeys[0].key,
+          apiKeys: [environment.apiKeys[0].key],
           context: command.requestData.context,
           contextHash: command.requestData.contextHash,
         })
@@ -565,7 +569,7 @@ describe('Session', () => {
 
     environmentRepository.findEnvironmentByIdentifier.resolves(environment as any);
     organizationRepository.findById.resolves(organization as any);
-    selectIntegration.execute.resolves({ ...mockIntegration, credentials: { hmac: false } });
+    selectIntegration.execute.resolves({ integration: { ...mockIntegration, credentials: { hmac: false } } });
     createSubscriber.execute.resolves(subscriber as any);
     notificationsCount.execute.resolves(notificationCount);
     authService.getSubscriberWidgetToken.resolves(token);

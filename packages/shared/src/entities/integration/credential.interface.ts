@@ -26,6 +26,8 @@ export interface ICredentials {
   redirectUrl?: string;
   hmac?: boolean;
   ipPoolName?: string;
+  /** Amazon SES: name of the Configuration Set applied to sent emails. */
+  configurationSetName?: string;
   apiKeyRequestHeader?: string;
   secretKeyRequestHeader?: string;
   idPath?: string;
@@ -56,34 +58,62 @@ export interface ICredentials {
   tenantId?: string;
   signingSecret?: string;
   outboundIntegrationId?: string;
+  /**
+   * Agent email: ISO timestamp of when the agent's outbound was first switched from the demo
+   * sender to the user's own provider. Marks completion of the email "What's next" layer-2
+   * onboarding and time-boxes that guide. Only meaningful on the NovuAgent email integration.
+   */
+  outboundConnectedAt?: string;
+  /**
+   * Channel-agnostic ISO timestamp marking Layer-2 "What's next" completion (Connected badge +
+   * guide hide window). For WhatsApp Business: stamped when a permanent Access Token is in place
+   * (server auto-stamp on post-connect `apiToken` rotation, or manual confirm). Email continues to
+   * use `outboundConnectedAt` for now.
+   */
+  whatsNextCompletedAt?: string;
   useFromAddressOverride?: boolean;
   fromAddressOverride?: string;
   /**
    * Agent default shared inbox: the slug prefix used in
-   * `{emailSlugPrefix}-{inboxRoutingKey}@<shared-domain>`. Only meaningful on
-   * the NovuAgent email integration. Snapshotted from the linked agent's
-   * identifier at provisioning time; editable by the user. Validated against
+   * `{emailSlugPrefix}-{inboxRoutingKey}@<shared-domain>`. A new Agent Inbox
+   * with no routing key publishes `{emailSlugPrefix}@<shared-domain>` instead,
+   * and that slug stays the one chosen at creation. A keyed inbox may still
+   * edit its prefix. Validated against
    * `^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$` server-side.
    */
   emailSlugPrefix?: string;
   /**
    * Agent default shared inbox: the trailing routing key in
-   * `{emailSlugPrefix}-{inboxRoutingKey}@<shared-domain>`. Only meaningful on
-   * the NovuAgent email integration. Generated server-side at provisioning
-   * time, globally unique under a partial index on `credentials.inboxRoutingKey`
-   * scoped to `providerId = novu-email-agent`. Not user-editable: the API
-   * update path pins this field to its existing value to prevent rotation
-   * through the standard integration update endpoint.
+   * `{emailSlugPrefix}-{inboxRoutingKey}@<shared-domain>`. Absent on a vanity
+   * Agent Inbox, whose address is the slug alone. Generated server-side at
+   * provisioning time, globally unique under a partial index on
+   * `credentials.inboxRoutingKey` scoped to both inbox providers. Not
+   * user-editable: the API update path pins this field to its existing value
+   * to prevent rotation through the standard integration update endpoint.
    */
   inboxRoutingKey?: string;
   /**
-   * Cloud-only kill switch for the Novu shared inbox
+   * Domain half of the shared inbox address, pinned when the integration is
+   * provisioned. Agent Email Inbox gets `NOVU_AGENT_INBOX_INBOUND_DOMAIN`
+   * (falling back to the Connect domain when that is unset). Novu Email gets
+   * `NOVU_AGENT_SHARED_INBOUND_DOMAIN`. A missing pin means the Connect domain,
+   * so rows created before this field keep their existing address.
+   * Server-managed: the integration update path restores the stored value.
+   */
+  inboxDomain?: string;
+  /**
+   * Kill switch for the Novu shared inbox
    * (`{emailSlugPrefix}-{inboxRoutingKey}@<shared-domain>`). When `true`, the
    * inbound worker drops mail addressed to this agent on the shared domain;
    * custom-domain routes for the same agent still deliver. Only meaningful on
-   * the NovuAgent email integration. Managed server-side via
-   * `PATCH /agents/:identifier/inbox/shared`; pinned through the generic
-   * integration update path.
+   * the NovuAgent email integration.
+   *
+   * On cloud this is a user-facing toggle managed via
+   * `PATCH /agents/:identifier/inbox/shared` (pinned through the generic
+   * integration update path). On self-hosted, where there is no shared inbox,
+   * it is set to `true` defensively at provisioning time and is effectively
+   * redundant (every reader also gates on `isAgentSharedInboxEnabled()` /
+   * `sharedInboundAddress`, both falsy self-hosted).
    */
   sharedInboxDisabled?: boolean;
   /** Claude Managed Agents: ID of the Anthropic environment tied to this integration. */
@@ -104,4 +134,24 @@ export interface ICredentials {
    * configured per-integration when the customer is not on the default workspace.
    */
   externalWorkspaceId?: string;
+  /** When true, WhatsApp credentials were provisioned via Novu Tech Provider Embedded Signup; app secret is resolved from platform env. */
+  isNovuManaged?: boolean;
+  /** HTTP method for custom webhook delivery (e.g. POST, PUT). */
+  method?: string;
+  /** Custom webhook request headers as JSON. */
+  headers?: string;
+  /** Custom webhook request body template. */
+  body?: string;
+  /**
+   * Tool-webhook routing mode. `'static'` sends to the integration `webhookUrl`;
+   * `'dynamic'` fans out to per-subscriber `tool_webhook` endpoints. Missing = static.
+   */
+  routingMode?: 'static' | 'dynamic';
+  /**
+   * Email webhook: how the `secretKey` value is interpreted when computing the
+   * `X-Novu-Signature` header. `'text'` (default) signs with the raw UTF-8 bytes of
+   * the stored secret; `'base64'` and `'hex'` decode it to binary first — required
+   * when the verification side (e.g. AWS KMS) holds the key as binary material.
+   */
+  hmacSecretKeyEncoding?: 'text' | 'base64' | 'hex';
 }

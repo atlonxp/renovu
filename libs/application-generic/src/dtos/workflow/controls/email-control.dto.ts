@@ -1,6 +1,19 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsIn, IsOptional, IsString, MinLength, ValidateIf } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsBoolean, IsIn, IsOptional, IsString, MinLength, ValidateIf, ValidateNested } from 'class-validator';
 import { SkipControlDto } from '../skip.dto';
+
+export class EmailFromControlDto {
+  @ApiPropertyOptional({ description: 'Sender email address override for this step.' })
+  @IsOptional()
+  @IsString()
+  email?: string;
+
+  @ApiPropertyOptional({ description: 'Sender display name override for this step.' })
+  @IsOptional()
+  @IsString()
+  name?: string;
+}
 
 export class EmailControlDto extends SkipControlDto {
   @ApiProperty({ description: 'Subject of the email.', minLength: 1 })
@@ -40,4 +53,33 @@ export class EmailControlDto extends SkipControlDto {
   @IsString()
   @MinLength(1)
   layoutId?: string | null;
+
+  @ApiPropertyOptional({
+    type: () => EmailFromControlDto,
+    description: 'Sender name and email overrides for this step.',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => EmailFromControlDto)
+  from?: EmailFromControlDto;
+
+  @ApiPropertyOptional({
+    description:
+      'When true, sender name/email use the primary email integration defaults and skip workflow agent defaults.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  useProviderDefaults?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Step-level Reply-To override. When unset, inherits the workflow agent reply-to.',
+  })
+  @IsOptional()
+  @IsString()
+  replyTo?: string;
+
+  @ApiPropertyOptional({ description: 'One-line inbox preview text shown next to the subject.' })
+  @IsOptional()
+  @IsString()
+  preheader?: string;
 }

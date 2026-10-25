@@ -30,15 +30,20 @@ const formatDimension = (value: string, unit: ImageSizeUnit): string => {
 };
 
 export function ImageBubbleMenu(props: EditorBubbleMenuProps) {
-  const { editor, appendTo } = props;
+  const { editor, appendTo, imageMenuConfig } = props;
   if (!editor) {
     return null;
   }
 
   const state = useImageState(editor);
 
+  const showAlignment = imageMenuConfig?.showAlignment ?? true;
+  const showExternalLink = imageMenuConfig?.showExternalLink ?? true;
+  const showSizeControls = imageMenuConfig?.showSizeControls ?? true;
+
+  const { textMenuConfig: _textMenuConfig, imageMenuConfig: _imageMenuConfig, ...restProps } = props;
   const bubbleMenuProps: EditorBubbleMenuProps = {
-    ...props,
+    ...restProps,
     ...(appendTo ? { appendTo: appendTo.current } : {}),
     shouldShow: ({ editor }) => {
       if (!editor.isEditable || editor.view.dragging) {
@@ -89,17 +94,19 @@ export function ImageBubbleMenu(props: EditorBubbleMenuProps) {
         )}
 
         <div className="mly-flex mly-space-x-0.5">
-          <AlignmentSwitch
-            alignment={state.alignment}
-            onAlignmentChange={(alignment) => {
-              const isCurrentNodeImage = state.isImageActive;
-              if (!isCurrentNodeImage) {
-                editor?.chain().focus().updateLogoAttributes({ alignment }).run();
-              } else {
-                editor?.chain().focus().updateImageAttributes({ alignment }).run();
-              }
-            }}
-          />
+          {showAlignment && (
+            <AlignmentSwitch
+              alignment={state.alignment}
+              onAlignmentChange={(alignment) => {
+                const isCurrentNodeImage = state.isImageActive;
+                if (!isCurrentNodeImage) {
+                  editor?.chain().focus().updateLogoAttributes({ alignment }).run();
+                } else {
+                  editor?.chain().focus().updateImageAttributes({ alignment }).run();
+                }
+              }}
+            />
+          )}
 
           <LinkInputPopover
             defaultValue={state?.imageSrc ?? ''}
@@ -123,12 +130,13 @@ export function ImageBubbleMenu(props: EditorBubbleMenuProps) {
               }
             }}
             tooltip="Source URL"
+            placeholder="Image URL"
             icon={ImageDown}
             editor={editor}
             isVariable={state.isSrcVariable}
           />
 
-          {state.isImageActive && (
+          {showExternalLink && state.isImageActive && (
             <LinkInputPopover
               defaultValue={state?.imageExternalLink ?? ''}
               onValueChange={(value, isVariable) => {
@@ -147,7 +155,7 @@ export function ImageBubbleMenu(props: EditorBubbleMenuProps) {
           )}
         </div>
 
-        {state.isImageActive && state.imageSrc && (
+        {showSizeControls && state.isImageActive && state.imageSrc && (
           <>
             <Divider />
 

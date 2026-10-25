@@ -1,9 +1,9 @@
-FROM node:22.22-alpine3.23 AS dev_base
+FROM node:22.23.4-alpine3.23 AS dev_base
 RUN apk add --no-cache g++ make py3-pip
 ENV NX_DAEMON=false
 
 # Install global dependencies
-RUN npm --no-update-notifier --no-fund --global install pm2@6.0.14 pnpm@11.0.9&& \
+RUN npm --no-update-notifier --no-fund --global install pm2@6.0.14 pnpm@11.28.2&& \
     pnpm --version
 
 # Set non-root user
@@ -17,21 +17,16 @@ COPY --chown=1000:1000 ./meta .
 COPY --chown=1000:1000 ./deps .
 COPY --chown=1000:1000 ./pkg .
 
-RUN --mount=type=secret,id=BULL_MQ_PRO_NPM_TOKEN,uid=1000 export BULL_MQ_PRO_NPM_TOKEN=$(cat /run/secrets/BULL_MQ_PRO_NPM_TOKEN) && \
-    if [ -n "${BULL_MQ_PRO_NPM_TOKEN}" ] ; then echo 'Building with Enterprise Edition of Novu'; rm -f .npmrc ; cp .npmrc-cloud .npmrc ; fi
-
-RUN --mount=type=cache,id=pnpm-store-ws,target=/root/.pnpm-store\
-    --mount=type=secret,id=BULL_MQ_PRO_NPM_TOKEN,uid=1000 export BULL_MQ_PRO_NPM_TOKEN=$(cat /run/secrets/BULL_MQ_PRO_NPM_TOKEN) && \
+RUN --mount=type=cache,id=pnpm-store-ws,target=/root/.pnpm-store \
  pnpm install --filter "novuhq" --filter "{${PACKAGE_PATH}}..."\
  --frozen-lockfile\
  --unsafe-perm\
  --reporter=silent
 
-RUN --mount=type=secret,id=BULL_MQ_PRO_NPM_TOKEN,uid=1000 export BULL_MQ_PRO_NPM_TOKEN=$(cat /run/secrets/BULL_MQ_PRO_NPM_TOKEN) && NODE_ENV=production NX_DAEMON=false pnpm build:ws
+RUN NODE_ENV=production NX_DAEMON=false pnpm build:ws
 
 WORKDIR /usr/src/app/apps/ws
 
-RUN cp src/dotenvcreate.mjs dist/dotenvcreate.mjs
 RUN cp src/.example.env dist/.env
 RUN cp src/.env.development dist/.env.development
 RUN cp src/.env.production dist/.env.production
@@ -43,21 +38,10 @@ WORKDIR /usr/src/app
 FROM dev AS deploy
 
 WORKDIR /usr/src/app
-RUN --mount=type=secret,id=BULL_MQ_PRO_NPM_TOKEN,uid=1000 export BULL_MQ_PRO_NPM_TOKEN=$(cat /run/secrets/BULL_MQ_PRO_NPM_TOKEN) && \
-    pnpm --filter @novu/ws deploy --legacy --prod /usr/src/deploy && \
-    if [ -n "${BULL_MQ_PRO_NPM_TOKEN}" ]; then \
-      cd $(mktemp -d) && \
-      echo "@taskforcesh:registry=https://npm.taskforce.sh/" > .npmrc && \
-      echo "//npm.taskforce.sh/:_authToken=${BULL_MQ_PRO_NPM_TOKEN}" >> .npmrc && \
-      npm init -y > /dev/null 2>&1 && \
-      npm install @taskforcesh/bullmq-pro@6.11.0 2>/dev/null && \
-      cp -r node_modules/@taskforcesh /usr/src/deploy/node_modules/@taskforcesh && \
-      rm -rf node_modules/@taskforcesh && \
-      mv node_modules /usr/src/deploy/node_modules/@taskforcesh/bullmq-pro/node_modules; \
-    fi
+RUN pnpm --filter @novu/ws deploy --legacy --prod /usr/src/deploy
 
 # ------- PRODUCTION BUILD ----------
-FROM node:22.22-alpine3.23 AS prod
+FROM node:22.23.4-alpine3.23 AS prod
 
 ENV CI=true
 
@@ -76,4 +60,4 @@ COPY --chown=1000:1000 --from=deploy /usr/src/deploy .
 # Built output (not included by pnpm deploy because dist is gitignored)
 COPY --chown=1000:1000 --from=dev /usr/src/app/apps/ws/dist ./dist
 
-ENTRYPOINT [ "sh", "-c", "node dist/dotenvcreate.mjs -s=$SECRET_NAME -r=$NOVU_REGION -e=$NOVU_ENTERPRISE -v=$NODE_ENV -h=$IS_SELF_HOSTED && pm2-runtime start dist/main.js -i max" ]
+ENTRYPOINT [ "sh", "-c", "pm2-runtime start dist/main.js -i max" ]

@@ -32,9 +32,22 @@ export const conversationRepository = new ConversationRepository();
 export const activityRepository = new ConversationActivityRepository();
 export const channelEndpointRepository = new ChannelEndpointRepository();
 
+/**
+ * Narrows a nullable lookup result, failing the test with the label instead of
+ * throwing an opaque `TypeError` on the first property access.
+ */
+export function must<T>(value: T | null | undefined, label: string): T {
+  if (value === null || value === undefined) {
+    throw new Error(`Expected ${label} to exist, got ${value}`);
+  }
+
+  return value;
+}
+
 const integrationRepository = new IntegrationRepository();
 const agentIntegrationRepository = new AgentIntegrationRepository();
 const channelConnectionRepository = new ChannelConnectionRepository();
+const agentRepository = new AgentRepository();
 
 export async function setupAgentTestContext(): Promise<AgentTestContext> {
   const session = new UserSession();
@@ -46,6 +59,17 @@ export async function setupAgentTestContext(): Promise<AgentTestContext> {
     identifier: agentIdentifier,
   });
   const agentId = createRes.body.data._id as string;
+
+  // Slack e2e historically relied on always-on auto-provision; open access is
+  // now explicit so restricted agents stay lookup-only.
+  await agentRepository.update(
+    {
+      _id: agentId,
+      _environmentId: session.environment._id,
+      _organizationId: session.organization._id,
+    },
+    { $set: { 'behavior.subscriberAccess': 'open' } }
+  );
 
   const integration = await integrationRepository.create({
     _environmentId: session.environment._id,

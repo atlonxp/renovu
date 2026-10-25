@@ -1,12 +1,15 @@
-import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import {
   CreateExecutionDetails,
   CreateExecutionDetailsCommand,
+  DeferReasonEnum,
   DetailEnum,
+  EventBridgeSchedulerService,
   PinoLogger,
 } from '@novu/application-generic';
 import { ChannelTypeEnum, JobEntity, JobRepository, JobStatusEnum, MessageRepository } from '@novu/dal';
 import { ExecutionDetailsSourceEnum, ExecutionDetailsStatusEnum } from '@novu/shared';
+import { GetSubscriber } from '../../../subscribers/usecases/get-subscriber';
 import { InboxNotificationDto } from '../../dtos/inbox-notification.dto';
 import { MarkNotificationAsCommand } from '../mark-notification-as/mark-notification-as.command';
 import { MarkNotificationAs } from '../mark-notification-as/mark-notification-as.usecase';
@@ -19,15 +22,27 @@ export class UnsnoozeNotification {
     private messageRepository: MessageRepository,
     private jobRepository: JobRepository,
     private markNotificationAs: MarkNotificationAs,
-    private createExecutionDetails: CreateExecutionDetails
+    private createExecutionDetails: CreateExecutionDetails,
+    private getSubscriber: GetSubscriber,
+    private schedulerService: EventBridgeSchedulerService
   ) {
     this.logger.setContext(this.constructor.name);
   }
 
   async execute(command: UnsnoozeNotificationCommand): Promise<InboxNotificationDto> {
+    const subscriber = await this.getSubscriber.execute({
+      environmentId: command.environmentId,
+      organizationId: command.organizationId,
+      subscriberId: command.subscriberId,
+    });
+    if (!subscriber) {
+      throw new BadRequestException(`Subscriber with id: ${command.subscriberId} is not found.`);
+    }
+
     const snoozedNotification = await this.messageRepository.findOne({
       _id: command.notificationId,
       _environmentId: command.environmentId,
+      _subscriberId: subscriber._id,
       channel: ChannelTypeEnum.IN_APP,
       snoozedUntil: { $exists: true, $ne: null },
       contextKeys: command.contextKeys,
@@ -60,7 +75,8 @@ export class UnsnoozeNotification {
         _notificationId: notificationId,
         _environmentId: command.environmentId,
         delay: { $exists: true },
-        status: JobStatusEnum.PENDING,
+        // PENDING kept for unsnooze jobs created before the switch to DELAYED
+        status: { $in: [JobStatusEnum.DELAYED, JobStatusEnum.PENDING] },
         'payload.unsnooze': true,
       });
 
@@ -77,6 +93,8 @@ export class UnsnoozeNotification {
     });
 
     if (scheduledJob) {
+      this.deleteSnoozeSchedule(scheduledJob);
+
       // fire and forget
       this.createExecutionDetails
         .execute(
@@ -100,5 +118,25 @@ export class UnsnoozeNotification {
     }
 
     return unsnoozedNotification;
+  }
+
+  /**
+   * Snooze is the one defer reason whose schedule is worth removing: the job
+   * document has just been deleted, so a later fire would find nothing and
+   * churn through SQS redeliveries until the redrive policy gives up. Every
+   * other reason relies on the fire happening and `RunJob` deciding it is a
+   * no-op. Best effort by design - the unsnooze has already been committed and
+   * a leftover schedule is only noise, never a correctness problem.
+   */
+  private deleteSnoozeSchedule(job: JobEntity): void {
+    this.schedulerService
+      .deleteSchedule({
+        deferReason: DeferReasonEnum.SNOOZE,
+        organizationId: job._organizationId,
+        scheduleId: job._id,
+      })
+      .catch((error) => {
+        this.logger.warn({ err: error, jobId: job._id }, 'Failed to delete the snooze schedule');
+      });
   }
 }

@@ -17,7 +17,8 @@ interface OrganizationContextValue {
     _id: string;
     id: string;
     imageUrl: string;
-    reload?: (...args: any[]) => Promise<void>;
+    reload?: (...args: any[]) => Promise<unknown>;
+    update?: (...args: any[]) => Promise<unknown>;
     [key: string]: any;
   };
   isLoaded: boolean;
@@ -54,6 +55,8 @@ export function OrganizationContextProvider({ children }: any) {
           _id: organization._id,
           id: organization._id,
           imageUrl: '',
+          update: async () => null,
+          reload: async () => null,
         }
       : undefined,
     isLoaded: hasToken ? !isLoading : true,

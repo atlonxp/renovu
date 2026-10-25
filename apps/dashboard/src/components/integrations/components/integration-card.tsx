@@ -1,6 +1,8 @@
 import {
   ApiServiceLevelEnum,
   ChannelTypeEnum,
+  EnvironmentTypeEnum,
+  FeatureNameEnum,
   type IEnvironment,
   type IIntegration,
   type IProviderConfig,
@@ -17,6 +19,7 @@ import { Badge } from '@/components/primitives/badge';
 import { Button } from '@/components/primitives/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/primitives/tooltip';
 import { UpgradeCTATooltip } from '@/components/upgrade-cta-tooltip';
+import { getMinimumTierForFeature } from '@/utils/upgrade-tier';
 import { useFetchSubscription } from '../../../hooks/use-fetch-subscription';
 import { ROUTES } from '../../../utils/routes';
 import { cn } from '../../../utils/ui';
@@ -47,7 +50,12 @@ export function IntegrationCard({
   const { subscription } = useFetchSubscription();
 
   const handleConfigureClick = (e: React.MouseEvent<HTMLElement>) => {
-    if (integration.channel === ChannelTypeEnum.IN_APP && !integration.connected) {
+    const shouldRedirectToInboxOnboarding =
+      integration.channel === ChannelTypeEnum.IN_APP &&
+      !integration.connected &&
+      environment.type === EnvironmentTypeEnum.DEV;
+
+    if (shouldRedirectToInboxOnboarding) {
       e.preventDefault();
 
       navigate(ROUTES.INBOX_EMBED + `?environmentId=${environment._id}`);
@@ -146,9 +154,14 @@ export function IntegrationCard({
               <TooltipContent>This is your primary integration for the {provider.channel} channel.</TooltipContent>
             </Tooltip>
           )}
+          {((integration.rules && Object.keys(integration.rules).length > 0) ||
+            (integration.conditions && integration.conditions.length > 0)) && (
+            <span className="text-foreground-400 text-[10px] leading-none">if</span>
+          )}
           {integration.channel === ChannelTypeEnum.IN_APP && isFreePlan && (
             <UpgradeCTATooltip
-              description="Upgrade to remove the Novu branding and extend notification snooze beyond 24 hours in your Inbox component."
+              description="Remove the Novu branding and extend notification snooze beyond 24 hours in your Inbox component."
+              requiredTier={getMinimumTierForFeature(FeatureNameEnum.PLATFORM_REMOVE_NOVU_BRANDING_BOOLEAN)}
               utmSource="in-app-upgrade-tooltip"
               side="right"
               align="center"

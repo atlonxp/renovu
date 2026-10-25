@@ -9,7 +9,7 @@ import {
   TriggerOverrides,
   WorkflowPreferences,
 } from '@novu/shared';
-import { IsArray, IsDefined, IsOptional, IsString } from 'class-validator';
+import { IsArray, IsBoolean, IsDefined, IsOptional, IsString, ValidateIf } from 'class-validator';
 
 import { EnvironmentWithUserCommand } from '../../commands';
 import { SubscriberTopicPreference } from '../../dtos';
@@ -22,7 +22,13 @@ export class CreateNotificationJobsCommand extends EnvironmentWithUserCommand {
   @IsDefined()
   overrides: TriggerOverrides;
 
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsString()
+  _agentId?: string | null;
+
   @IsDefined()
+  // biome-ignore lint/suspicious/noExplicitAny: the trigger payload is arbitrary customer JSON
   payload: any;
 
   @IsDefined()
@@ -65,4 +71,9 @@ export class CreateNotificationJobsCommand extends EnvironmentWithUserCommand {
 
   @IsDefined()
   critical: boolean;
+
+  /** Mirrors `IProcessSubscriberDataDto.incrementUsageInWorker`; transitional (NV-8853). */
+  @IsOptional()
+  @IsBoolean()
+  incrementUsageInWorker?: boolean;
 }

@@ -74,9 +74,19 @@ export class ActionDto {
 }
 
 export class ChatRenderOutput extends RenderOutput {
-  @ApiProperty({ description: 'Body of the chat message' })
+  @ApiPropertyOptional({ description: 'Body of the chat message. Mutually exclusive with `card`.' })
+  @IsOptional()
   @IsString()
-  body: string;
+  body?: string;
+
+  @ApiPropertyOptional({
+    description: 'Rich Chat: compiled provider-agnostic card DSL. Mutually exclusive with `body`.',
+    type: 'object',
+    additionalProperties: true,
+  })
+  @IsOptional()
+  @IsObject()
+  card?: Record<string, unknown>;
 }
 
 export class SmsRenderOutput extends RenderOutput {
@@ -125,7 +135,7 @@ export class DigestRegularOutput {
 
   @ApiPropertyOptional({
     description: 'Look back window configuration',
-    type: 'object',
+    type: Object,
   })
   @IsOptional()
   @ValidateNested()
@@ -243,7 +253,7 @@ export class GeneratePreviewResponseDto {
     additionalProperties: true,
   })
   @IsOptional()
-  schema?: any | null;
+  schema?: unknown;
 
   @ApiPropertyOptional({
     description: 'Sample novu-signature header value for HTTP request steps',
@@ -255,7 +265,6 @@ export class GeneratePreviewResponseDto {
 
   @ApiProperty({
     description: 'Preview result',
-    type: 'object',
     oneOf: [
       {
         type: 'object',
@@ -305,6 +314,13 @@ export class GeneratePreviewResponseDto {
       },
       {
         properties: {
+          type: { enum: [ChannelTypeEnum.TOOL] },
+          preview: { type: 'object', additionalProperties: true },
+          error: { $ref: getSchemaPath(PreviewErrorDto) },
+        },
+      },
+      {
+        properties: {
           type: { enum: [ActionTypeEnum.DELAY] },
           preview: { $ref: getSchemaPath(DigestRegularOutput) },
         },
@@ -344,6 +360,11 @@ export class GeneratePreviewResponseDto {
         error?: PreviewErrorDto;
       }
     | {
+        type: ChannelTypeEnum.TOOL;
+        preview: Record<string, unknown>;
+        error?: PreviewErrorDto;
+      }
+    | {
         type: ActionTypeEnum.DELAY;
         preview: DigestRenderOutput;
       }
@@ -358,6 +379,7 @@ export class GeneratePreviewResponseDto {
           | ChannelTypeEnum.SMS
           | ChannelTypeEnum.PUSH
           | ChannelTypeEnum.CHAT
+          | ChannelTypeEnum.TOOL
           | ActionTypeEnum.DELAY
           | ActionTypeEnum.DIGEST;
         preview: Record<string, unknown>;

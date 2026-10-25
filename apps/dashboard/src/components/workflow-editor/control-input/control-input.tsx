@@ -1,5 +1,5 @@
-import { FeatureFlagsKeysEnum } from '@novu/shared';
-import { EditorView } from '@uiw/react-codemirror';
+import { type CompletionSource } from '@codemirror/autocomplete';
+import { EditorView, type Extension } from '@uiw/react-codemirror';
 import { cva } from 'class-variance-authority';
 import { useMemo, useRef } from 'react';
 import { EditorOverlays } from '@/components/editor-overlays';
@@ -9,7 +9,6 @@ import { useWorkflow } from '@/components/workflow-editor/workflow-provider';
 import { useWorkflowSchema } from '@/components/workflow-editor/workflow-schema-provider';
 import { useEditorTranslationOverlay } from '@/hooks/use-editor-translation-overlay';
 import { useEnhancedVariableValidation } from '@/hooks/use-enhanced-variable-validation';
-import { useFeatureFlag } from '@/hooks/use-feature-flag';
 import { IsAllowedVariable, LiquidVariable } from '@/utils/parseStepVariables';
 import { cn } from '@/utils/ui';
 import { LocalizationResourceEnum } from '../../../types/translations';
@@ -44,6 +43,9 @@ type ControlInputProps = {
   enableTranslations?: boolean;
   disabled?: boolean;
   readOnly?: boolean;
+  completionSources?: CompletionSource[];
+  /** Must keep a stable identity: a new array rebuilds the editor's extensions. */
+  extensions?: Extension[];
 };
 
 export function ControlInput({
@@ -62,6 +64,8 @@ export function ControlInput({
   enableTranslations = false,
   disabled = false,
   readOnly = false,
+  completionSources,
+  extensions: externalExtensions,
 }: ControlInputProps) {
   const viewRef = useRef<EditorView | null>(null);
   const lastCompletionRef = useRef<CompletionRange | null>(null);
@@ -95,6 +99,7 @@ export function ControlInput({
     resourceType,
     enableTranslations,
     isTranslationEnabledOnResource: !!workflow?.isTranslationEnabled,
+    isReadOnly: disabled || readOnly,
   });
 
   const { enhancedIsAllowedVariable } = useEnhancedVariableValidation({
@@ -104,10 +109,19 @@ export function ControlInput({
   });
 
   const extensions = useMemo(() => {
-    if (!translationPluginExtension) return [];
+    const merged = [...(externalExtensions ?? [])];
 
-    return [translationPluginExtension];
-  }, [translationPluginExtension]);
+    if (translationPluginExtension) {
+      merged.push(translationPluginExtension);
+    }
+
+    return merged;
+  }, [externalExtensions, translationPluginExtension]);
+
+  const mergedCompletionSources = useMemo(
+    () => [...(translationCompletionSource ?? []), ...(completionSources ?? [])],
+    [translationCompletionSource, completionSources]
+  );
 
   return (
     <VariableEditor
@@ -125,7 +139,7 @@ export function ControlInput({
       multiline={multiline}
       indentWithTab={indentWithTab}
       size={size}
-      completionSources={translationCompletionSource}
+      completionSources={mergedCompletionSources}
       isPayloadSchemaEnabled={isPayloadSchemaEnabled}
       isTranslationEnabled={shouldEnableTranslations}
       isContextEnabled={true}

@@ -1,13 +1,15 @@
 import { PushProviderIdEnum } from '@novu/shared';
-import { ChannelTypeEnum, IPushOptions, IPushProvider, ISendMessageSuccessResponse } from '@novu/stateless';
-import axios, { AxiosInstance } from 'axios';
-import { BaseProvider, CasingEnum } from '../../../base.provider';
+import { IPushOptions, IPushProvider, ISendMessageSuccessResponse } from '@novu/stateless';
+import { AxiosInstance } from 'axios';
+import { CasingEnum } from '../../../base.provider';
+import { createProviderHttpClient } from '../../../utils/http';
+import { resolveSafePusherBeamsBaseUrl } from '../../../utils/safe-pusher-beams-url';
 import { WithPassthrough } from '../../../utils/types';
+import { PushBaseProvider } from '../push.base-provider';
 
-export class PusherBeamsPushProvider extends BaseProvider implements IPushProvider {
+export class PusherBeamsPushProvider extends PushBaseProvider implements IPushProvider {
   protected casing: CasingEnum = CasingEnum.SNAKE_CASE;
   id = PushProviderIdEnum.PusherBeams;
-  channelType = ChannelTypeEnum.PUSH as ChannelTypeEnum.PUSH;
 
   private axiosInstance: AxiosInstance;
 
@@ -18,8 +20,10 @@ export class PusherBeamsPushProvider extends BaseProvider implements IPushProvid
     }
   ) {
     super();
-    this.axiosInstance = axios.create({
-      baseURL: `https://${this.config.instanceId}.pushnotifications.pusher.com/publish_api/v1/instances/${this.config.instanceId}`,
+    const baseURL = resolveSafePusherBeamsBaseUrl(this.config.instanceId);
+
+    this.axiosInstance = createProviderHttpClient({
+      baseURL,
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${this.config.secretKey}`,
@@ -44,6 +48,7 @@ export class PusherBeamsPushProvider extends BaseProvider implements IPushProvid
           category: overrides.categoryId,
           sound,
         },
+        data: options.payload,
       },
       fcm: {
         notification: {

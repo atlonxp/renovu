@@ -2,10 +2,13 @@ export { createClient as createClickHouseClient } from '@clickhouse/client';
 export * from './clickhouse.service';
 export * from './clickhouse-batch.service';
 export * from './delivery-trend-counts';
+export { toInclusiveUtcDays, toUtcDay } from './inclusive-utc-days';
 export * from './log.repository';
 export * from './request-log';
 export { StepRun, StepRunFinalStatus, StepRunNonFinalStatus, StepRunRepository, StepRunStatus } from './step-run';
 export {
+  BuildStepRunTraceFromJobParams,
+  buildStepRunTraceFromJob,
   EventType,
   mapEventTypeToTitle,
   RequestTraceInput,

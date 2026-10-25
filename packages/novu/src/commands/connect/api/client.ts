@@ -1,3 +1,4 @@
+import { NOVU_ANALYTICS_SOURCE_HEADER } from '@novu/shared';
 import { AxiosError, AxiosInstance } from 'axios';
 import { createNovuAxios, extractNovuApiMessage } from '../../shared/novu-http';
 
@@ -16,16 +17,37 @@ export class NovuApiError extends Error {
 export interface ConnectApiClient {
   readonly axios: AxiosInstance;
   readonly apiUrl: string;
+  readonly isKeyless: boolean;
 }
 
-export function createConnectApiClient(input: { apiUrl: string; secretKey: string }): ConnectApiClient {
+export function createConnectApiClient(input: {
+  apiUrl: string;
+  secretKey?: string;
+  keylessApplicationIdentifier?: string;
+}): ConnectApiClient {
   const baseURL = input.apiUrl.replace(/\/$/, '');
   const debug = process.env.NOVU_CLI_DEBUG === '1' || process.env.NOVU_CLI_DEBUG === 'true';
+  const keylessIdentifier = input.keylessApplicationIdentifier?.trim();
+  const isKeyless = Boolean(keylessIdentifier);
+
+  if (!isKeyless && !input.secretKey) {
+    throw new Error('createConnectApiClient requires either a secretKey or a keylessApplicationIdentifier.');
+  }
+
+  const authHeaders = isKeyless
+    ? {
+        Authorization: `Keyless ${keylessIdentifier}`,
+        'Novu-Application-Identifier': keylessIdentifier as string,
+        [NOVU_ANALYTICS_SOURCE_HEADER]: 'cli',
+      }
+    : {
+        Authorization: `ApiKey ${input.secretKey}`,
+        [NOVU_ANALYTICS_SOURCE_HEADER]: 'cli',
+      };
+
   const instance = createNovuAxios({
     apiUrl: baseURL,
-    headers: {
-      Authorization: `ApiKey ${input.secretKey}`,
-    },
+    headers: authHeaders,
   });
 
   if (debug) {
@@ -67,5 +89,5 @@ export function createConnectApiClient(input: { apiUrl: string; secretKey: strin
     }
   );
 
-  return { axios: instance, apiUrl: baseURL };
+  return { axios: instance, apiUrl: baseURL, isKeyless };
 }

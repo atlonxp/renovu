@@ -1,10 +1,16 @@
-import { AgentRuntimeProviderIdEnum, CLAUDE_BUILTIN_TOOLS, type IIntegration, IntegrationKindEnum } from '@novu/shared';
+import {
+  type AgentAnalyticsSource,
+  AgentRuntimeProviderIdEnum,
+  CLAUDE_BUILTIN_TOOLS,
+  type IIntegration,
+  IntegrationKindEnum,
+} from '@novu/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useState } from 'react';
 import { AGENTS_LIST_QUERY_KEY, type AgentResponse, type CreateAgentBody, createAgent } from '@/api/agents';
 import { resolveClaudeManagedProviderId } from '@/components/agents/connectors/claude-managed-integrations';
-import { buildManagedIntegrationCredentials } from '@/components/agents/create-agent-fields';
 import type { CreateAgentForm } from '@/components/agents/create-agent-fields';
+import { buildManagedIntegrationCredentials } from '@/components/agents/create-agent-fields';
 import { requireEnvironment, useEnvironment } from '@/context/environment/hooks';
 import { QueryKeys } from '@/utils/query-keys';
 import { useCreateIntegration } from './use-create-integration';
@@ -13,6 +19,7 @@ import { useDeleteIntegration } from './use-delete-integration';
 type SubmitOptions = {
   onSuccess?: (agent: AgentResponse) => void;
   onError?: (error: Error) => void;
+  analyticsSource?: AgentAnalyticsSource;
 };
 
 /**
@@ -29,8 +36,8 @@ export function useCreateAgentMutation() {
   const [isPending, setIsPending] = useState(false);
 
   const createAgentMutation = useMutation({
-    mutationFn: (body: CreateAgentBody) =>
-      createAgent(requireEnvironment(currentEnvironment, 'No environment selected'), body),
+    mutationFn: ({ body, analyticsSource }: { body: CreateAgentBody; analyticsSource?: AgentAnalyticsSource }) =>
+      createAgent(requireEnvironment(currentEnvironment, 'No environment selected'), body, { analyticsSource }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [AGENTS_LIST_QUERY_KEY] });
     },
@@ -42,6 +49,7 @@ export function useCreateAgentMutation() {
         name,
         identifier,
         instructions,
+        description,
         apiKey,
         externalAgentId,
         externalEnvironmentId,
@@ -63,11 +71,14 @@ export function useCreateAgentMutation() {
           const request: CreateAgentBody = {
             name,
             identifier,
-            description: instructions,
+            description,
           };
 
           try {
-            const created = await createAgentMutation.mutateAsync(request);
+            const created = await createAgentMutation.mutateAsync({
+              body: request,
+              analyticsSource: options?.analyticsSource,
+            });
             options?.onSuccess?.(created);
 
             return created;
@@ -135,6 +146,7 @@ export function useCreateAgentMutation() {
             : {
                 name,
                 identifier,
+                description,
                 runtime: 'managed',
                 managedRuntime: {
                   integrationId,
@@ -155,7 +167,10 @@ export function useCreateAgentMutation() {
               };
 
           try {
-            const created = await createAgentMutation.mutateAsync(request);
+            const created = await createAgentMutation.mutateAsync({
+              body: request,
+              analyticsSource: options?.analyticsSource,
+            });
             options?.onSuccess?.(created);
 
             return created;

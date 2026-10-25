@@ -64,10 +64,7 @@ export class NovuEmailAdapterImpl implements Adapter<NovuEmailThreadId, NovuEmai
 
     const chatModule = await import('chat');
     this.parseMarkdownFn = chatModule.parseMarkdown;
-    this.messageParser.setChatModule(
-      chatModule.Message as unknown as Parameters<MessageParser['setChatModule']>[0],
-      chatModule.parseMarkdown
-    );
+    this.messageParser.setChatModule(chatModule.Message, chatModule.parseMarkdown);
   }
 
   // -- Thread ID methods --
@@ -108,38 +105,46 @@ export class NovuEmailAdapterImpl implements Adapter<NovuEmailThreadId, NovuEmai
       references: payload.references,
     });
 
-    const agentAddress = payload.to[0]?.address;
+    const agentAddress = payload.to[0]?.address ? this.config.stripAgentReplyToken(payload.to[0].address) : undefined;
     await Promise.all([
       this.threadResolver.trackSubject(threadId, payload.subject),
       agentAddress ? this.threadResolver.trackAgentAddress(threadId, agentAddress) : Promise.resolve(),
     ]);
 
-    const message = this.parseMessage(this.toRawMessage(payload, threadId));
+    const message = this.parseMessage(this.toRawMessage(payload), threadId);
     this.chat.processMessage(this, threadId, message, options);
 
     return new Response(null, { status: 200 });
   }
 
-  private toRawMessage(payload: import('./types.js').EmailWebhookPayload, _threadId: string): NovuEmailRawMessage {
+  private toRawMessage(payload: import('./types.js').EmailWebhookPayload): NovuEmailRawMessage {
     return {
       id: payload.messageId,
       messageId: payload.messageId,
       from: payload.from.name ? `${payload.from.name} <${payload.from.address}>` : payload.from.address,
-      to: payload.to.map((t: { address: string; name?: string }) => t.address),
+      to: payload.to.map((t: { address: string; name?: string }) => this.config.stripAgentReplyToken(t.address)),
       subject: payload.subject,
       text: payload.text,
       html: payload.html,
+      inReplyTo: payload.inReplyTo,
+      references: payload.references,
+      headers: payload.headers,
+      domain: payload.domain,
+      route: payload.route,
+      originToken: payload.originToken,
       createdAt: payload.date,
       attachments: payload.attachments,
+      dkim: payload.dkim,
+      spf: payload.spf,
     };
   }
 
   // -- Message parsing --
 
-  parseMessage(raw: NovuEmailRawMessage): Message<NovuEmailRawMessage> {
+  parseMessage(raw: NovuEmailRawMessage, threadId = ''): Message<NovuEmailRawMessage> {
     const agentAddress = raw.to[0] ?? '';
 
-    return this.messageParser.parse(raw, agentAddress);
+    return this.messageParser.parse(raw, agentAddress, threadId);
   }
 
   // -- Outbound --
@@ -148,10 +153,7 @@ export class NovuEmailAdapterImpl implements Adapter<NovuEmailThreadId, NovuEmai
     const normalized = this.normalizeMessage(message);
     const decoded = this.threadResolver.decodeThreadId(threadId);
 
-    const agentAddress = await this.threadResolver.getAgentAddress(threadId);
-    if (!agentAddress) {
-      throw new Error(`No agent address found for thread ${threadId} — cannot determine From address for reply`);
-    }
+    const agentAddress = await this.resolveAgentAddress(threadId, 'reply');
 
     const fromHeader = this.config.senderName ? `${this.config.senderName} <${agentAddress}>` : agentAddress;
 
@@ -215,10 +217,7 @@ export class NovuEmailAdapterImpl implements Adapter<NovuEmailThreadId, NovuEmai
       return;
     }
 
-    const agentAddress = await this.threadResolver.getAgentAddress(threadId);
-    if (!agentAddress) {
-      throw new Error(`No agent address found for thread ${threadId} — cannot determine From address for reaction`);
-    }
+    const agentAddress = await this.resolveAgentAddress(threadId, 'reaction');
 
     let reactionEmoji: string;
     try {
@@ -316,6 +315,28 @@ export class NovuEmailAdapterImpl implements Adapter<NovuEmailThreadId, NovuEmai
     });
   }
 
+  /**
+   * The agent's From address for a thread: the address recorded from the
+   * inbound email that opened it, else `defaultAgentAddress` for threads the
+   * agent opened itself. The fallback is recorded so later replies and
+   * reactions on the thread keep the same From.
+   */
+  private async resolveAgentAddress(threadId: string, purpose: 'reply' | 'reaction'): Promise<string> {
+    const tracked = await this.threadResolver.getAgentAddress(threadId);
+    if (tracked) {
+      return tracked;
+    }
+
+    const fallback = this.config.defaultAgentAddress?.trim();
+    if (!fallback) {
+      throw new Error(`No agent address found for thread ${threadId} — cannot determine From address for ${purpose}`);
+    }
+
+    await this.threadResolver.trackAgentAddress(threadId, fallback);
+
+    return fallback;
+  }
+
   // -- Unsupported operations --
 
   async startTyping(_threadId: string): Promise<void> {
@@ -378,15 +399,7 @@ export class NovuEmailAdapterImpl implements Adapter<NovuEmailThreadId, NovuEmai
   }
 
   private segmentGraphemes(value: string): string[] {
-    const Segmenter = (
-      Intl as unknown as {
-        Segmenter?: new (
-          locale: string,
-          options: { granularity: 'grapheme' }
-        ) => { segment(input: string): Iterable<{ segment: string }> };
-      }
-    ).Segmenter;
-
+    const Segmenter = Intl.Segmenter;
     if (!Segmenter) {
       return Array.from(value);
     }

@@ -45,7 +45,13 @@ export const getEnvVariable = (name: string, context?: unknown): string => {
 
   // Cloudflare workers
   try {
-    return globalThis[name as keyof typeof globalThis];
+    const globalValue = globalThis[name as keyof typeof globalThis];
+    // Only return a real string. A bare `return globalThis[name]` yields
+    // `undefined` for a missing name (property access does not throw in Node),
+    // which breaks the `: string` contract and the `return ''` fallback below.
+    if (typeof globalValue === 'string') {
+      return globalValue;
+    }
   } catch (_) {
     // This will raise an error in Cloudflare Pages
   }
@@ -55,8 +61,7 @@ export const getEnvVariable = (name: string, context?: unknown): string => {
 
 export type EEAuthProvider = 'clerk' | 'better-auth';
 
-export const isEEAuthEnabled = () =>
-  process.env.NOVU_ENTERPRISE === 'true' || process.env.CI_EE_TEST === 'true';
+export const isEEAuthEnabled = () => process.env.NOVU_ENTERPRISE === 'true' || process.env.CI_EE_TEST === 'true';
 
 export const getEEAuthProvider = (): EEAuthProvider => {
   const provider = process.env.EE_AUTH_PROVIDER as EEAuthProvider | undefined;
@@ -67,3 +72,20 @@ export const getEEAuthProvider = (): EEAuthProvider => {
 export const isClerkEnabled = () => isEEAuthEnabled() && getEEAuthProvider() === 'clerk';
 
 export const isBetterAuthEnabled = () => isEEAuthEnabled() && getEEAuthProvider() === 'better-auth';
+
+/**
+ * Outbound SSRF DNS-pinning for non-bridge paths (HTTP request steps, provider
+ * webhooks, etc.) applies on Novu Cloud Enterprise builds.
+ *
+ * Bridge user-supplied URLs always enforce DNS pinning regardless of
+ * deployment mode — see ExecuteFrameworkRequest. Self-hosted operators who
+ * need private/internal bridge targets must allow-list them via
+ * NOVU_SAFE_OUTBOUND_ALLOW (link-local / cloud-metadata ranges are never
+ * allow-listed).
+ */
+export const isOutboundSsrfProtectionEnabled = (): boolean => {
+  const isEnterprise = getEnvVariable('NOVU_ENTERPRISE') === 'true' || getEnvVariable('CI_EE_TEST') === 'true';
+  const isSelfHosted = getEnvVariable('IS_SELF_HOSTED') === 'true';
+
+  return isEnterprise && !isSelfHosted;
+};

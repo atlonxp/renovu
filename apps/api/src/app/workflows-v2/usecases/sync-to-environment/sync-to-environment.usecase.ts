@@ -6,6 +6,7 @@ import {
   GetWorkflowUseCase,
   Instrument,
   InstrumentUsecase,
+  ResolveAgentInboundAddresses,
   SendWebhookMessage,
   StepResponseDto,
   UpsertStepDataCommand,
@@ -34,6 +35,10 @@ import {
   WorkflowCreationSourceEnum,
 } from '@novu/shared';
 import { PublishTranslationGroup } from '@novu/translation';
+import {
+  SyncAgentToEnvironment,
+  SyncAgentToEnvironmentCommand,
+} from '../../../agents/management/usecases/sync-agent-to-environment';
 import {
   LayoutSyncToEnvironmentCommand,
   LayoutSyncToEnvironmentUseCase,
@@ -65,11 +70,13 @@ export class SyncToEnvironmentUseCase {
     private upsertWorkflowUseCase: UpsertWorkflowUseCase,
     private layoutSyncToEnvironmentUseCase: LayoutSyncToEnvironmentUseCase,
     private publishTranslationGroupUseCase: PublishTranslationGroup,
+    private syncAgentToEnvironment: SyncAgentToEnvironment,
     private syncStepResolverToEnvironmentUsecase: SyncStepResolverToEnvironmentUsecase,
     private featureFlagsService: FeatureFlagsService,
     private moduleRef: ModuleRef,
     private notificationTemplateRepository: NotificationTemplateRepository,
     private environmentRepository: EnvironmentRepository,
+    private resolveAgentInboundAddresses: ResolveAgentInboundAddresses,
     @Optional()
     private sendWebhookMessage?: SendWebhookMessage
   ) {}
@@ -126,6 +133,24 @@ export class SyncToEnvironmentUseCase {
     );
     await Promise.all(layoutsTranslationGroupsPromises);
 
+    if (workflowDto.agent?.identifier) {
+      await this.syncAgentToEnvironment.execute(
+        SyncAgentToEnvironmentCommand.create({
+          agentIdentifier: workflowDto.agent.identifier,
+          environmentId: command.user.environmentId,
+          targetEnvironmentId: command.targetEnvironmentId,
+          organizationId: command.user.organizationId,
+          userId: command.user._id,
+        })
+      );
+
+      await this.resolveAgentInboundAddresses.validateWorkflowAgentConfig({
+        agent: workflowDto.agent,
+        environmentId: command.targetEnvironmentId,
+        organizationId: command.user.organizationId,
+      });
+    }
+
     const upsertedWorkflow = await this.upsertWorkflowUseCase.execute(
       UpsertWorkflowCommand.create({
         preserveWorkflowId: true,
@@ -153,7 +178,9 @@ export class SyncToEnvironmentUseCase {
         eventType: WebhookEventEnum.WORKFLOW_PUBLISHED,
         objectType: WebhookObjectTypeEnum.WORKFLOW,
         payload: {
+          // biome-ignore lint/plugin: webhook payloads carry the workflow DTO as a loose JSON object
           object: upsertedWorkflow as unknown as Record<string, unknown>,
+          // biome-ignore lint/plugin: webhook payloads carry the workflow DTO as a loose JSON object
           previousObject: sourceWorkflow as unknown as Record<string, unknown>,
         },
         organizationId: command.user.organizationId,
@@ -275,6 +302,7 @@ export class SyncToEnvironmentUseCase {
       description: sourceWorkflow.description,
       __source: WorkflowCreationSourceEnum.DASHBOARD,
       severity: sourceWorkflow.severity,
+      agent: sourceWorkflow.agent ?? null,
       steps: await this.mapStepsToCreateOrUpdateDto(sourceWorkflow.steps),
       preferences: this.mapPreferences(preferences),
     };
@@ -296,6 +324,7 @@ export class SyncToEnvironmentUseCase {
       tags: sourceWorkflow.tags,
       description: sourceWorkflow.description,
       severity: sourceWorkflow.severity,
+      agent: sourceWorkflow.agent ?? null,
       steps: await this.mapStepsToCreateOrUpdateDto(sourceWorkflow.steps, existingTargetEnvWorkflow?.steps),
       preferences: this.mapPreferences(preferencesToClone),
     };
@@ -323,6 +352,8 @@ export class SyncToEnvironmentUseCase {
       name: sourceStep.name ?? '',
       type: sourceStep.type,
       controlValues: sourceStep.controls?.values ?? {},
+      providerOverrides: sourceStep.providerOverrides ?? null,
+      integrationOverrides: sourceStep.integrationOverrides ?? null,
     };
   }
 

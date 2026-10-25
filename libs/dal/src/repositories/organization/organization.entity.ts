@@ -2,8 +2,8 @@ import {
   ApiServiceLevelEnum,
   IBrandEnrichment,
   IOrganizationEntity,
+  IOrganizationUsageLimits,
   OnboardingWorkflowsStatus,
-  OrganizationProductTypeEnum,
   ProductUseCases,
 } from '@novu/shared';
 
@@ -41,6 +41,9 @@ export class OrganizationEntity implements IOrganizationEntity {
   /** Lifecycle of AI-generated onboarding workflow templates (snapshots). */
   onboardingWorkflowsStatus?: OnboardingWorkflowsStatus;
 
+  /** Workflow-run usage limit and usage alert settings; absent until the organization changes them. */
+  usageLimits?: IOrganizationUsageLimits;
+
   createdAt: string;
 
   updatedAt: string;
@@ -50,9 +53,6 @@ export class OrganizationEntity implements IOrganizationEntity {
   stripeCustomerId?: string;
 
   createdBy?: string;
-
-  /** Which Novu product this organization belongs to. Missing value is treated as `platform`. */
-  productType?: OrganizationProductTypeEnum;
 }
 
 export type Branding = {

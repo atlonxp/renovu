@@ -5,6 +5,7 @@ import { NonExistingFileError } from '../../services/storage/non-existing-file.e
 import { StorageService } from '../../services/storage/storage.service';
 
 const LOG_CONTEXT = 'AttachmentRehydrator';
+const WEBHOOK_ATTACHMENT_URL_TTL_SECONDS = 6 * 60 * 60;
 
 @Injectable()
 export class AttachmentRehydrator {
@@ -17,6 +18,10 @@ export class AttachmentRehydrator {
    *
    * This rehydration is intentionally performed only for the legacy domain-route and
    * reply-to webhook paths. The agent webhook receives metadata + URL only.
+   *
+   * Inline-mode attachments (self-hosted without S3) already carry their binary
+   * `content` in the queue payload — they are passed through unchanged without
+   * any S3 round-trip.
    *
    * Per-attachment S3 failures are handled gracefully: `content` is set to `null`
    * and a warning is logged; the attachment is still included with its `url` so
@@ -32,8 +37,63 @@ export class AttachmentRehydrator {
     return results;
   }
 
+  async createSignedUrls(attachments: IInboundParseAttachment[] | undefined): Promise<InboundEmailAttachment[]> {
+    if (!attachments || attachments.length === 0) {
+      return [];
+    }
+
+    return await Promise.all(
+      attachments.map(async (attachment) => {
+        if (!attachment.storagePath) {
+          return await this.rehydrateSingle(attachment);
+        }
+
+        const url = await this.storageService.getReadSignedUrl(
+          attachment.storagePath,
+          WEBHOOK_ATTACHMENT_URL_TTL_SECONDS
+        );
+
+        return {
+          filename: attachment.filename,
+          contentType: attachment.contentType,
+          size: attachment.size,
+          url,
+          expiresAt: new Date(Date.now() + WEBHOOK_ATTACHMENT_URL_TTL_SECONDS * 1000).toISOString(),
+        };
+      })
+    );
+  }
+
   private async rehydrateSingle(attachment: IInboundParseAttachment): Promise<InboundEmailAttachment> {
+    /*
+     * Inline-mode (S3-not-configured) fallback: the inbound-mail server already
+     * embedded the binary in the queue payload. Skip the S3 round-trip entirely
+     * and return the legacy shape consumers expect.
+     */
+    if (!attachment.storagePath) {
+      Logger.log(
+        { filename: attachment.filename, attachmentSource: 'inline' },
+        'Attachment source is inline queue payload — skipping S3 rehydration',
+        LOG_CONTEXT
+      );
+
+      return {
+        filename: attachment.filename,
+        contentType: attachment.contentType,
+        size: attachment.size,
+        url: attachment.url,
+        content: attachment.content ?? null,
+        contentBytes: attachment.size,
+      };
+    }
+
     try {
+      Logger.log(
+        { filename: attachment.filename, storagePath: attachment.storagePath, attachmentSource: 's3' },
+        'Attachment source is S3 — rehydrating from storage',
+        LOG_CONTEXT
+      );
+
       const fileBuffer = await this.storageService.getFile(attachment.storagePath);
 
       return {
@@ -41,7 +101,6 @@ export class AttachmentRehydrator {
         contentType: attachment.contentType,
         size: attachment.size,
         url: attachment.url,
-        storagePath: attachment.storagePath,
         content: {
           type: 'Buffer',
           data: Array.from(fileBuffer),
@@ -68,7 +127,6 @@ export class AttachmentRehydrator {
         contentType: attachment.contentType,
         size: attachment.size,
         url: attachment.url,
-        storagePath: attachment.storagePath,
         content: null,
         contentBytes: attachment.size,
       };

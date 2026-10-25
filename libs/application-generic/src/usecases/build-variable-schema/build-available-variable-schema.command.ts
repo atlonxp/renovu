@@ -1,19 +1,37 @@
-import { ControlValuesEntity, NotificationTemplateEntity } from '@novu/dal';
-import { StepTypeEnum } from '@novu/shared';
+import { ControlValuesEntity, EnvironmentVariableForTemplate } from '@novu/dal';
+import { EnvironmentTypeEnum, StepTypeEnum } from '@novu/shared';
 import { IsOptional, IsString } from 'class-validator';
 import { EnvironmentWithUserCommand } from '../../commands';
 import { JSONSchemaDto } from '../../dtos/json-schema.dto';
 import { PreviewPayloadDto } from '../../dtos/workflow/preview-payload.dto';
+import { WorkflowForVariableSchema } from '../../types/workflow-mapper.types';
+
+/**
+ * Environment name/type and variables loaded once and reused across steps.
+ */
+export interface IPreloadedEnvironmentContext {
+  rawEnvVars: EnvironmentVariableForTemplate[];
+  environment: { name: string; type: EnvironmentTypeEnum } | null;
+}
 
 // Type for optimistic step data used during sync
 export interface IOptimisticStepInfo {
   stepId: string;
   type: StepTypeEnum;
+  /**
+   * In-flight control values from the upsert/sync payload.
+   * Needed so HTTP response schemas are available before control values are persisted.
+   */
+  controlValues?: Record<string, unknown>;
+  /**
+   * Persisted step template id in the target environment (when updating an existing workflow).
+   */
+  _id?: string;
 }
 
 export class BuildVariableSchemaCommand extends EnvironmentWithUserCommand {
   @IsOptional()
-  workflow?: NotificationTemplateEntity;
+  workflow?: WorkflowForVariableSchema;
 
   @IsOptional()
   @IsString()
@@ -40,6 +58,13 @@ export class BuildVariableSchemaCommand extends EnvironmentWithUserCommand {
    */
   @IsOptional()
   preloadedControlValues?: ControlValuesEntity[];
+
+  /**
+   * Pre-loaded environment and environment variables. Skips those reads when set,
+   * including when the environment was not found or the variable list is empty.
+   */
+  @IsOptional()
+  preloadedEnvironmentContext?: IPreloadedEnvironmentContext;
 
   /**
    * When set, takes precedence over workflow.payloadSchema for validation.

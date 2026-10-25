@@ -1,16 +1,21 @@
+import { AgentReplyPolicyEnum } from '@novu/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { RiCloseCircleLine, RiExpandUpDownLine } from 'react-icons/ri';
 import {
+  type AgentBehavior,
   type AgentEmojiEntry,
+  type AgentReplyPolicy,
   type AgentResponse,
   getAgentDetailQueryKey,
   getAgentEmojiQueryKey,
   listAgentEmoji,
   updateAgent,
 } from '@/api/agents';
+import { SUBSCRIBER_ACCESS_SETTING_LABEL, SUBSCRIBER_ACCESS_TOOLTIP } from '@/components/agents/subscriber-access-copy';
 import { HelpTooltipIndicator } from '@/components/primitives/help-tooltip-indicator';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/primitives/popover';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/primitives/select';
 import { showErrorToast } from '@/components/primitives/sonner-helpers';
 import { Switch } from '@/components/primitives/switch';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/primitives/tooltip';
@@ -20,12 +25,106 @@ const DEFAULT_REACTION_ON_RESOLVED = 'check';
 const PROD_READ_ONLY_TOOLTIP =
   'This setting is read-only in production. Edit in Development and promote to apply changes.';
 
+type BehaviorSwitchProps = {
+  checked: boolean;
+  disabled?: boolean;
+  readOnly: boolean;
+  onCheckedChange: (checked: boolean) => void;
+};
+
+function BehaviorSwitch({ checked, disabled, readOnly, onCheckedChange }: BehaviorSwitchProps) {
+  if (readOnly) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex">
+            <Switch checked={checked} disabled />
+          </span>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-xs">{PROD_READ_ONLY_TOOLTIP}</TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  return <Switch checked={checked} disabled={disabled} onCheckedChange={onCheckedChange} />;
+}
+
+const REPLY_POLICY_LABELS: Record<AgentReplyPolicy, string> = {
+  mention_only: 'Mention only',
+  auto_reply: 'Auto-reply in threads',
+  smart: 'Smart',
+};
+
+const REPLY_POLICY_DESCRIPTIONS: Record<AgentReplyPolicy, string> = {
+  mention_only: 'Replies only to messages that @mention the agent.',
+  auto_reply: 'Once an @mention pulls the agent into a thread, it keeps replying there without further mentions.',
+  smart:
+    'Replies without a mention while it is one-on-one, and asks to be @mentioned once someone else or another agent joins, or a teammate is @mentioned.',
+};
+
+const REPLY_POLICY_TOOLTIP = (
+  <div className="flex flex-col gap-2">
+    <p>How the agent decides when to answer in Slack and Teams channels.</p>
+    <ul className="flex flex-col gap-1.5">
+      {(Object.keys(REPLY_POLICY_LABELS) as AgentReplyPolicy[]).map((policy) => (
+        <li key={policy}>
+          <span className="font-medium">{REPLY_POLICY_LABELS[policy]}</span>
+          <span className="block opacity-80">{REPLY_POLICY_DESCRIPTIONS[policy]}</span>
+        </li>
+      ))}
+    </ul>
+    <p className="opacity-80">
+      New agents start on Smart. Agents without a saved policy keep Auto-reply. Direct messages always get a reply.
+      Channel messages and group chats always need an @mention.
+    </p>
+  </div>
+);
+
+type ReplyPolicySelectProps = {
+  value: AgentReplyPolicy;
+  disabled?: boolean;
+  readOnly: boolean;
+  onValueChange: (value: AgentReplyPolicy) => void;
+};
+
+function ReplyPolicySelect({ value, disabled, readOnly, onValueChange }: ReplyPolicySelectProps) {
+  const select = (
+    <Select
+      value={value}
+      onValueChange={(next) => onValueChange(next as AgentReplyPolicy)}
+      disabled={disabled || readOnly}
+    >
+      <SelectTrigger size="2xs" className="w-[11.5rem] shrink-0">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent align="end">
+        <SelectItem value={AgentReplyPolicyEnum.MENTION_ONLY}>{REPLY_POLICY_LABELS.mention_only}</SelectItem>
+        <SelectItem value={AgentReplyPolicyEnum.AUTO_REPLY}>{REPLY_POLICY_LABELS.auto_reply}</SelectItem>
+        <SelectItem value={AgentReplyPolicyEnum.SMART}>{REPLY_POLICY_LABELS.smart}</SelectItem>
+      </SelectContent>
+    </Select>
+  );
+
+  if (readOnly) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex">{select}</span>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-xs">{PROD_READ_ONLY_TOOLTIP}</TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  return select;
+}
+
 function useAgentEmoji() {
   const { currentEnvironment } = useEnvironment();
 
   const { data: emojiList = [] } = useQuery({
     queryKey: getAgentEmojiQueryKey(),
-    queryFn: ({ signal }) => listAgentEmoji(currentEnvironment!, signal),
+    queryFn: ({ signal }) => listAgentEmoji(requireEnvironment(currentEnvironment, 'No environment selected'), signal),
     enabled: !!currentEnvironment,
     staleTime: Infinity,
   });
@@ -48,7 +147,15 @@ function SectionHeader({ children }: { children: React.ReactNode }) {
   );
 }
 
-function ToggleRow({ label, tooltip, children }: { label: string; tooltip: string; children: React.ReactNode }) {
+function ToggleRow({
+  label,
+  tooltip,
+  children,
+}: {
+  label: string;
+  tooltip: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <div className="flex items-center justify-between gap-2 py-1">
       <div className="flex flex-1 items-center gap-1">
@@ -136,9 +243,11 @@ export function AgentBehaviorSection({ agent }: AgentBehaviorSectionProps) {
   const acknowledgeOnReceived = agent.behavior?.acknowledgeOnReceived !== false;
   const reactionOnResolved =
     agent.behavior?.reactionOnResolved === undefined ? DEFAULT_REACTION_ON_RESOLVED : agent.behavior.reactionOnResolved;
+  const subscriberAccessOpen = agent.behavior?.subscriberAccess === 'open';
+  const replyPolicy = agent.behavior?.replyPolicy ?? AgentReplyPolicyEnum.AUTO_REPLY;
 
   const { mutate, isPending } = useMutation({
-    mutationFn: (body: { acknowledgeOnReceived?: boolean; reactionOnResolved?: string | null }) =>
+    mutationFn: (body: Partial<AgentBehavior>) =>
       updateAgent(requireEnvironment(currentEnvironment, 'No environment selected'), agent.identifier, {
         behavior: body,
       }),
@@ -161,22 +270,12 @@ export function AgentBehaviorSection({ agent }: AgentBehaviorSectionProps) {
             label="Acknowledge incoming messages"
             tooltip='Show a "Typing…" indicator while the agent works. On platforms that don&#39;t support typing, react with an "eyes" emoji instead.'
           >
-            {readOnly ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="inline-flex">
-                    <Switch checked={acknowledgeOnReceived} disabled />
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent className="max-w-xs">{PROD_READ_ONLY_TOOLTIP}</TooltipContent>
-              </Tooltip>
-            ) : (
-              <Switch
-                checked={acknowledgeOnReceived}
-                disabled={isPending}
-                onCheckedChange={(checked) => mutate({ acknowledgeOnReceived: checked })}
-              />
-            )}
+            <BehaviorSwitch
+              checked={acknowledgeOnReceived}
+              disabled={isPending}
+              readOnly={readOnly}
+              onCheckedChange={(checked) => mutate({ acknowledgeOnReceived: checked })}
+            />
           </ToggleRow>
 
           <ToggleRow
@@ -207,6 +306,24 @@ export function AgentBehaviorSection({ agent }: AgentBehaviorSectionProps) {
                 onSelect={(emojiName) => mutate({ reactionOnResolved: emojiName })}
               />
             )}
+          </ToggleRow>
+
+          <ToggleRow label="Reply policy" tooltip={REPLY_POLICY_TOOLTIP}>
+            <ReplyPolicySelect
+              value={replyPolicy}
+              disabled={isPending}
+              readOnly={readOnly}
+              onValueChange={(next) => mutate({ replyPolicy: next })}
+            />
+          </ToggleRow>
+
+          <ToggleRow label={SUBSCRIBER_ACCESS_SETTING_LABEL} tooltip={SUBSCRIBER_ACCESS_TOOLTIP}>
+            <BehaviorSwitch
+              checked={subscriberAccessOpen}
+              disabled={isPending}
+              readOnly={readOnly}
+              onCheckedChange={(checked) => mutate({ subscriberAccess: checked ? 'open' : 'restricted' })}
+            />
           </ToggleRow>
         </div>
       </div>

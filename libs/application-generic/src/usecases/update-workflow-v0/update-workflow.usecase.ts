@@ -15,7 +15,6 @@ import {
 import {
   buildWorkflowPreferences,
   ChangeEntityTypeEnum,
-  ControlValuesLevelEnum,
   DEFAULT_WORKFLOW_PREFERENCES,
   isBridgeWorkflow,
   PreferencesTypeEnum,
@@ -26,7 +25,7 @@ import { WorkflowWithPreferencesResponseDto } from '../../dtos/get-workflow-with
 import { Instrument, InstrumentUsecase } from '../../instrumentation';
 import { AnalyticsService, ContentService } from '../../services';
 import { ResourceValidatorService } from '../../services/resource-validator.service';
-import { isVariantEmpty, PlatformException } from '../../utils';
+import { isVariantEmpty, PlatformException, STEP_CONTROL_LEVELS } from '../../utils';
 import { computeWorkflowStatus } from '../../utils/compute-workflow-status';
 import { AUTO_TRANSLATE, MANAGE_TRANSLATIONS, TRANSLATIONS_SERVICE } from '../../utils/constants';
 import { NotificationStep, NotificationStepVariantCommand } from '../../value-objects';
@@ -48,6 +47,12 @@ import {
   UpsertWorkflowPreferencesCommand,
 } from '../upsert-preferences';
 import { UpdateWorkflowCommandV0 } from './update-workflow.command';
+
+/** The minimal step shape needed to diff which MessageTemplates a workflow references. */
+interface StepTemplateReference {
+  _templateId?: string;
+  variants?: { _templateId?: string }[];
+}
 
 /**
  * @deprecated - use `UpsertWorkflow` instead
@@ -74,6 +79,7 @@ export class UpdateWorkflowV0 {
   ) {}
 
   @InstrumentUsecase()
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing v0 update orchestration is outside this change.
   async execute(command: UpdateWorkflowCommandV0): Promise<WorkflowWithPreferencesResponseDto> {
     await this.validatePayload(command);
 
@@ -99,6 +105,10 @@ export class UpdateWorkflowV0 {
 
     if (command.severity !== undefined) {
       updatePayload.severity = command.severity;
+    }
+
+    if (command.agent !== undefined) {
+      updatePayload.agent = command.agent;
     }
 
     if (command.description !== undefined && command.description !== null) {
@@ -144,6 +154,7 @@ export class UpdateWorkflowV0 {
 
     const allowedTemplateIds = this.buildAllowedTemplateIds(existingTemplate.steps);
 
+    // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing v0 update orchestration is outside this change.
     const workflowUpdate = async (session?: ClientSession | null) => {
       if (command.steps) {
         updatePayload = this.updateTriggers(updatePayload, command.steps);
@@ -154,8 +165,6 @@ export class UpdateWorkflowV0 {
           parentChangeId,
           allowedTemplateIds
         );
-
-        await this.deleteRemovedSteps(existingTemplate.steps, command, parentChangeId);
       }
 
       if (command.tags) {
@@ -178,8 +187,11 @@ export class UpdateWorkflowV0 {
         updatePayload.validatePayload = command.validatePayload;
       }
 
-      if (command.active !== undefined) {
-        updatePayload.status = computeWorkflowStatus(command.active, updatePayload.steps || existingTemplate.steps);
+      if (command.active !== undefined || command.steps) {
+        const active = command.active ?? existingTemplate.active ?? false;
+        const steps = updatePayload.steps ?? existingTemplate.steps;
+
+        updatePayload.status = computeWorkflowStatus(active, steps);
       }
 
       if (command.issues) {
@@ -296,6 +308,17 @@ export class UpdateWorkflowV0 {
         },
         { session }
       );
+
+      if (command.steps) {
+        // Soft-delete after workflow update so concurrent triggers never see orphaned template refs.
+        await this.deleteRemovedSteps(
+          existingTemplate.steps,
+          updatePayload.steps || [],
+          command,
+          parentChangeId,
+          session
+        );
+      }
     };
 
     if (command.session) {
@@ -514,7 +537,7 @@ export class UpdateWorkflowV0 {
         throw new BadRequestException(`Something un-expected happened, template couldn't be found`);
       }
 
-      const updatedVariants = await this.updateVariants(message.variants, command, parentChangeId!, allowedTemplateIds);
+      const updatedVariants = await this.updateVariants(message.variants, command, parentChangeId, allowedTemplateIds);
 
       const messageTemplatePayload: CreateMessageTemplateCommand | UpdateMessageTemplateCommand = {
         type: message.template.type,
@@ -678,7 +701,7 @@ export class UpdateWorkflowV0 {
       partialNotificationStep.variants = updatedVariants;
     }
 
-    if (message.issues) {
+    if (message.issues !== undefined) {
       partialNotificationStep.issues = message.issues;
     }
 
@@ -699,7 +722,7 @@ export class UpdateWorkflowV0 {
     return notificationTemplate;
   }
 
-  private getRemovedSteps(existingSteps: NotificationStepEntity[], newSteps: NotificationStep[]) {
+  private getRemovedSteps(existingSteps: StepTemplateReference[], newSteps: StepTemplateReference[]): string[] {
     const existingStepsIds = (existingSteps || []).flatMap((step) => [
       step._templateId,
       ...(step.variants || []).flatMap((variant) => variant._templateId),
@@ -710,7 +733,7 @@ export class UpdateWorkflowV0 {
       ...(step.variants || []).flatMap((variant) => variant._templateId),
     ]);
 
-    return existingStepsIds.filter((id) => !newStepsIds.includes(id));
+    return existingStepsIds.filter((id): id is string => !!id && !newStepsIds.includes(id));
   }
 
   private async updateVariants(
@@ -786,31 +809,48 @@ export class UpdateWorkflowV0 {
 
   @Instrument()
   private async deleteRemovedSteps(
-    existingSteps: NotificationStepEntity[] | NotificationStepData[] | undefined,
+    existingSteps: StepTemplateReference[] | undefined,
+    newSteps: StepTemplateReference[],
     command: UpdateWorkflowCommandV0,
-    parentChangeId: string
+    parentChangeId: string,
+    session?: ClientSession | null
   ) {
-    const removedStepsIds = this.getRemovedSteps(existingSteps || [], command.steps || []);
+    const removedStepsIds = this.getRemovedSteps(existingSteps || [], newSteps);
 
+    // Sequential on purpose: parallel operations inside a transaction are undefined behaviour in Mongoose.
     for (const id of removedStepsIds) {
-      await this.deleteMessageTemplate.execute(
-        DeleteMessageTemplateCommand.create({
-          organizationId: command.organizationId,
-          environmentId: command.environmentId,
-          userId: command.userId,
-          messageTemplateId: id,
-          parentChangeId,
-          workflowType: command.type,
-        })
+      const deleted = await this.deleteMessageTemplate.execute(
+        DeleteMessageTemplateCommand.create(
+          {
+            organizationId: command.organizationId,
+            environmentId: command.environmentId,
+            userId: command.userId,
+            messageTemplateId: id,
+            parentChangeId,
+            workflowType: command.type,
+          },
+          { session }
+        )
       );
 
-      await this.controlValuesRepository.delete({
-        _environmentId: command.environmentId,
-        _organizationId: command.organizationId,
-        _workflowId: command.id,
-        _stepId: id,
-        level: ControlValuesLevelEnum.STEP_CONTROLS,
-      });
+      // Abort the transaction if the template was not deleted, so we never commit a
+      // workflow that dropped the step and its controls while leaving the template behind.
+      if (!deleted) {
+        throw new BadRequestException(`Failed to delete message template ${id} while updating the workflow`);
+      }
+
+      await this.controlValuesRepository.deleteMany(
+        {
+          _environmentId: command.environmentId,
+          _organizationId: command.organizationId,
+          _workflowId: command.id,
+          _stepId: id,
+          level: {
+            $in: STEP_CONTROL_LEVELS,
+          },
+        },
+        { session }
+      );
     }
   }
 }

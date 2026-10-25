@@ -1,20 +1,31 @@
+import { parseLiquidControlValue } from '@novu/framework/internal';
 import { ContentIssueEnum, RuntimeIssue, StepTypeEnum } from '@novu/shared';
-import Ajv, { ErrorObject } from 'ajv';
+import Ajv, { type AnySchema, ErrorObject } from 'ajv';
+import Ajv2020 from 'ajv/dist/2020';
 import addFormats from 'ajv-formats';
 import { JSONSchemaDto } from '../dtos/json-schema.dto';
 import { capitalize } from '../services/helper-service';
 import { buildVariables } from './build-variables';
-import { buildLiquidParser } from './template-parser/liquid-engine';
+import { buildLiquidValidator } from './template-parser/liquid-engine';
+import { isLiquidErrors } from './template-parser/parser-utils';
+
+const liquidValidator = buildLiquidValidator();
+
+const UNSUPPORTED_QUOTES_MESSAGE =
+  'Use single quotes for text inside {{ }} and {% %}. Double quotes (") and backslashes (\\) are not supported';
+
+const stripLiquidPosition = (message: string): string => message.split(/,? line:/)[0];
 
 const getErrorPath = (error: ErrorObject): string => {
   const path = error.instancePath.substring(1);
-  const { missingProperty } = error.params;
+  const { missingProperty, additionalProperty } = error.params;
+  const appendedProperty = (missingProperty ?? additionalProperty) as string | undefined;
 
   if (!path || path.trim().length === 0) {
-    return missingProperty;
+    return appendedProperty as string;
   }
 
-  const fullPath = missingProperty ? `${path}/${missingProperty}` : path;
+  const fullPath = appendedProperty ? `${path}/${appendedProperty}` : path;
 
   return fullPath?.replace(/\//g, '.');
 };
@@ -49,6 +60,9 @@ const mapAjvErrorToMessage = (
   if (error.keyword === 'minLength') {
     return `${capitalize(error.instancePath.replace('/', ''))} is required`;
   }
+  if (error.keyword === 'additionalProperties') {
+    return `"${error.params.additionalProperty}" is not a supported property`;
+  }
 
   // Check if this is a URL field error
   const errorPath = getErrorPath(error);
@@ -75,6 +89,8 @@ const mapAjvErrorToIssueType = (error: ErrorObject, isUrlField = false): Content
     case 'pattern':
     case 'anyOf':
       return isUrlField ? ContentIssueEnum.INVALID_URL : ContentIssueEnum.MISSING_VALUE;
+    case 'additionalProperties':
+      return ContentIssueEnum.UNSUPPORTED_PROPERTY;
     default:
       return ContentIssueEnum.MISSING_VALUE;
   }
@@ -82,6 +98,107 @@ const mapAjvErrorToIssueType = (error: ErrorObject, isUrlField = false): Content
 
 export type ControlIssues = {
   controls?: Record<string, RuntimeIssue[]>;
+};
+
+const DRAFT_2020_12_SCHEMA_ID = 'https://json-schema.org/draft/2020-12/schema';
+
+function usesDraft2020Schema(schema: AnySchema): boolean {
+  if (typeof schema !== 'object' || schema === null || !('$schema' in schema)) {
+    return false;
+  }
+
+  const schemaId = (schema as { $schema?: string }).$schema;
+
+  return schemaId === DRAFT_2020_12_SCHEMA_ID || schemaId?.includes('2020-12') === true;
+}
+
+/** Single AJV configuration for every control-value schema check, so issues stay consistent. */
+export const createSchemaValidationAjv = ({
+  verbose = false,
+  schema,
+}: {
+  verbose?: boolean;
+  schema?: AnySchema;
+} = {}): Ajv => {
+  const ajv =
+    schema && usesDraft2020Schema(schema)
+      ? new Ajv2020({ allErrors: true, strict: false, verbose })
+      : new Ajv({ allErrors: true, strict: false, verbose });
+
+  addFormats(ajv);
+
+  return ajv;
+};
+
+const joinIssuePath = (pathPrefix: string | undefined, errorPath: string | undefined): string | undefined => {
+  const segments = [pathPrefix, errorPath].filter((segment): segment is string => Boolean(segment?.trim()));
+
+  return segments.length === 0 ? undefined : segments.join('.');
+};
+
+/**
+ * Turns AJV errors into `StepIssue`s keyed by control path.
+ *
+ * `pathPrefix` namespaces the result for values validated against their own root schema rather
+ * than the step's control schema. `collapseUrlFieldErrors` drives the step-control URL heuristic,
+ * which rewrites the message and keeps a single error per field; callers validating a third-party
+ * schema turn it off, since a `url` there means whatever that provider says it means.
+ */
+export const mapSchemaErrorsToControlIssues = (
+  errors: readonly ErrorObject[],
+  {
+    stepType,
+    pathPrefix,
+    collapseUrlFieldErrors = true,
+  }: { stepType?: StepTypeEnum; pathPrefix?: string; collapseUrlFieldErrors?: boolean } = {}
+): ControlIssues => {
+  const urlFieldErrors = new Map<string, ErrorObject[]>();
+  const otherErrors: Array<{ error: ErrorObject; path: string }> = [];
+
+  for (const error of errors) {
+    const errorPath = getErrorPath(error);
+    const path = joinIssuePath(pathPrefix, errorPath);
+
+    if (!path) {
+      continue;
+    }
+
+    if (collapseUrlFieldErrors && isUrlFieldError(errorPath, error.instancePath || '')) {
+      urlFieldErrors.set(path, [...(urlFieldErrors.get(path) ?? []), error]);
+    } else {
+      otherErrors.push({ error, path });
+    }
+  }
+
+  const controls: Record<string, RuntimeIssue[]> = {};
+
+  // For URL fields, only keep one error (prefer anyOf, then first pattern error)
+  // anyOf errors are preferred because they represent the union validation failure,
+  // which is more accurate than individual pattern failures
+  for (const [path, fieldErrors] of urlFieldErrors.entries()) {
+    const anyOfError = fieldErrors.find((e) => e.keyword === 'anyOf');
+    const errorToUse = anyOfError || fieldErrors[0];
+    controls[path] = [
+      {
+        message: mapAjvErrorToMessage(errorToUse, stepType),
+        issueType: mapAjvErrorToIssueType(errorToUse, true),
+        variableName: path,
+      },
+    ];
+  }
+
+  for (const { error, path } of otherErrors) {
+    if (!controls[path]) {
+      controls[path] = [];
+    }
+    controls[path].push({
+      message: mapAjvErrorToMessage(error, stepType),
+      issueType: mapAjvErrorToIssueType(error),
+      variableName: path,
+    });
+  }
+
+  return { controls };
 };
 
 export const processControlValuesBySchema = ({
@@ -93,99 +210,49 @@ export const processControlValuesBySchema = ({
   controlValues: Record<string, unknown> | null;
   stepType?: StepTypeEnum;
 }): ControlIssues => {
-  let issues: ControlIssues = {};
-
   if (!controlSchema || !controlValues) {
-    return issues;
+    return {};
   }
 
-  const ajv = new Ajv({ allErrors: true, strict: false });
-  addFormats(ajv);
-  const validate = ajv.compile(controlSchema);
+  const validate = createSchemaValidationAjv({ schema: controlSchema }).compile(controlSchema);
   const isValid = validate(controlValues);
   const errors = validate.errors as null | ErrorObject[];
 
-  if (!isValid && errors && errors?.length !== 0 && controlValues) {
-    // First pass: identify URL fields and collect errors
-    const urlFieldErrors = new Map<string, ErrorObject[]>();
-    const otherErrors: ErrorObject[] = [];
-
-    for (const error of errors) {
-      const path = getErrorPath(error);
-      const instancePath = error.instancePath || '';
-      const isUrlField = isUrlFieldError(path, instancePath);
-
-      if (isUrlField && path) {
-        if (!urlFieldErrors.has(path)) {
-          urlFieldErrors.set(path, []);
-        }
-        const existingErrors = urlFieldErrors.get(path);
-        if (existingErrors) {
-          existingErrors.push(error);
-        }
-      } else {
-        otherErrors.push(error);
-      }
-    }
-
-    // Second pass: build issues object
-    const controls: Record<string, RuntimeIssue[]> = {};
-
-    // For URL fields, only keep one error (prefer anyOf, then first pattern error)
-    // anyOf errors are preferred because they represent the union validation failure,
-    // which is more accurate than individual pattern failures
-    for (const [path, fieldErrors] of urlFieldErrors.entries()) {
-      const anyOfError = fieldErrors.find((e) => e.keyword === 'anyOf');
-      const errorToUse = anyOfError || fieldErrors[0];
-      const mappedMessage = mapAjvErrorToMessage(errorToUse, stepType);
-      controls[path] = [
-        {
-          message: mappedMessage,
-          issueType: mapAjvErrorToIssueType(errorToUse, true),
-          variableName: path,
-        },
-      ];
-    }
-
-    // Add all other errors
-    for (const error of otherErrors) {
-      const path = getErrorPath(error);
-      if (!path) {
-        continue;
-      }
-      if (!controls[path]) {
-        controls[path] = [];
-      }
-      const mappedMessage = mapAjvErrorToMessage(error, stepType);
-      controls[path].push({
-        message: mappedMessage,
-        issueType: mapAjvErrorToIssueType(error),
-        variableName: path,
-      });
-    }
-
-    issues = {
-      controls,
-    };
-
-    return issues;
+  if (isValid || !errors || errors.length === 0) {
+    return {};
   }
 
-  return issues;
+  return mapSchemaErrorsToControlIssues(errors, { stepType });
+};
+
+/**
+ * Explains a compile failure in terms of what the user typed. When the typed text parses, the
+ * failure comes from the JSON escaping compile adds, which only affects quotes and backslashes.
+ */
+const describeCompilationError = (value: string): string => {
+  try {
+    liquidValidator.parse(value);
+  } catch (error) {
+    const cause = isLiquidErrors(error) ? error.errors[0] : error;
+
+    return cause instanceof Error ? stripLiquidPosition(cause.message) : String(cause);
+  }
+
+  return UNSUPPORTED_QUOTES_MESSAGE;
 };
 
 const validateContentCompilation = (controlKey: string, currentValue: unknown): RuntimeIssue | null => {
+  if (typeof currentValue !== 'string') {
+    return null;
+  }
+
   try {
-    const parserEngine = buildLiquidParser();
-    parserEngine.parse(typeof currentValue === 'string' ? currentValue : JSON.stringify(currentValue));
+    parseLiquidControlValue(liquidValidator, currentValue);
 
     return null;
-  } catch (error) {
-    // @ts-expect-error - error is unknown
-    const message = error.message ? error.message.split(', line:1')[0] || error.message.split(' line:1')[0] : '';
-
+  } catch {
     return {
-      message: `Content compilation error: ${message}`.trim(),
+      message: `Content compilation error: ${describeCompilationError(currentValue)}`,
       issueType: ContentIssueEnum.ILLEGAL_VARIABLE_IN_CONTROL_VALUE,
       variableName: controlKey,
     };
@@ -217,8 +284,9 @@ export const processControlValuesByLiquid = ({
       issues.controls = issues.controls || {};
 
       issues.controls[controlKey] = liquidTemplateIssues.invalidVariables.map((invalidVariable) => {
-        const message = invalidVariable.message ? invalidVariable.message.split(' line:')[0] : '';
-        const variableName = invalidVariable.name === 'unknown' ? '{{}}' : invalidVariable.name;
+        const message = invalidVariable.message ? stripLiquidPosition(invalidVariable.message) : '';
+        const isSyntaxError = invalidVariable.isParseFailure === true;
+        const variableName = isSyntaxError ? '{{}}' : invalidVariable.name;
 
         if ('filterMessage' in invalidVariable) {
           return {
@@ -229,7 +297,9 @@ export const processControlValuesByLiquid = ({
         }
 
         return {
-          message: `Variable "${variableName}" ${message}`.trim(),
+          message: isSyntaxError
+            ? `Content compilation error: ${message}`
+            : `Variable "${variableName}" ${message}`.trim(),
           issueType: ContentIssueEnum.ILLEGAL_VARIABLE_IN_CONTROL_VALUE,
           variableName: variableName,
         };

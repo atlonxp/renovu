@@ -1,4 +1,13 @@
-import { ChannelTypeEnum, IEnvironment, IIntegration, IntegrationKindEnum } from '@novu/shared';
+import {
+  ChannelTypeEnum,
+  IEnvironment,
+  IIntegration,
+  IntegrationKindEnum,
+  type WhatsAppSignupLinkStatus,
+} from '@novu/shared';
+
+export type { WhatsAppSignupLinkStatus };
+
 import { del, get, getApiBaseUrl, NovuApiError, post, put } from './api.client';
 
 export type HealthCheckStatus = 'ready' | 'pending' | 'failed';
@@ -22,6 +31,7 @@ export type CreateIntegrationData = {
   active: boolean;
   primary?: boolean;
   _environmentId?: string;
+  rules?: Record<string, unknown> | null;
 };
 
 export enum CheckIntegrationResponseEnum {
@@ -39,7 +49,48 @@ export type UpdateIntegrationData = {
   credentials: Record<string, unknown>;
   configurations: Record<string, string>;
   check: boolean;
+  rules?: Record<string, unknown> | null;
 };
+
+export async function generateLinkUserOAuthUrl({
+  environment,
+  integrationIdentifier,
+  subscriberId,
+  connectionIdentifier,
+}: {
+  environment: IEnvironment;
+  integrationIdentifier: string;
+  subscriberId: string;
+  connectionIdentifier?: string;
+}): Promise<string> {
+  const response = await post<{ data: { url: string } }>('/integrations/channel-endpoints/oauth', {
+    environment,
+    body: { integrationIdentifier, subscriberId, connectionIdentifier },
+  });
+
+  return response.data.url;
+}
+
+export async function generateConnectOAuthUrl({
+  environment,
+  integrationIdentifier,
+  subscriberId,
+  connectionIdentifier,
+  autoLinkUser,
+}: {
+  environment: IEnvironment;
+  integrationIdentifier: string;
+  subscriberId: string;
+  connectionIdentifier?: string;
+  autoLinkUser?: boolean;
+}): Promise<string> {
+  const response = await post<{ data: { url: string } }>('/integrations/channel-connections/oauth', {
+    environment,
+    body: { integrationIdentifier, subscriberId, connectionIdentifier, autoLinkUser },
+  });
+
+  return response.data.url;
+}
 
 export async function getIntegrations({ environment }: { environment: IEnvironment }) {
   // TODO: This is a technical debt on the API side.
@@ -110,6 +161,44 @@ export async function slackQuickSetup(
   });
 }
 
+export type WhatsAppEmbeddedSignupParams = {
+  code: string;
+  wabaId: string;
+  phoneNumberId: string;
+  integrationIdentifier: string;
+  agentIdentifier: string;
+};
+
+export type WhatsAppEmbeddedSignupResult = {
+  success: boolean;
+  integrationId?: string;
+  integrationIdentifier?: string;
+  callbackUrl?: string;
+  wabaId?: string;
+  displayPhoneNumber?: string;
+  phoneRegistrationWarning?: string;
+  error?: {
+    code: string;
+    message: string;
+  };
+  webhookReason?: {
+    code: string;
+    message: string;
+  };
+};
+
+export async function completeWhatsAppEmbeddedSignup(
+  params: WhatsAppEmbeddedSignupParams,
+  environment: IEnvironment
+): Promise<WhatsAppEmbeddedSignupResult> {
+  const response = await post<{ data: WhatsAppEmbeddedSignupResult }>('/integrations/whatsapp/embedded-signup', {
+    body: params,
+    environment,
+  });
+
+  return response.data;
+}
+
 export async function getMsTeamsArmTemplateDeployUrl(
   integrationId: string,
   environment: IEnvironment
@@ -158,7 +247,7 @@ export type IntegrationStoreTelegramMobileLink = {
 type IntegrationStoreTelegramMobileLinkEnvelope = { data: IntegrationStoreTelegramMobileLink };
 
 /**
- * Issues a signed, single-use, short-lived JWT that lets an unauthenticated
+ * Issues an opaque, single-use, short-lived setup token that lets an unauthenticated
  * mobile visitor create a Telegram integration from the Integration Store
  * create flow. The integration is created server-side on submit.
  */
@@ -242,6 +331,74 @@ export async function submitIntegrationStoreTelegramMobileCredentials(
   }
 
   return unwrapEnvelope(data) as SubmitIntegrationStoreTelegramMobileCredentialsResult;
+}
+
+/**
+ * Public, unauthenticated request used by the tokenized WhatsApp signup page
+ * opened from `npx novu connect` (the visitor may have no Novu session at all).
+ */
+export async function getWhatsAppSignupLinkStatus(
+  token: string,
+  signal?: AbortSignal
+): Promise<WhatsAppSignupLinkStatus> {
+  const url = `${getApiBaseUrl()}/v1/integrations/whatsapp/signup/status?token=${encodeURIComponent(token)}`;
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+    signal,
+  });
+
+  const data = await safeJson(response);
+
+  if (!response.ok) {
+    throw new NovuApiError(extractErrorMessage(data) ?? 'Failed to load signup link', response.status, data);
+  }
+
+  return unwrapEnvelope(data) as WhatsAppSignupLinkStatus;
+}
+
+export type CompleteWhatsAppSignupPublicParams = {
+  token: string;
+  code: string;
+  wabaId: string;
+  phoneNumberId: string;
+};
+
+export type WhatsAppSignupSubmitErrorCode = 'token_invalid' | 'token_expired' | 'token_already_used' | 'unknown';
+
+export class WhatsAppSignupSubmitError extends Error {
+  constructor(
+    public readonly code: WhatsAppSignupSubmitErrorCode,
+    message: string,
+    public readonly status: number
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * Public, unauthenticated completion for the tokenized WhatsApp signup page.
+ * Trust comes from the opaque token minted by the connect CLI.
+ */
+export async function completeWhatsAppSignupPublic(
+  params: CompleteWhatsAppSignupPublicParams
+): Promise<WhatsAppEmbeddedSignupResult> {
+  const url = `${getApiBaseUrl()}/v1/integrations/whatsapp/signup`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+
+  const data = await safeJson(response);
+
+  if (!response.ok) {
+    const code = extractErrorCode(data);
+    const message = extractErrorMessage(data) ?? 'Failed to complete WhatsApp signup';
+    throw new WhatsAppSignupSubmitError(code, message, response.status);
+  }
+
+  return unwrapEnvelope(data) as WhatsAppEmbeddedSignupResult;
 }
 
 async function safeJson(response: Response): Promise<unknown> {

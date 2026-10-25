@@ -9,10 +9,14 @@ import {
   NotificationTemplateEntity,
 } from '@novu/dal';
 import {
+  AGENTS_ORG_FUNNEL_EVENTS,
+  buildWorkflowPreferences,
   ControlValuesLevelEnum,
-  DEFAULT_WORKFLOW_PREFERENCES,
+  isRecord,
   ResourceOriginEnum,
   ResourceTypeEnum,
+  type StepIntegrationOverrides,
+  type StepProviderOverrides,
   StepTypeEnum,
   WebhookEventEnum,
   WebhookObjectTypeEnum,
@@ -25,16 +29,20 @@ import { StepIssuesDto } from '../../dtos/step-issues.dto';
 import { EmailRenderOutput } from '../../dtos/workflow/generate-preview-response.dto';
 import { WorkflowResponseDto } from '../../dtos/workflow/workflow-response.dto';
 import { Instrument, InstrumentUsecase } from '../../instrumentation';
-import { EmailControlType } from '../../schemas/control';
+import { ChatControlType, EmailControlType } from '../../schemas/control';
 import { AnalyticsService } from '../../services';
 import {
   computeWorkflowStatus,
+  isSupportedProviderOverrideId,
   removeBrandingFromHtml,
+  resolveStepControlSchemas,
+  STEP_CONTROL_LEVELS,
+  type StepOverrideLevel,
   shortId,
   slugifyOrRandom,
-  stepTypeToControlSchema,
 } from '../../utils';
 import { isStringifiedMailyJSONContent } from '../../utils/maily-utils';
+import { resolveChatEditorType } from '../../utils/resolve-chat-editor-type';
 import { isStepResolverActive } from '../../utils/step-resolver-control-state';
 import { NotificationStep } from '../../value-objects';
 import { SendWebhookMessage } from '../../webhooks';
@@ -47,6 +55,44 @@ import { UpdateWorkflowCommandV0, UpdateWorkflowV0 } from '../update-workflow-v0
 import { UpsertControlValuesCommand, UpsertControlValuesUseCase } from '../upsert-control-values';
 import { GetWorkflowByIdsCommand, GetWorkflowByIdsUseCase } from '../workflow';
 import { UpsertStepDataCommand, UpsertWorkflowCommand } from './upsert-workflow.command';
+
+/** One override control-values doc: a provider override, or an integration override when it carries an identifier. */
+interface StepOverrideEntry {
+  providerId: string;
+  integrationIdentifier?: string;
+  controls: Record<string, unknown>;
+}
+
+interface StepOverridesUpdate {
+  step: NotificationStepEntity;
+  level: StepOverrideLevel;
+  /** `null` deletes every override doc of the level. */
+  entries: StepOverrideEntry[] | null;
+}
+
+function toStepOverrideKey({ providerId, integrationIdentifier }: Partial<StepOverrideEntry>): string {
+  return JSON.stringify([providerId ?? '', integrationIdentifier ?? '']);
+}
+
+function toProviderOverrideEntries(providerOverrides: StepProviderOverrides): StepOverrideEntry[] {
+  return Object.entries(providerOverrides)
+    .filter(([providerId]) => isSupportedProviderOverrideId(providerId))
+    .map(([providerId, controls]) => ({ providerId, controls: controls ?? {} }));
+}
+
+/**
+ * An empty identifier is dropped: without one, the control-values lookup would match any
+ * integration override doc of that provider and overwrite it.
+ */
+function toIntegrationOverrideEntries(integrationOverrides: StepIntegrationOverrides): StepOverrideEntry[] {
+  return Object.entries(integrationOverrides)
+    .filter(([providerId]) => isSupportedProviderOverrideId(providerId))
+    .flatMap(([providerId, overridesByIdentifier]) =>
+      Object.entries(isRecord(overridesByIdentifier) ? overridesByIdentifier : {})
+        .filter(([integrationIdentifier]) => integrationIdentifier.length > 0)
+        .map(([integrationIdentifier, controls]) => ({ providerId, integrationIdentifier, controls: controls ?? {} }))
+    );
+}
 
 @Injectable()
 export class UpsertWorkflowUseCase {
@@ -79,43 +125,51 @@ export class UpsertWorkflowUseCase {
         )
       : null;
 
+    const resolvedCommand = this.resolveWorkflowOrigin(command, existingWorkflow);
+
     let upsertedWorkflow: NotificationTemplateEntity;
 
     if (existingWorkflow) {
-      this.mixpanelTrack(command, 'Workflow Update - [API]');
+      this.mixpanelTrack(resolvedCommand, 'Workflow Update - [API]');
 
       upsertedWorkflow = await this.updateWorkflowV0Usecase.execute(
         UpdateWorkflowCommandV0.create({
-          ...(await this.buildUpdateWorkflowCommand(command, existingWorkflow)),
-          session: command.session,
+          ...(await this.buildUpdateWorkflowCommand(resolvedCommand, existingWorkflow)),
+          session: resolvedCommand.session,
         })
       );
     } else {
-      this.mixpanelTrack(command, 'Workflow Created - [API]');
+      this.mixpanelTrack(resolvedCommand, 'Workflow Created - [API]');
 
       upsertedWorkflow = await this.createWorkflowV0Usecase.execute(
         CreateWorkflowCommandV0.create({
-          ...(await this.buildCreateWorkflowCommand(command)),
-          session: command.session,
+          ...(await this.buildCreateWorkflowCommand(resolvedCommand)),
+          session: resolvedCommand.session,
         })
       );
     }
 
-    await this.upsertControlValues(upsertedWorkflow, command);
+    await this.upsertControlValues(upsertedWorkflow, resolvedCommand);
 
     const updatedWorkflow = await this.getWorkflowUseCase.execute(
       GetWorkflowCommand.create({
         workflowIdOrInternalId: upsertedWorkflow._id,
         user: command.user,
+        // Read-after-write: must reflect the preferences we just persisted.
+        skipPreferencesCache: true,
       })
     );
+
+    this.trackAgentAssignedToWorkflow(existingWorkflow, updatedWorkflow, resolvedCommand);
 
     if (existingWorkflow) {
       await this.sendWebhookMessage.execute({
         eventType: WebhookEventEnum.WORKFLOW_UPDATED,
         objectType: WebhookObjectTypeEnum.WORKFLOW,
         payload: {
+          // biome-ignore lint/plugin: workflow webhook payload is a loose record
           object: updatedWorkflow as unknown as Record<string, unknown>,
+          // biome-ignore lint/plugin: workflow webhook payload is a loose record
           previousObject: existingWorkflow as unknown as Record<string, unknown>,
         },
         organizationId: command.user.organizationId,
@@ -126,6 +180,7 @@ export class UpsertWorkflowUseCase {
         eventType: WebhookEventEnum.WORKFLOW_CREATED,
         objectType: WebhookObjectTypeEnum.WORKFLOW,
         payload: {
+          // biome-ignore lint/plugin: workflow webhook payload is a loose record
           object: updatedWorkflow as unknown as Record<string, unknown>,
         },
         organizationId: command.user.organizationId,
@@ -134,6 +189,24 @@ export class UpsertWorkflowUseCase {
     }
 
     return updatedWorkflow;
+  }
+
+  private resolveWorkflowOrigin(
+    command: UpsertWorkflowCommand,
+    existingWorkflow: NotificationTemplateEntity | null
+  ): UpsertWorkflowCommand {
+    // On update, always keep the persisted origin — request body origin is ignored.
+    const origin = existingWorkflow
+      ? (existingWorkflow.origin ?? ResourceOriginEnum.NOVU_CLOUD)
+      : (command.workflowDto.origin ?? ResourceOriginEnum.NOVU_CLOUD);
+
+    return {
+      ...command,
+      workflowDto: {
+        ...command.workflowDto,
+        origin,
+      },
+    };
   }
 
   @Instrument()
@@ -158,14 +231,15 @@ export class UpsertWorkflowUseCase {
       active: isWorkflowActive,
       description: workflowDto.description || '',
       tags: workflowDto.tags || [],
-      userPreferences: workflowDto.preferences?.user ?? null,
-      defaultPreferences: workflowDto.preferences?.workflow ?? DEFAULT_WORKFLOW_PREFERENCES,
+      userPreferences: workflowDto.preferences?.user ? buildWorkflowPreferences(workflowDto.preferences.user) : null,
+      defaultPreferences: buildWorkflowPreferences(workflowDto.preferences?.workflow),
       triggerIdentifier: preserveWorkflowId ? workflowDto.workflowId : slugifyOrRandom(workflowDto.name),
       status: computeWorkflowStatus(isWorkflowActive, steps),
       payloadSchema: workflowDto.payloadSchema,
       validatePayload: workflowDto.validatePayload,
       isTranslationEnabled: workflowDto.isTranslationEnabled,
       severity: workflowDto.severity,
+      agent: workflowDto.agent,
     };
   }
 
@@ -186,17 +260,19 @@ export class UpsertWorkflowUseCase {
       userId: user._id,
       name: workflowDto.name,
       steps,
+      // biome-ignore lint/plugin: update command rawData is the request DTO stored as a loose record
       rawData: workflowDto as unknown as Record<string, unknown>,
       type: ResourceTypeEnum.BRIDGE,
       description: workflowDto.description,
-      userPreferences: workflowDto.preferences?.user ?? null,
-      defaultPreferences: workflowDto.preferences?.workflow ?? DEFAULT_WORKFLOW_PREFERENCES,
+      userPreferences: workflowDto.preferences?.user ? buildWorkflowPreferences(workflowDto.preferences.user) : null,
+      defaultPreferences: buildWorkflowPreferences(workflowDto.preferences?.workflow),
       tags: workflowDto.tags,
       active: workflowActive,
       payloadSchema: workflowDto.payloadSchema,
       validatePayload: workflowDto.validatePayload,
       isTranslationEnabled: workflowDto.isTranslationEnabled,
       severity: workflowDto.severity,
+      agent: workflowDto.agent,
     };
   }
 
@@ -205,10 +281,8 @@ export class UpsertWorkflowUseCase {
     command: UpsertWorkflowCommand,
     existingWorkflow?: NotificationTemplateEntity
   ): Promise<NotificationStep[]> {
-    const {
-      user,
-      workflowDto: { origin: workflowOrigin },
-    } = command;
+    const { user } = command;
+    const workflowOrigin = command.workflowDto.origin ?? ResourceOriginEnum.NOVU_CLOUD;
 
     let preloadedControlValues: ControlValuesEntity[] | undefined;
     if (existingWorkflow) {
@@ -217,12 +291,15 @@ export class UpsertWorkflowUseCase {
           _environmentId: user.environmentId,
           _organizationId: user.organizationId,
           _workflowId: existingWorkflow._id,
-          level: ControlValuesLevelEnum.STEP_CONTROLS,
+          level: { $in: STEP_CONTROL_LEVELS },
           controls: { $ne: null },
         },
         {
           controls: 1,
           _stepId: 1,
+          level: 1,
+          providerId: 1,
+          integrationIdentifier: 1,
           _id: 0,
         }
       );
@@ -249,6 +326,8 @@ export class UpsertWorkflowUseCase {
     const optimisticSteps = command.workflowDto.steps.map((step, index) => ({
       stepId: stepIds[index],
       type: step.type,
+      ...(step.controlValues ? { controlValues: step.controlValues } : {}),
+      ...(step._id ? { _id: step._id } : {}),
     }));
 
     const optimisticPayloadSchema = command.workflowDto.payloadSchema as JSONSchemaDto | undefined;
@@ -258,9 +337,12 @@ export class UpsertWorkflowUseCase {
         const existingStep: NotificationStepEntity | null | undefined =
           '_id' in step ? existingWorkflow?.steps.find((s) => !!step._id && s._templateId === step._id) : null;
 
-        const controlSchemaKey = step.type;
-        const controlSchemas: ControlSchemas =
-          existingStep?.template?.controls || stepTypeToControlSchema[controlSchemaKey];
+        const controlSchemas: ControlSchemas = resolveStepControlSchemas({
+          stepType: step.type,
+          workflowOrigin,
+          existingControls: existingStep?.template?.controls,
+          stepResolverHash: existingStep?.template?.stepResolverHash,
+        });
         const issues: StepIssuesDto = await this.buildStepIssuesUsecase.execute({
           workflowOrigin,
           user,
@@ -269,6 +351,8 @@ export class UpsertWorkflowUseCase {
           stepType: step.type,
           controlSchema: controlSchemas.schema,
           controlsDto: step.controlValues,
+          providerOverridesDto: step.providerOverrides,
+          integrationOverridesDto: step.integrationOverrides,
           optimisticSteps,
           preloadedControlValues,
           optimisticPayloadSchema,
@@ -360,10 +444,15 @@ export class UpsertWorkflowUseCase {
     command: UpsertWorkflowCommand
   ): Promise<void> {
     const controlValuesUpdates = this.getControlValuesUpdates(updatedWorkflow.steps, command);
-    if (controlValuesUpdates.length === 0) return;
+    const stepOverridesUpdates = this.getStepOverridesUpdates(updatedWorkflow.steps, command);
 
+    // A null controlValues cascade-deletes the step's override docs, so it must finish before the
+    // overrides sent in the same request are written.
     await Promise.all(
       controlValuesUpdates.map((update) => this.executeControlValuesUpdate(update, updatedWorkflow._id, command))
+    );
+    await Promise.all(
+      stepOverridesUpdates.map((update) => this.executeStepOverridesUpdate(update, updatedWorkflow._id, command))
     );
   }
 
@@ -383,7 +472,41 @@ export class UpsertWorkflowUseCase {
       .filter((update): update is NonNullable<typeof update> => update !== null);
   }
 
+  /** An omitted override field (or a step absent from the request) leaves that level's docs untouched. */
   @Instrument()
+  private getStepOverridesUpdates(
+    updatedSteps: NotificationStepEntity[],
+    command: UpsertWorkflowCommand
+  ): StepOverridesUpdate[] {
+    return updatedSteps.flatMap((step) => {
+      const commandStep = this.findMatchingCommandStep(step, command.workflowDto.steps);
+      if (!commandStep) return [];
+
+      const { providerOverrides, integrationOverrides } = commandStep;
+      const updates: StepOverridesUpdate[] = [];
+
+      if (providerOverrides !== undefined) {
+        updates.push({
+          step,
+          level: ControlValuesLevelEnum.STEP_PROVIDER_CONTROLS,
+          entries: providerOverrides === null ? null : toProviderOverrideEntries(providerOverrides),
+        });
+      }
+
+      if (integrationOverrides !== undefined) {
+        updates.push({
+          step,
+          level: ControlValuesLevelEnum.STEP_INTEGRATION_CONTROLS,
+          entries: integrationOverrides === null ? null : toIntegrationOverrideEntries(integrationOverrides),
+        });
+      }
+
+      return updates;
+    });
+  }
+
+  @Instrument()
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: existing control-value write path is outside this change
   private async executeControlValuesUpdate(
     {
       shouldDelete,
@@ -394,19 +517,29 @@ export class UpsertWorkflowUseCase {
     command: UpsertWorkflowCommand
   ) {
     if (shouldDelete) {
-      return this.controlValuesRepository.delete(
+      // Cascade-delete main step controls and any per-provider / per-integration override docs for the step.
+      return this.controlValuesRepository.deleteMany(
         {
           _environmentId: command.user.environmentId,
           _organizationId: command.user.organizationId,
           _workflowId: workflowId,
           _stepId: step._templateId,
-          level: ControlValuesLevelEnum.STEP_CONTROLS,
+          level: { $in: STEP_CONTROL_LEVELS },
         },
         { session: command.session }
       );
     }
 
-    const newControlValues = controlValues || {};
+    // providerOverrides / integrationOverrides are persisted as STEP_PROVIDER_CONTROLS / STEP_INTEGRATION_CONTROLS
+    // docs — never nest them in main controls.
+    const {
+      providerOverrides: _ignoredProviderOverrides,
+      integrationOverrides: _ignoredIntegrationOverrides,
+      ...newControlValues
+    } = (controlValues || {}) as Record<string, unknown> & {
+      providerOverrides?: unknown;
+      integrationOverrides?: unknown;
+    };
 
     /*
      * Only apply email-specific processing for NOVU_CLOUD workflows
@@ -467,6 +600,22 @@ export class UpsertWorkflowUseCase {
       }
     }
 
+    if (
+      step.template?.type === StepTypeEnum.CHAT &&
+      (command.workflowDto.origin === ResourceOriginEnum.NOVU_CLOUD ||
+        command.workflowDto.origin === ResourceOriginEnum.NOVU_CLOUD_V1) &&
+      !isStepResolverActive(step.template?.stepResolverHash)
+    ) {
+      const chatControlValues = newControlValues as ChatControlType;
+      const resolvedEditorType = resolveChatEditorType(chatControlValues.body, chatControlValues.editorType);
+
+      if (resolvedEditorType) {
+        chatControlValues.editorType = resolvedEditorType;
+      } else {
+        delete chatControlValues.editorType;
+      }
+    }
+
     return this.upsertControlValuesUseCase.execute(
       UpsertControlValuesCommand.create({
         organizationId: command.user.organizationId,
@@ -475,7 +624,92 @@ export class UpsertWorkflowUseCase {
         workflowId,
         level: ControlValuesLevelEnum.STEP_CONTROLS,
         newControlValues,
+        session: command.session,
       })
+    );
+  }
+
+  @Instrument()
+  private async executeStepOverridesUpdate(
+    { step, level, entries }: StepOverridesUpdate,
+    workflowId: string,
+    command: UpsertWorkflowCommand
+  ) {
+    const baseQuery = {
+      _environmentId: command.user.environmentId,
+      _organizationId: command.user.organizationId,
+      _workflowId: workflowId,
+      _stepId: step._templateId,
+      level,
+    };
+
+    if (entries === null) {
+      return this.controlValuesRepository.deleteMany(baseQuery, { session: command.session });
+    }
+
+    const desiredKeys = new Set(entries.map(toStepOverrideKey));
+    const existingDocs = await this.controlValuesRepository.find(
+      baseQuery,
+      {
+        providerId: 1,
+        integrationIdentifier: 1,
+        _id: 1,
+      },
+      { session: command.session }
+    );
+    const docIdsToDelete = existingDocs.filter((doc) => !desiredKeys.has(toStepOverrideKey(doc))).map((doc) => doc._id);
+
+    if (docIdsToDelete.length > 0) {
+      await this.controlValuesRepository.deleteMany(
+        { ...baseQuery, _id: { $in: docIdsToDelete } },
+        { session: command.session }
+      );
+    }
+
+    await Promise.all(
+      entries.map((entry) =>
+        this.upsertControlValuesUseCase.execute(
+          UpsertControlValuesCommand.create({
+            organizationId: command.user.organizationId,
+            environmentId: command.user.environmentId,
+            stepId: step._templateId,
+            workflowId,
+            level,
+            providerId: entry.providerId,
+            integrationIdentifier: entry.integrationIdentifier,
+            newControlValues: entry.controls,
+            session: command.session,
+          })
+        )
+      )
+    );
+  }
+
+  private findMatchingCommandStep(
+    updatedStep: NotificationStepEntity,
+    commandSteps: UpsertStepDataCommand[]
+  ): UpsertStepDataCommand | undefined {
+    // Strongest identity wins, and a step that owns a stronger key is not a candidate for a weaker one.
+    // Otherwise a newly inserted step with the same name, placed earlier in the request, hijacks an
+    // existing step's control values. `in` checks stay so omitted keys still fall through.
+    const matchedById = commandSteps.find(
+      (commandStep) => '_id' in commandStep && commandStep._id === updatedStep._templateId
+    );
+
+    if (matchedById) {
+      return matchedById;
+    }
+
+    const matchedByStepId = commandSteps.find(
+      (commandStep) => !('_id' in commandStep) && 'stepId' in commandStep && commandStep.stepId === updatedStep.stepId
+    );
+
+    if (matchedByStepId) {
+      return matchedByStepId;
+    }
+
+    return commandSteps.find(
+      (commandStep) => !('_id' in commandStep) && !('stepId' in commandStep) && commandStep.name === updatedStep.name
     );
   }
 
@@ -484,19 +718,7 @@ export class UpsertWorkflowUseCase {
     updatedStep: NotificationStepEntity,
     commandSteps: UpsertStepDataCommand[]
   ): Record<string, unknown> | undefined | null {
-    const commandStep = commandSteps.find((commandStepX) => {
-      const isStepUpdateDashboardDto = '_id' in commandStepX;
-      if (isStepUpdateDashboardDto) {
-        return commandStepX._id === updatedStep._templateId;
-      }
-
-      const isCreateBySyncToEnvironment = 'stepId' in commandStepX;
-      if (isCreateBySyncToEnvironment) {
-        return commandStepX.stepId === updatedStep.stepId;
-      }
-
-      return commandStepX.name === updatedStep.name;
-    });
+    const commandStep = this.findMatchingCommandStep(updatedStep, commandSteps);
 
     if (!commandStep) return null;
 
@@ -511,5 +733,38 @@ export class UpsertWorkflowUseCase {
       origin: command.workflowDto.origin,
       source: command.workflowDto.__source,
     });
+  }
+
+  private trackAgentAssignedToWorkflow(
+    existingWorkflow: NotificationTemplateEntity | null,
+    updatedWorkflow: WorkflowResponseDto,
+    command: UpsertWorkflowCommand
+  ): void {
+    const nextAgentIdentifier = updatedWorkflow.agent?.identifier ?? null;
+    if (!nextAgentIdentifier) {
+      return;
+    }
+
+    const previousAgentIdentifier = existingWorkflow?.agent?.identifier ?? null;
+    if (nextAgentIdentifier === previousAgentIdentifier) {
+      return;
+    }
+
+    const userId = command.user?._id;
+    if (!userId) {
+      return;
+    }
+
+    const properties = {
+      _organization: command.user.organizationId,
+      environmentId: command.user.environmentId,
+      workflowId: updatedWorkflow.workflowId,
+      workflowName: updatedWorkflow.name,
+      agentIdentifier: nextAgentIdentifier,
+      previousAgentIdentifier,
+      source: command.workflowDto.__source,
+    };
+
+    this.analyticsService.track(AGENTS_ORG_FUNNEL_EVENTS.AGENT_ASSIGNED_TO_WORKFLOW, userId, properties);
   }
 }

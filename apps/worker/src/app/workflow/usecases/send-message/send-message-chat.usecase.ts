@@ -7,20 +7,28 @@ import {
   CreateExecutionDetails,
   CreateExecutionDetailsCommand,
   DetailEnum,
+  FeatureFlagsService,
   GetNovuProviderCredentials,
   InstrumentUsecase,
+  type IntegrationSelectionResult,
   messageWebhookMapper,
   SelectIntegration,
+  SelectIntegrationCommand,
   SelectVariant,
   SendWebhookMessage,
   validateEndpointForType,
 } from '@novu/application-generic';
 import {
+  AgentIntegrationRepository,
+  AgentRepository,
+  EnvironmentEntity,
   IntegrationEntity,
   MessageEntity,
   MessageRepository,
   NotificationStepEntity,
+  OrganizationEntity,
   SubscriberRepository,
+  UserEntity,
 } from '@novu/dal';
 import { ChatOutput } from '@novu/framework/internal';
 import {
@@ -31,12 +39,15 @@ import {
   ENDPOINT_TYPES,
   ExecutionDetailsSourceEnum,
   ExecutionDetailsStatusEnum,
+  FeatureFlagsKeysEnum,
+  getAtPath,
+  getProviderOverrideConfig,
   IChannelSettings,
   ProvidersIdEnum,
   WebhookEventEnum,
   WebhookObjectTypeEnum,
 } from '@novu/shared';
-import { ChannelData, ISendMessageSuccessResponse } from '@novu/stateless';
+import { CardElement, ChannelData, IChatRenderValidation, ISendMessageSuccessResponse } from '@novu/stateless';
 import { addBreadcrumb } from '@sentry/node';
 import { PlatformException } from '../../../shared/utils';
 import { ResolveChannelEndpointsCommand } from './channel-endpoint-resolution/resolve-channel-endpoints.command';
@@ -44,23 +55,93 @@ import {
   IntegrationEndpoints,
   ResolveChannelEndpoints,
 } from './channel-endpoint-resolution/resolve-channel-endpoints.usecase';
-import { SendMessageBase } from './send-message.base';
+import { combineProviderOverrides, SendMessageBase } from './send-message.base';
 import { SendMessageChannelCommand } from './send-message-channel.command';
 import { SendMessageResult, SendMessageStatus } from './send-message-type.usecase';
 
 const LOG_CONTEXT = 'SendMessageChat';
+
+/**
+ * True when overrides carry payload that replaces the compiled card (primary content key,
+ * seeded array content, or provider-native rich fields). Routing/metadata-only keys such as
+ * `webhookUrl` or endpoint identifiers must not suppress card resolution.
+ */
+export function hasChatContentOverride(providerId: string, overrides: Record<string, unknown>): boolean {
+  if (Object.keys(overrides).length === 0) {
+    return false;
+  }
+
+  const config = getProviderOverrideConfig(providerId);
+
+  if (config?.seedWhenAbsent && Array.isArray(overrides[config.seedWhenAbsent.key])) {
+    return true;
+  }
+
+  const primaryKey = config?.primaryContentKey;
+  if (primaryKey != null) {
+    const primaryValue = getAtPath(overrides, primaryKey);
+    if (primaryValue !== undefined && primaryValue !== null) {
+      return true;
+    }
+  }
+
+  // Native rich payloads that replace the compiled card (Slack Block Kit, Teams Adaptive Cards).
+  if (Array.isArray(overrides.blocks) || overrides.attachments !== undefined) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Chat providers that deliver to the subscriber's phone number rather than a webhook/channel.
+ * These are auto-resolved from `subscriber.phone` and select their integration by providerId.
+ */
+const PHONE_BASED_CHAT_PROVIDERS: ChatProviderIdEnum[] = [
+  ChatProviderIdEnum.WhatsAppBusiness,
+  ChatProviderIdEnum.Sendblue,
+  ChatProviderIdEnum.PhotonImessage,
+];
 
 type UnifiedChannel = {
   type: 'new' | 'legacy';
   data: IntegrationEndpoints | IChannelSettings;
 };
 
+type LegacyChannelWithBoundIntegration = IChannelSettings & {
+  integrationIdentifier?: string;
+};
+
 type MessageContext = {
   command: SendMessageChannelCommand;
   step: NotificationStepEntity;
   content: string;
+  /**
+   * Rich Chat: the compiled card (from a Maily block body or a code-first `card` output),
+   * resolved once from the bridge output. Its absence keeps the legacy plain-text `content` path.
+   */
+  card?: CardElement;
   i18nInstance: unknown;
+  assignedAgentId: string | null;
 };
+
+const AGENT_SUPPORTED_ENDPOINT_TYPES = new Set<string>([
+  ENDPOINT_TYPES.SLACK_USER,
+  ENDPOINT_TYPES.SLACK_CHANNEL,
+  ENDPOINT_TYPES.MS_TEAMS_USER,
+]);
+
+function filterAgentSupportedEndpoints(endpoints: ChannelData[]): ChannelData[] {
+  return endpoints.filter((endpoint) => {
+    if (!AGENT_SUPPORTED_ENDPOINT_TYPES.has(endpoint.type)) {
+      return false;
+    }
+
+    const token = 'token' in endpoint ? endpoint.token : undefined;
+
+    return typeof token === 'string' && token.length > 0;
+  });
+}
 
 @Injectable()
 export class SendMessageChat extends SendMessageBase {
@@ -76,7 +157,10 @@ export class SendMessageChat extends SendMessageBase {
     protected createExecutionDetails: CreateExecutionDetails,
     protected moduleRef: ModuleRef,
     private sendWebhookMessage: SendWebhookMessage,
-    private resolveChannelEndpoints: ResolveChannelEndpoints
+    private resolveChannelEndpoints: ResolveChannelEndpoints,
+    private agentRepository: AgentRepository,
+    private agentIntegrationRepository: AgentIntegrationRepository,
+    private featureFlagsService: FeatureFlagsService
   ) {
     super(
       messageRepository,
@@ -93,10 +177,11 @@ export class SendMessageChat extends SendMessageBase {
   public async execute(command: SendMessageChannelCommand): Promise<SendMessageResult> {
     try {
       // Phase 1: Prepare message context (template processing, content compilation)
-      const messageContext = await this.prepareMessageContext(command);
+      const assignedAgentId = await this.resolveAssignedAgentId(command);
+      const messageContext = await this.prepareMessageContext(command, assignedAgentId);
 
       // Phase 2: Resolve all channels into unified format
-      const channels = await this.resolveAllChannels(command);
+      let channels = await this.resolveAllChannels(command);
 
       if (channels.length === 0) {
         if (command.contextKeys.length > 0) {
@@ -122,6 +207,24 @@ export class SendMessageChat extends SendMessageBase {
         };
       }
 
+      if (assignedAgentId) {
+        const gated = await this.gateChannelsForAssignedAgent(channels, assignedAgentId, command);
+        if (gated.length > 0) {
+          channels = gated;
+        } else {
+          await this.createExecutionDetail(
+            command,
+            DetailEnum.CHAT_AGENT_CHANNELS_FALLBACK,
+            ExecutionDetailsStatusEnum.WARNING,
+            undefined,
+            {
+              message:
+                "No chat channels linked to the assigned agent were available; sent using the subscriber's configured channels",
+            }
+          );
+        }
+      }
+
       // Phase 3: Send to all channels using unified pipeline
       const status = await this.sendToAllChannels(channels, messageContext);
 
@@ -141,7 +244,10 @@ export class SendMessageChat extends SendMessageBase {
   /**
    * Prepares the message context by handling template processing, variant resolution, and content compilation
    */
-  private async prepareMessageContext(command: SendMessageChannelCommand): Promise<MessageContext> {
+  private async prepareMessageContext(
+    command: SendMessageChannelCommand,
+    assignedAgentId: string | null
+  ): Promise<MessageContext> {
     addBreadcrumb({
       message: 'Sending Chat',
     });
@@ -173,6 +279,7 @@ export class SendMessageChat extends SendMessageBase {
 
     const bridgeOutput = command.bridgeData?.outputs as ChatOutput | undefined;
     let content: string = bridgeOutput?.body || '';
+    const card = bridgeOutput?.card as CardElement | undefined;
 
     try {
       if (!command.bridgeData) {
@@ -189,7 +296,7 @@ export class SendMessageChat extends SendMessageBase {
       throw new PlatformException(DetailEnum.MESSAGE_CONTENT_NOT_GENERATED);
     }
 
-    return { command, step, content, i18nInstance };
+    return { command, step, content, card, i18nInstance, assignedAgentId };
   }
 
   /**
@@ -197,7 +304,7 @@ export class SendMessageChat extends SendMessageBase {
    */
   private async resolveAllChannels(command: SendMessageChannelCommand): Promise<UnifiedChannel[]> {
     const integrationChannelGroups = await this.getChannelEndpointGroups(command);
-    const legacyChatChannels = this.getLegacyChatChannels(command);
+    const legacyChatChannels = await this.getLegacyChatChannels(command, integrationChannelGroups);
 
     const unifiedChannels: UnifiedChannel[] = [];
 
@@ -238,14 +345,18 @@ export class SendMessageChat extends SendMessageBase {
             messageContext.command,
             channel.data as IntegrationEndpoints,
             messageContext.step,
-            messageContext.content
+            messageContext.content,
+            messageContext.assignedAgentId,
+            messageContext.card
           );
         } else {
           result = await this.sendChannelMessageLegacy(
             messageContext.command,
             channel.data as IChannelSettings,
             messageContext.step,
-            messageContext.content
+            messageContext.content,
+            messageContext.assignedAgentId,
+            messageContext.card
           );
         }
 
@@ -301,7 +412,10 @@ export class SendMessageChat extends SendMessageBase {
     };
   }
 
-  private getLegacyChatChannels(command: SendMessageChannelCommand): IChannelSettings[] {
+  private async getLegacyChatChannels(
+    command: SendMessageChannelCommand,
+    channelEndpointGroups: IntegrationEndpoints[] = []
+  ): Promise<IChannelSettings[]> {
     const { subscriber } = command.compileContext;
 
     const chatChannels =
@@ -309,18 +423,59 @@ export class SendMessageChat extends SendMessageBase {
         Object.values(ChatProviderIdEnum).includes(chan.providerId as ChatProviderIdEnum)
       ) || [];
 
-    // Add WhatsApp Business if subscriber has phone
+    /*
+     * Phone-based chat providers (WhatsApp Business, Sendblue) deliver to the subscriber's phone
+     * number. Auto-resolve a channel from `subscriber.phone` for each such provider that has an
+     * active integration, so we only attempt providers the environment is actually configured for.
+     * Skip providers that already have a legacy channel OR a new channel-endpoint group — otherwise
+     * the same phone number is notified twice (once via endpoints, once via this synthetic channel).
+     */
     if (subscriber.phone) {
-      // @ts-expect-error - Adding WhatsApp channel without _integrationId
-      chatChannels.push({
-        providerId: ChatProviderIdEnum.WhatsAppBusiness,
-        credentials: {
-          phoneNumber: subscriber.phone,
-        },
-      });
+      const activePhoneProviders = await this.getActivePhoneBasedProviders(command);
+      const existingProviderIds = new Set<string>([
+        ...chatChannels.map((channel) => channel.providerId),
+        ...channelEndpointGroups.map((group) => group.providerId),
+      ]);
+
+      for (const providerId of activePhoneProviders) {
+        if (existingProviderIds.has(providerId)) continue;
+
+        // @ts-expect-error - Adding a phone-based channel without _integrationId
+        chatChannels.push({
+          providerId,
+          credentials: {
+            phoneNumber: subscriber.phone,
+          },
+        });
+      }
     }
 
     return chatChannels;
+  }
+
+  /**
+   * Returns the phone-based chat providers that have an active integration selectable for this job,
+   * mirroring the selection performed later by {@link getAndValidateIntegration}.
+   */
+  private async getActivePhoneBasedProviders(command: SendMessageChannelCommand): Promise<ChatProviderIdEnum[]> {
+    const results = await Promise.all(
+      PHONE_BASED_CHAT_PROVIDERS.map(async (providerId) => {
+        const integration = await this.selectIntegration.execute(
+          SelectIntegrationCommand.create({
+            organizationId: command.organizationId,
+            environmentId: command.environmentId,
+            channelType: ChannelTypeEnum.CHAT,
+            providerId,
+            userId: command.userId,
+            filterData: this.getIntegrationFilterData(command),
+          })
+        );
+
+        return integration ? providerId : null;
+      })
+    );
+
+    return results.filter((providerId): providerId is ChatProviderIdEnum => providerId !== null);
   }
 
   /**
@@ -330,22 +485,28 @@ export class SendMessageChat extends SendMessageBase {
     command: SendMessageChannelCommand,
     integrationChannelData: IntegrationEndpoints,
     step: NotificationStepEntity,
-    content: string
+    content: string,
+    assignedAgentId: string | null,
+    card?: CardElement
   ): Promise<SendMessageResult> {
-    const { integration, error } = await this.getAndValidateIntegration(
+    const { selection, error } = await this.getAndValidateIntegration(
       command,
       integrationChannelData.providerId,
       undefined,
       integrationChannelData.integrationIdentifier
     );
     if (error) return error;
+    const { integration } = selection;
+    const resolvedSelection = integrationChannelData.matchedConditions
+      ? { ...selection, matchedConditions: integrationChannelData.matchedConditions }
+      : selection;
 
     const message = await this.createMessage(
       command,
       step,
       content,
       integrationChannelData.providerId,
-      integration,
+      resolvedSelection,
       {},
       integrationChannelData.channelData
     );
@@ -354,7 +515,15 @@ export class SendMessageChat extends SendMessageBase {
 
     for (const channelData of integrationChannelData.channelData) {
       try {
-        const result = await this.sendMessage(channelData, integration, content, message, command);
+        const result = await this.sendMessage(
+          channelData,
+          integration,
+          content,
+          card,
+          message,
+          command,
+          assignedAgentId ?? undefined
+        );
 
         if (result.status === SendMessageStatus.SUCCESS) {
           status = SendMessageStatus.SUCCESS;
@@ -382,29 +551,36 @@ export class SendMessageChat extends SendMessageBase {
     command: SendMessageChannelCommand,
     subscriberChannel: IChannelSettings,
     step: NotificationStepEntity,
-    content: string
+    content: string,
+    assignedAgentId: string | null,
+    card?: CardElement
   ): Promise<SendMessageResult> {
     /**
-     * Current a workaround as chat providers for whatsapp is more similar to sms than to our chat implementation
+     * Workaround: phone-based chat providers (WhatsApp, Sendblue) behave more like SMS than our
+     * webhook-based chat implementation, so they select their integration by providerId rather
+     * than by the subscriber channel's _integrationId (which is absent on auto-resolved channels).
+     * Agent gating may stamp `integrationIdentifier` to pin dispatch to a linked integration.
      */
-    const integrationId =
-      subscriberChannel.providerId !== ChatProviderIdEnum.WhatsAppBusiness
-        ? subscriberChannel._integrationId
-        : undefined;
+    const isPhoneBased = PHONE_BASED_CHAT_PROVIDERS.includes(subscriberChannel.providerId as ChatProviderIdEnum);
+    const agentBoundIdentifier = (subscriberChannel as LegacyChannelWithBoundIntegration).integrationIdentifier;
+    const integrationId = isPhoneBased ? undefined : subscriberChannel._integrationId;
+    const integrationIdentifier = isPhoneBased ? agentBoundIdentifier : undefined;
 
-    const { integration, error } = await this.getAndValidateIntegration(
+    const { selection, error } = await this.getAndValidateIntegration(
       command,
       subscriberChannel.providerId,
       integrationId,
-      undefined
+      integrationIdentifier
     );
     if (error) return error;
+    const { integration } = selection;
 
-    const combinedOverrides = this.combineOverrides(
+    const combinedOverrides = combineProviderOverrides(
       command.bridgeData,
       command.overrides,
       command.step.stepId,
-      integration.providerId
+      integration.providerId,
+      integration.identifier
     );
 
     const chatWebhookUrl =
@@ -419,7 +595,7 @@ export class SendMessageChat extends SendMessageBase {
       step,
       content,
       subscriberChannel.providerId,
-      integration,
+      selection,
       {
         chatWebhookUrl,
         phone: phoneNumber,
@@ -428,7 +604,15 @@ export class SendMessageChat extends SendMessageBase {
     );
 
     if (channelData) {
-      return await this.sendMessage(channelData, integration, content, message, command);
+      return await this.sendMessage(
+        channelData,
+        integration,
+        content,
+        card,
+        message,
+        command,
+        assignedAgentId ?? undefined
+      );
     }
 
     return await this.sendErrors(chatWebhookUrl, integration, message, command, phoneNumber);
@@ -476,6 +660,7 @@ export class SendMessageChat extends SendMessageBase {
         subscriberId: command.subscriberId,
         channelType: ChannelTypeEnum.CHAT,
         contextKeys: command.contextKeys,
+        filterData: this.getIntegrationFilterData(command),
       })
     );
   }
@@ -553,34 +738,241 @@ export class SendMessageChat extends SendMessageBase {
     channelData: ChannelData,
     integration: IntegrationEntity,
     content: string,
+    card: CardElement | undefined,
     message: MessageEntity,
-    command: SendMessageChannelCommand
+    command: SendMessageChannelCommand,
+    assignedAgentId?: string
   ): Promise<SendMessageResult> {
     const chatHandler = this.setupChatHandler(integration);
     const overrides = this.buildMessageOverrides(command, integration);
 
-    const combinedOverrides = this.combineOverrides(
+    const combinedOverrides = combineProviderOverrides(
       command.bridgeData,
       command.overrides,
       command.step.stepId,
-      integration.providerId
+      integration.providerId,
+      integration.identifier
     );
 
     // Apply channel data overrides if present for this specific endpoint
     const overriddenChannelData = this.applyEndpointSpecificOverrides(channelData, combinedOverrides);
 
     try {
+      // Rich Chat: resolve the compiled card into transport-ready fields once, here — before
+      // `send` — so the provider stays a pure transport and the editor preview can reuse the
+      // same `render()`. Gated by `IS_CHAT_BLOCK_EDITOR_ENABLED`; when off, the legacy plain-text
+      // `content` path is used unchanged. Skip when a content override is present — it replaces the
+      // card at delivery (otherwise Slack prefers default Block Kit `blocks` over override `text`).
+      let messageContent = content;
+      let nativePayload: Record<string, unknown> | undefined;
+      const isRichChatEnabled = await this.isRichChatEnabled(command);
+      const hasContentOverride = hasChatContentOverride(integration.providerId, combinedOverrides);
+
+      if (card && isRichChatEnabled && !hasContentOverride) {
+        const resolved = await chatHandler.resolveCardContent(card);
+        messageContent = resolved.content;
+        nativePayload = resolved.nativePayload;
+        this.logCardRenderWarnings(resolved.validation, command);
+      }
+
       const result = await chatHandler.send({
         channelData: overriddenChannelData,
         bridgeProviderData: combinedOverrides,
         customData: overrides,
-        content,
+        content: messageContent,
+        nativePayload,
       });
+
+      if (result.id) {
+        await this.persistProviderIdentifier(result.id, message, command, assignedAgentId);
+      }
 
       return await this.handleMessageSendSuccess(result, message, command, overriddenChannelData);
     } catch (error) {
       return await this.handleMessageSendError(error, message, command, overriddenChannelData);
     }
+  }
+
+  private async persistProviderIdentifier(
+    identifier: string,
+    message: MessageEntity,
+    command: SendMessageChannelCommand,
+    assignedAgentId?: string
+  ): Promise<void> {
+    try {
+      await this.messageRepository.update(
+        {
+          _id: message._id,
+          _environmentId: command.environmentId,
+        },
+        {
+          $set: {
+            identifier,
+            ...(assignedAgentId ? { _agentId: assignedAgentId } : {}),
+          },
+        }
+      );
+    } catch (error) {
+      Logger.error(
+        {
+          err: error,
+          jobId: command.jobId,
+          messageId: message._id,
+          agentId: assignedAgentId,
+          identifier,
+        },
+        'Failed to persist provider identifier on message after successful send',
+        LOG_CONTEXT
+      );
+
+      await this.createExecutionDetail(
+        command,
+        DetailEnum.CHAT_AGENT_PLATFORM_THREAD_PERSIST_FAILED,
+        ExecutionDetailsStatusEnum.WARNING,
+        message._id,
+        {
+          identifier,
+          message: this.getErrorMessage(error),
+        }
+      );
+    }
+  }
+
+  private async resolveAssignedAgentId(command: SendMessageChannelCommand): Promise<string | null> {
+    if (command.job._agentId !== undefined) {
+      if (command.job._agentId === null) {
+        return null;
+      }
+
+      return String(command.job._agentId);
+    }
+
+    const workflowAgent = command.workflow?.agent;
+    if (!workflowAgent?.identifier) {
+      return null;
+    }
+
+    const agent = await this.agentRepository.findOne(
+      {
+        identifier: workflowAgent.identifier,
+        _environmentId: command.environmentId,
+        _organizationId: command.organizationId,
+      },
+      ['_id']
+    );
+
+    return agent?._id ? String(agent._id) : null;
+  }
+
+  private async gateChannelsForAssignedAgent(
+    channels: UnifiedChannel[],
+    assignedAgentId: string,
+    command: SendMessageChannelCommand
+  ): Promise<UnifiedChannel[]> {
+    const linkedRefs = await this.agentIntegrationRepository.listLinkedIntegrationRefs({
+      agentId: assignedAgentId,
+      environmentId: command.environmentId,
+      organizationId: command.organizationId,
+    });
+    const linkedIntegrationIdentifiers = new Set(linkedRefs.map((ref) => ref.identifier));
+    const linkedIdentifierByProviderId = new Map<string, string>();
+    for (const ref of linkedRefs) {
+      if (!linkedIdentifierByProviderId.has(ref.providerId)) {
+        linkedIdentifierByProviderId.set(ref.providerId, ref.identifier);
+      }
+    }
+
+    return channels.flatMap((channel) => {
+      const eligible = this.evaluateChannelForAgent(
+        channel,
+        linkedIntegrationIdentifiers,
+        linkedIdentifierByProviderId
+      );
+
+      return eligible ? [eligible] : [];
+    });
+  }
+
+  private evaluateChannelForAgent(
+    channel: UnifiedChannel,
+    linkedIntegrationIdentifiers: Set<string>,
+    linkedIdentifierByProviderId: Map<string, string>
+  ): UnifiedChannel | null {
+    if (channel.type === 'legacy') {
+      return this.evaluateLegacyChannelForAgent(channel, linkedIdentifierByProviderId);
+    }
+
+    const channelGroup = channel.data as IntegrationEndpoints;
+
+    if (!linkedIntegrationIdentifiers.has(channelGroup.integrationIdentifier)) {
+      return null;
+    }
+
+    // Phone-based providers deliver to a phone number rather than a token-bearing webhook,
+    // so their endpoints are kept as-is once the integration is confirmed linked.
+    if (PHONE_BASED_CHAT_PROVIDERS.includes(channelGroup.providerId as ChatProviderIdEnum)) {
+      return channel;
+    }
+
+    const supported = filterAgentSupportedEndpoints(channelGroup.channelData);
+
+    if (supported.length === 0) {
+      return null;
+    }
+
+    channelGroup.channelData = supported;
+
+    return channel;
+  }
+
+  /**
+   * Auto-resolved phone channels carry no integration id; bind to the agent's linked
+   * integration for that provider before allowing the channel through.
+   */
+  private evaluateLegacyChannelForAgent(
+    channel: UnifiedChannel,
+    linkedIdentifierByProviderId: Map<string, string>
+  ): UnifiedChannel | null {
+    const legacyChannel = channel.data as LegacyChannelWithBoundIntegration;
+
+    if (!PHONE_BASED_CHAT_PROVIDERS.includes(legacyChannel.providerId as ChatProviderIdEnum)) {
+      return null;
+    }
+
+    const linkedIdentifier = linkedIdentifierByProviderId.get(legacyChannel.providerId);
+    if (!linkedIdentifier) {
+      return null;
+    }
+
+    legacyChannel.integrationIdentifier = linkedIdentifier;
+
+    return channel;
+  }
+
+  private async isRichChatEnabled(command: SendMessageChannelCommand): Promise<boolean> {
+    return await this.featureFlagsService.getFlag({
+      key: FeatureFlagsKeysEnum.IS_CHAT_BLOCK_EDITOR_ENABLED,
+      defaultValue: false,
+      environment: { _id: command.environmentId } as EnvironmentEntity,
+      organization: { _id: command.organizationId } as OrganizationEntity,
+      user: { _id: command.userId } as UserEntity,
+    });
+  }
+
+  /**
+   * Rich Chat: surface the deterministic, non-blocking post-render platform-limit warnings
+   * (e.g. Slack block/char caps) produced while resolving the card into the execution log.
+   */
+  private logCardRenderWarnings(validation: IChatRenderValidation[], command: SendMessageChannelCommand): void {
+    if (validation.length === 0) {
+      return;
+    }
+
+    Logger.warn(
+      { jobId: command.jobId, warnings: validation },
+      `Chat card render produced ${validation.length} platform-limit warning(s)`,
+      LOG_CONTEXT
+    );
   }
 
   private updateStatus(currentStatus: SendMessageStatus, newStatus: SendMessageStatus): SendMessageStatus {
@@ -597,7 +989,7 @@ export class SendMessageChat extends SendMessageBase {
     step: NotificationStepEntity,
     content: string,
     providerId: ProvidersIdEnum,
-    integration: IntegrationEntity,
+    selection: IntegrationSelectionResult,
     additionalFields: Partial<MessageEntity> = {},
     channelData?: ChannelData[]
   ): Promise<MessageEntity> {
@@ -612,6 +1004,7 @@ export class SendMessageChat extends SendMessageBase {
       transactionId: command.transactionId,
       content: this.storeContent() ? content : null,
       providerId,
+      templateIdentifier: command.identifier,
       _jobId: command.jobId,
       tags: command.tags,
       severity: command.severity,
@@ -622,7 +1015,7 @@ export class SendMessageChat extends SendMessageBase {
       ...additionalFields,
     });
 
-    await this.sendSelectedIntegrationExecution(command.job, integration);
+    await this.sendSelectedIntegrationExecution(command.job, selection);
 
     await this.createExecutionDetail(
       command,
@@ -640,23 +1033,23 @@ export class SendMessageChat extends SendMessageBase {
     providerId: ProvidersIdEnum,
     integrationId?: string,
     integrationIdentifier?: string
-  ): Promise<{ integration: IntegrationEntity; error?: never } | { integration?: never; error: SendMessageResult }> {
+  ): Promise<
+    { selection: IntegrationSelectionResult; error?: never } | { selection?: never; error: SendMessageResult }
+  > {
     const getIntegrationParams = {
       organizationId: command.organizationId,
       environmentId: command.environmentId,
       providerId,
       channelType: ChannelTypeEnum.CHAT,
       userId: command.userId,
-      filterData: {
-        tenant: command.job.tenant,
-      },
+      filterData: this.getIntegrationFilterData(command),
       ...(integrationId && { id: integrationId }),
       ...(integrationIdentifier && { identifier: integrationIdentifier }),
     };
 
-    const integration = await this.getIntegration(getIntegrationParams);
+    const selection = await this.getIntegration(getIntegrationParams);
 
-    if (!integration) {
+    if (!selection) {
       const reason = integrationIdentifier
         ? `Integration with integrationIdentifier: ${integrationIdentifier} is either deleted or not active`
         : integrationId
@@ -693,7 +1086,7 @@ export class SendMessageChat extends SendMessageBase {
       };
     }
 
-    return { integration };
+    return { selection };
   }
 
   private async createExecutionDetail(

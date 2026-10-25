@@ -31,40 +31,59 @@ export class SubscriberRepository extends BaseRepository<SubscriberDBModel, Subs
   async findByPhone(
     environmentId: string,
     organizationId: string,
-    phoneCandidates: string[]
+    phoneCandidates: string[],
+    digitFlexibleRegexSource?: string | null
   ): Promise<SubscriberEntity[]> {
     if (phoneCandidates.length === 0) {
       return [];
     }
 
+    // Exact `$in` covers canonical E.164 / Meta digit forms. Optional
+    // digit-flexible regex also matches stored phones with spaces, dashes, or
+    // parentheses (e.g. "+1 (555) 123-4567") so open-access WhatsApp does not
+    // miss a known subscriber or provision a duplicate phantom for the same number.
+    const phoneFilter = digitFlexibleRegexSource
+      ? {
+          $or: [{ phone: { $in: phoneCandidates } }, { phone: { $regex: digitFlexibleRegexSource } }],
+        }
+      : { phone: { $in: phoneCandidates } };
+
+    // Projects `_id` and `data` alongside `subscriberId` so the agent WhatsApp
+    // resolver can (a) map the external id to the Mongo `_id` needed to repoint
+    // MCP / tool-trust rows and (b) read the `__novu_source` provenance marker
+    // to tell an auto-provisioned "phantom" apart from a customer-created
+    // subscriber during the adoption merge. Limit raised from 2 to comfortably
+    // capture a real subscriber plus any phantom(s) sharing the phone.
     return this.find(
       {
         _environmentId: environmentId,
         _organizationId: organizationId,
-        phone: { $in: phoneCandidates },
+        ...phoneFilter,
       },
-      'subscriberId',
-      { limit: 2 }
+      '_id subscriberId phone data',
+      { limit: 10 }
     );
   }
 
-  async findByEmail(
-    environmentId: string,
-    organizationId: string,
-    email: string
-  ): Promise<SubscriberEntity[]> {
+  async findByEmail(environmentId: string, organizationId: string, email: string): Promise<SubscriberEntity[]> {
     if (!email) {
       return [];
     }
 
+    // Projects `_id` and `data` alongside `subscriberId` so the agent email
+    // resolver can (a) map the external id to the Mongo `_id` needed to repoint
+    // MCP / tool-trust rows and (b) read the `__novu_source` provenance marker
+    // to tell an auto-provisioned "phantom" apart from a customer-created
+    // subscriber during the adoption merge. Limit raised from 2 to comfortably
+    // capture a real subscriber plus any phantom(s) sharing the address.
     return this.find(
       {
         _environmentId: environmentId,
         _organizationId: organizationId,
         email,
       },
-      'subscriberId',
-      { limit: 2 }
+      '_id subscriberId email data',
+      { limit: 10 }
     );
   }
 
@@ -90,7 +109,7 @@ export class SubscriberRepository extends BaseRepository<SubscriberDBModel, Subs
     });
 
     let bulkResponse;
-    let writeErrors: Array<{ err: { index: number; errmsg: string; op?: { subscriberId?: string } } }> = [];
+    let writeErrors: SubscriberWriteError[] = [];
     try {
       bulkResponse = await this.bulkWrite(bulkWriteOps);
     } catch (e: unknown) {
@@ -99,9 +118,7 @@ export class SubscriberRepository extends BaseRepository<SubscriberDBModel, Subs
           throw new DalException(e.message);
         }
         bulkResponse = e.result;
-        writeErrors = e.writeErrors as Array<{
-          err: { index: number; errmsg: string; op?: { subscriberId?: string } };
-        }>;
+        writeErrors = e.writeErrors;
       } else {
         throw new DalException('An unknown error occurred');
       }
@@ -166,7 +183,7 @@ export class SubscriberRepository extends BaseRepository<SubscriberDBModel, Subs
     emails: string[] = [],
     search?: string
   ): Promise<string[]> {
-    const filters: any = [];
+    const filters: SubscriberSearchClause[] = [];
 
     if (emails?.length) {
       filters.push({
@@ -196,6 +213,9 @@ export class SubscriberRepository extends BaseRepository<SubscriberDBModel, Subs
           subscriberId: { $eq: search },
         }
       );
+    }
+    if (filters.length === 0) {
+      return [];
     }
 
     return (
@@ -275,16 +295,10 @@ export class SubscriberRepository extends BaseRepository<SubscriberDBModel, Subs
         $and: [
           {
             ...(query.email && {
-              email: {
-                $regex: regExpEscape(query.email),
-                $options: 'i',
-              },
+              email: query.email,
             }),
             ...(query.phone && {
-              phone: {
-                $regex: regExpEscape(query.phone),
-                $options: 'i',
-              },
+              phone: query.phone,
             }),
             ...(query.subscriberId && {
               subscriberId: query.subscriberId,
@@ -350,6 +364,22 @@ function regExpEscape(literalString: string): string {
   return literalString.replace(/[-[\]{}()*+!<=:?./\\^$|#\s,]/g, '\\$&');
 }
 
-function isErrorWithWriteErrors(e: unknown): e is { writeErrors?: any; message?: string; result?: any } {
+type SubscriberSearchClause =
+  | { email: { $in: string[] } }
+  | { subscriberId: { $in: string[] } }
+  | { email: { $regex: string; $options: 'i' } }
+  | { subscriberId: { $eq: string } };
+
+type SubscriberWriteError = {
+  err: { index: number; errmsg: string; op?: { subscriberId?: string } };
+};
+
+type SubscriberBulkWriteResult = {
+  upsertedIds?: Record<string, unknown>;
+};
+
+function isErrorWithWriteErrors(
+  e: unknown
+): e is { writeErrors?: SubscriberWriteError[]; message?: string; result?: SubscriberBulkWriteResult } {
   return typeof e === 'object' && e !== null && 'writeErrors' in e;
 }

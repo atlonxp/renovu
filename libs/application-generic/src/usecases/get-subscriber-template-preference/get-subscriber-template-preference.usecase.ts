@@ -42,6 +42,10 @@ export class GetSubscriberTemplatePreference {
 
   @InstrumentUsecase()
   async execute(command: GetSubscriberTemplatePreferenceCommand): Promise<ISubscriberPreferenceResponse> {
+    if (!command.template) {
+      throw new BadRequestException('Template is required');
+    }
+
     const subscriber: Pick<SubscriberEntity, '_id'> | null = command.subscriber ?? (await this.getSubscriber(command));
 
     const initialChannels = await this.getChannels(command);
@@ -161,6 +165,7 @@ export class GetSubscriberTemplatePreference {
         in_app: true,
         chat: true,
         push: true,
+        tool: true,
       },
       includedChannels
     );

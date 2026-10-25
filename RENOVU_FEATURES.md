@@ -4,8 +4,10 @@
 >
 > This document is the canonical inventory of every file ReNOVU has added or customized relative to upstream `novuhq/novu`. When you `git merge upstream/next` and resolve conflicts, this is the file that prevents you from accidentally clobbering a ReNOVU feature.
 >
-> Last reviewed: **2026-05-08** (during ReNOVU v2.5.0-dev work on `renovu-v2.5-dev`).
-> Upstream baseline: NOVU v3.14.1 + `merge/upstream-next-2026-05` merge.
+> Last reviewed: **2026-10-25** (upstream merge `merge/upstream-next-2026-10-25`).
+> Upstream baseline: `upstream/next` @ `d7ff70c665` (2026-10-25).
+>
+> After any upstream merge run `bash scripts/renovu-feature-guards.sh` — 166 git-grep checks that fail when a fork feature is lost (`now` = must always pass, `post` = state after the 2026-10 merge, `fix` = known regressions).
 
 ---
 
@@ -124,7 +126,9 @@ Tags used:
 | `packages/translation/src/services/openai-translation.service.ts` | `[NEW]` | OpenAI GPT integration with variable tokenization, HTML validation |
 | `packages/translation/src/usecases/auto-translate/auto-translate.usecase.ts` | `[NEW]` | Sync translation flow |
 | `packages/translation/src/usecases/manage-translations/manage-translations.usecase.ts` | `[NEW]` | Translation CRUD |
-| `apps/worker/src/app/workflow/services/translation.service.ts` | `[CUSTOM]` | Bridge for notification delivery with locale support |
+| `apps/worker/src/app/workflow/usecases/send-message/send-message.base.ts` | `[CUSTOM]` | Delivery-time bridge (`applyTranslationsToStep`/`getTranslatedContent`) used by the 5 channel usecases |
+| `apps/worker/src/app/translation/*`, `JobTopicNameEnum.TRANSLATION` (`packages/shared/src/config/job-queue.ts`) | `[NEW]` | Async translation queue. Consumer owned by `TranslationWorkerModule.forRoot()`; registered as `undefined` in `worker-init.config.ts`, BullMQ-only in `worker-topics.ts`, no-op `case` in `libs/application-generic/src/modules/queues.module.ts` |
+| `apps/worker/src/app/ai-settings/*` | `[NEW]` | Worker-local `@Global` module providing `AI_SETTINGS_REPOSITORY` (self-hosted boot). Worker code must import mongoose from `@novu/dal`, never `'mongoose'` |
 
 **Conflict signature:** Anything `@novu/ee-translation`-shaped upstream — we replaced it wholesale.
 
@@ -138,7 +142,7 @@ Tags used:
 |---|---|---|
 | `apps/admin-tools/` | `[NEW]` | Whole NestJS service |
 | `apps/admin-tools/src/backup/backup.service.ts` | `[CUSTOM within NEW]` | Audit/activity collections excluded by default; large collections stream as NDJSON to dodge V8 heap OOM |
-| `apps/admin-tools/src/cli/{backup,restore,export,import}.ts` | `[NEW]` | CLI scripts |
+| `scripts/renovu-{backup,restore,export,import}.sh` | `[NEW]` | CLI wrappers |
 | `docker/Dockerfile.admin-tools` | `[NEW]` | Container image |
 | `apps/dashboard/src/components/settings/data-management-settings.tsx` | `[NEW]` | Settings → Data Management UI |
 
@@ -175,7 +179,8 @@ Tags used:
 | File | Tag | Purpose |
 |---|---|---|
 | `apps/api/src/app/organization/usecases/create-organization/create-organization.usecase.ts` | `[CUSTOM]` | New orgs get `apiServiceLevel: UNLIMITED` |
-| `libs/application-generic/src/utils/check-feature-tier.ts` | `[CUSTOM]` | UNLIMITED tier short-circuits all gates |
+| `packages/shared/src/consts/feature-tiers-constants.ts` | `[CUSTOM]` | FREE/PRO/BUSINESS rows unlocked (e.g. HIPAA); runtime gates short-circuit on `IS_SELF_HOSTED` in application-generic validators |
+| `.../create-organization/sync-external-organization/sync-external-organization.usecase.ts` | `[CUSTOM]` | UNLIMITED + `removeNovuBranding` without NOVU_ENTERPRISE |
 | `apps/dashboard/src/components/layouts/layouts-list.tsx` | `[CUSTOM]` | Layout count paywall removed for `IS_SELF_HOSTED` |
 | Various dashboard `useFeatureFlag` callsites | `[CUSTOM]` | Self-hosted defaults to enabled for branding-removal flag |
 
@@ -193,7 +198,7 @@ Tags used:
 | `docker-compose.yml` | `[CUSTOM]` | Local dev with multi-service orchestration |
 | `docker-compose.production.yml` | `[NEW]` | Standalone production w/ host port bindings |
 | `docker-compose.coolify.yml` | `[NEW]` | Coolify w/ no custom networks (avoids 504 from Traefik misrouting) |
-| `.github/workflows/publish-ghcr.yml` | `[NEW]` | Multi-arch GHCR publish |
+| `.github/workflows/build-push.yml` | `[NEW]` | amd64 GHCR images for api/worker/ws/dashboard/admin-tools on push to `release` (`:latest` only from `release`), `fail-fast: false` |
 | `pnpm-workspace.yaml` | `[CUSTOM]` | `enterprise/packages/*` removed |
 | `package.json` (root) | `[CUSTOM]` | `@novu/ee-billing`, `@novu/ee-shared-services`, `@novu/ee-translation`, `@novu/ee-api` removed from app deps |
 | `apps/api/package.json` | `[CUSTOM]` | Same |
@@ -217,6 +222,23 @@ These are smaller fixes that may or may not still be needed depending on upstrea
 When upstream evolves any of these, double-check the fix is still needed.
 
 ---
+
+## 11. Also fork-owned (cataloged 2026-10-25)
+
+| Area | Files | Notes |
+|---|---|---|
+| AI generation | `workflows-v2/usecases/generate-workflow/*`, `layouts-v2/usecases/generate-layout/*`, routes in `workflow.controller.ts` / `layouts.controller.ts`; dashboard `ai-generate-*-dialog.tsx`, `add-step-menu.tsx` "Generate with AI", `addAiStep` in `use-canvas-nodes-edges.ts` / `workflow-canvas.tsx`, `api/workflows.ts` `generateWorkflow*` | `defaultStepName` maps every `StepTypeEnum` — add new upstream step types there |
+| Layout container | `LayoutContainerConfig` (shared), `wrapWithLayoutContainer` (preview-layout), `maily.tsx` `containerStyle`, maily-core `fullBleed`, maily-render `setContainer` | |
+| Self-hosted unlocks | `main.tsx` Settings routes (`<SettingsPage />`), sidebar Settings link, `pages/environments.tsx`, `use-fetch-organization-settings.ts`, translation gating on AI key (`use-is-translation-enabled.ts`, `translation-list.tsx`, `translation-switch.tsx`) | Upstream gates these on `!IS_SELF_HOSTED_CE`; ReNOVU builds as CE |
+| Clerk shim additions | `utils/self-hosted/use-auth.ts` returns `currentUser`; `useClerk().setActive` performs the real project switch; `signOut` clears the JWT | Every name imported from `@clerk/react` must be exported by `utils/self-hosted/index.tsx` |
+| Agents product neutralised | `bootstrap.ts` 404s public agent/connect/web-chat/copilot-bridge routes; `app.module.ts` loads Human/NovuContext/WellKnown modules only when not self-hosted | Opt back in with `RENOVU_AGENTS_ENABLED=true` |
+| Hardening | `api.client.ts` 401 → `clearAuth`; LD-less boot; base-sync continue-on-error; mongo 8.0.15 + `MONGO_MIN_POOL_SIZE` in compose | |
+
+### Upstream-merge hazards (seen 2026-10)
+- Upstream adds exhaustive `never` switches / `Record<Enum, …>` maps. Fork enum values (`JobTopicNameEnum.TRANSLATION`) and new upstream values (`StepTypeEnum.TOOL`) break compile/boot with **no git conflict**.
+- The dashboard `build` script no longer runs tsc (Vite 8). Run `pnpm --filter @novu/dashboard typecheck` explicitly.
+- The vite alias `organization-dropdown-clerk → self-hosted/organization-switcher.tsx` keeps coming back through merges and hides the project dropdown.
+- `admin-tools` backup registry (`backup.service.ts`) is a static whitelist: it does not include `aisettings`, `translationsettings`, `topicsubscribers`, `environmentvariables`, `_renovu_migrations` or upstream's new collections. Use `mongodump` for pre-deploy backups until fixed.
 
 ## Deploy Runbook
 

@@ -13,6 +13,7 @@ import {
 import { expect } from 'chai';
 import sinon from 'sinon';
 import { GetOrganizationSettings } from '../../../organization/usecases/get-organization-settings/get-organization-settings.usecase';
+import { ControlsTranslationService } from './controls-translation.service';
 import { EmailOutputRendererCommand, EmailOutputRendererUsecase } from './email-output-renderer.usecase';
 import { FullPayloadForRender } from './render-command';
 
@@ -101,10 +102,15 @@ describe('EmailOutputRendererUsecase', () => {
     jobRepositoryMock = sinon.createStubInstance(JobRepository);
     createExecutionDetailsMock = sinon.createStubInstance(CreateExecutionDetails);
 
+    const controlsTranslationService = new ControlsTranslationService(
+      moduleRef as unknown as ModuleRef,
+      pinoLoggerMock as unknown as PinoLogger
+    );
+
     emailOutputRendererUsecase = new EmailOutputRendererUsecase(
       getOrganizationSettingsMock as any,
-      moduleRef as any,
       pinoLoggerMock as any,
+      controlsTranslationService,
       controlValuesRepositoryMock as any,
       getLayoutUseCaseV0 as any,
       jobRepositoryMock as any,
@@ -275,6 +281,83 @@ describe('EmailOutputRendererUsecase', () => {
 
       expect(result).to.have.property('subject', 'Welcome');
       expect(result.body).to.include('Hello valued customer');
+    });
+  });
+
+  describe('sender and preheader metadata', () => {
+    const buildPreheaderCommand = (
+      preheader: string,
+      controlValues: Record<string, unknown> = {}
+    ): EmailOutputRendererCommand => ({
+      dbWorkflow: mockDbWorkflow,
+      controlValues: {
+        subject: 'Welcome Email',
+        preheader,
+        body: JSON.stringify({
+          type: 'doc',
+          content: [
+            {
+              type: 'paragraph',
+              content: [{ type: 'text', text: 'Unique body marker' }],
+            },
+          ],
+        } satisfies MailyJSONContent),
+        ...controlValues,
+      },
+      fullPayloadForRender: mockFullPayload,
+      stepId: 'fake_step_id',
+    });
+
+    it('should render the preheader once', async () => {
+      const result = await emailOutputRendererUsecase.execute(buildPreheaderCommand('Peek inside'));
+
+      expect(result.body.split('Peek inside')).to.have.lengthOf(2);
+    });
+
+    it('should not expand $& as a special replacement pattern', async () => {
+      const result = await emailOutputRendererUsecase.execute(buildPreheaderCommand('$&'));
+
+      expect(result.body).to.include('$&');
+      expect(result.body.match(/<body\b/gi) || []).to.have.lengthOf(1);
+    });
+
+    it("should not expand $' as a special replacement pattern", async () => {
+      const result = await emailOutputRendererUsecase.execute(buildPreheaderCommand("$'"));
+
+      expect(result.body).to.include("$'");
+      expect(result.body.split('Unique body marker')).to.have.lengthOf(2);
+    });
+
+    it('should translate subject, sender name, and preheader only', async () => {
+      translateStub.callsFake(async (command: { content: string }) =>
+        command.content
+          .replace('{{t.subject}}', 'Willkommen')
+          .replace('{{t.senderName}}', 'Acme Sicherheit')
+          .replace('{{t.preheader}}', 'Ein Blick hinein')
+      );
+
+      const result = await emailOutputRendererUsecase.execute(
+        buildPreheaderCommand('{{t.preheader}}', {
+          subject: '{{t.subject}}',
+          from: { email: '{{t.senderEmail}}', name: '{{t.senderName}}' },
+          replyTo: '{{t.replyTo}}',
+        })
+      );
+
+      expect(result.subject).to.equal('Willkommen');
+      expect(result.from).to.deep.equal({ email: '{{t.senderEmail}}', name: 'Acme Sicherheit' });
+      expect(result.replyTo).to.equal('{{t.replyTo}}');
+      expect(result.preheader).to.equal('Ein Blick hinein');
+      expect(result.body).to.include('Ein Blick hinein');
+    });
+
+    it('should preserve an empty translated preheader', async () => {
+      translateStub.callsFake(async (command: { content: string }) => command.content.replace('{{t.preheader}}', ''));
+
+      const result = await emailOutputRendererUsecase.execute(buildPreheaderCommand('{{t.preheader}}'));
+
+      expect(result).to.have.property('preheader', '');
+      expect(result.body).to.not.include('{{t.preheader}}');
     });
   });
 

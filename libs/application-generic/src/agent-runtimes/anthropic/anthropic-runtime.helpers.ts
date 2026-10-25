@@ -1,6 +1,32 @@
 import { APIError } from '@anthropic-ai/sdk';
-import type { AgentMcpServerDto, AgentSkillDto, AgentToolDto } from '@novu/shared';
-import { CLAUDE_BUILTIN_TOOLS } from '@novu/shared';
+import type {
+  AgentCreateParams,
+  BetaManagedAgentsAgent,
+  BetaManagedAgentsAgentToolConfigParams,
+  BetaManagedAgentsCustomToolParams,
+  BetaManagedAgentsMCPServerURLDefinition,
+  BetaManagedAgentsSkillParams,
+} from '@anthropic-ai/sdk/resources/beta/agents/agents';
+import type {
+  BetaManagedAgentsMCPOAuthCreateParams,
+  BetaManagedAgentsMCPOAuthRefreshParams,
+  BetaManagedAgentsMCPOAuthRefreshUpdateParams,
+  BetaManagedAgentsMCPOAuthUpdateParams,
+} from '@anthropic-ai/sdk/resources/beta/vaults/credentials';
+import type {
+  AgentMcpServerDto,
+  AgentRuntimeConfigDto,
+  AgentSkillDto,
+  AgentToolDto,
+  McpTokenEndpointAuthMethod,
+} from '@novu/shared';
+import {
+  CLAUDE_BUILTIN_TOOLS,
+  NOVU_HUMAN_SCHEMA,
+  NOVU_RESOLVE_SCHEMA,
+  NOVU_TOOL_CATALOG_SCHEMA,
+  resolvePersistedMcpTokenEndpointAuthMethod,
+} from '@novu/shared';
 import {
   AgentRuntimeNetworkError,
   AgentRuntimeOverloadedError,
@@ -36,6 +62,24 @@ export function truncateWithEllipsis(value: string, max: number): string {
   }
 
   return `${value.slice(0, max - 1)}…`;
+}
+
+/**
+ * Anthropic's SDK formats `APIError.message` as `"<status> <raw-json-body>"`
+ * (e.g. `400 {"type":"error","error":{"message":"…"}}`), which is unreadable
+ * when surfaced to end users. The SDK also exposes the parsed response body on
+ * `error.error`, so we prefer the upstream `error.message` field and fall back
+ * to the raw message only when the structured body is missing.
+ */
+export function extractApiErrorMessage(err: APIError): string {
+  const body = err.error as { error?: { message?: unknown } } | undefined;
+  const providerMessage = body?.error?.message;
+
+  if (typeof providerMessage === 'string' && providerMessage.trim().length > 0) {
+    return providerMessage.trim();
+  }
+
+  return err.message;
 }
 
 /**
@@ -82,7 +126,7 @@ export function extractSkillNameFromBundle(files: UploadSkillFile[]): string | n
  * form — `^`-anchored quantifiers are tried at exactly one position and
  * are unambiguously linear.
  */
-export function parseSkillNameLine(frontmatter: string): string | null {
+function parseSkillNameLine(frontmatter: string): string | null {
   for (const rawLine of frontmatter.split('\n')) {
     const line = rawLine.replace(/\r$/, '');
     const trimmedStart = line.replace(/^[ \t]+/, '');
@@ -115,7 +159,7 @@ export function parseSkillNameLine(frontmatter: string): string | null {
  * `js/polynomial-redos` warning on `+`-quantified, `$`-anchored character
  * classes.
  */
-export function trimTrailingSpacesAndTabs(value: string): string {
+function trimTrailingSpacesAndTabs(value: string): string {
   let end = value.length;
   while (end > 0 && isSpaceOrTab(value[end - 1])) {
     end -= 1;
@@ -124,7 +168,7 @@ export function trimTrailingSpacesAndTabs(value: string): string {
   return end === value.length ? value : value.slice(0, end);
 }
 
-export function isSpaceOrTab(char: string): boolean {
+function isSpaceOrTab(char: string): boolean {
   return char === ' ' || char === '\t';
 }
 
@@ -152,7 +196,7 @@ export function isDuplicateDisplayTitleError(err: unknown): boolean {
   }
 
   const directMessage = err.message ?? '';
-  const errorBody = (err as unknown as { error?: unknown }).error;
+  const errorBody = err.error;
   const serializedBody = errorBody ? safeStringify(errorBody) : '';
 
   return (
@@ -160,7 +204,7 @@ export function isDuplicateDisplayTitleError(err: unknown): boolean {
   );
 }
 
-export function safeStringify(value: unknown): string {
+function safeStringify(value: unknown): string {
   try {
     return JSON.stringify(value);
   } catch {
@@ -168,15 +212,32 @@ export function safeStringify(value: unknown): string {
   }
 }
 
-export function mapSkill(raw: Record<string, unknown>): AgentSkillDto {
+export type AgentToolParam = NonNullable<AgentCreateParams['tools']>[number];
+
+export const DEFAULT_MODEL = 'claude-sonnet-4-6';
+
+export function mapAgentRuntimeConfig(agent: BetaManagedAgentsAgent): AgentRuntimeConfigDto {
+  /** The SDK only types the `{ id }` form; agent responses may still carry a bare model id string. */
+  const model: BetaManagedAgentsAgent['model'] | string | undefined = agent.model;
+
   return {
-    type: raw.type as 'anthropic' | 'custom',
-    skillId: raw.skill_id as string,
-    version: (raw.version as string | null | undefined) ?? null,
+    model: typeof model === 'string' ? model : (model?.id ?? DEFAULT_MODEL),
+    systemPrompt: agent.system ?? '',
+    mcpServers: agent.mcp_servers.map(mapMcpServer),
+    tools: agent.tools.flatMap(mapToolset),
+    skills: agent.skills.map(mapSkill),
   };
 }
 
-export function toSkillParam(skill: AgentSkillDto): Record<string, unknown> {
+export function mapSkill(skill: BetaManagedAgentsAgent['skills'][number]): AgentSkillDto {
+  return {
+    type: skill.type,
+    skillId: skill.skill_id,
+    version: skill.version,
+  };
+}
+
+export function toSkillParam(skill: AgentSkillDto): BetaManagedAgentsSkillParams {
   return {
     type: skill.type,
     skill_id: skill.skillId,
@@ -184,11 +245,11 @@ export function toSkillParam(skill: AgentSkillDto): Record<string, unknown> {
   };
 }
 
-export function mapMcpServer(raw: Record<string, unknown>): AgentMcpServerDto {
+export function mapMcpServer(server: BetaManagedAgentsMCPServerURLDefinition): AgentMcpServerDto {
   return {
-    externalId: (raw.name as string) ?? '',
-    name: raw.name as string,
-    url: raw.url as string,
+    externalId: server.name,
+    name: server.name,
+    url: server.url,
   };
 }
 
@@ -211,44 +272,50 @@ export const MANAGED_AGENT_DEFAULT_PERMISSION_CONFIG = {
  * separately via `agent.mcp_servers` (and Novu's enablement table), matching how
  * Claude surfaces built-in tools vs MCP integrations in its own UI.
  */
-export function mapToolset(raw: Record<string, unknown>): AgentToolDto[] {
-  if (raw.type === 'agent_toolset_20260401') {
-    return ((raw.configs as any[]) ?? [])
-      .filter((c) => c.enabled !== false)
-      .map((c) => ({
-        externalId: c.name as string,
-        name: c.name as string,
-        type: 'builtin' as const,
-      }));
-  }
-
-  return [];
-}
-
-/**
- * Build the Anthropic `tools` payload array from builtin tool type strings
- * and optional MCP server entries.
- *
- * We always emit the full toolset with every known tool explicitly set to
- * enabled or disabled. Sending only the enabled subset causes the Anthropic
- * API to default all omitted tools to enabled, which means the agent ends up
- * with every tool regardless of what the user selected.
- */
-export function buildToolsPayload(
-  toolTypes?: string[],
-  mcpServers?: Array<{ name: string; url: string }>
-): Record<string, unknown>[] {
-  const hasTools = Array.isArray(toolTypes) && toolTypes.length > 0;
-  const hasMcpServers = Array.isArray(mcpServers) && mcpServers.length > 0;
-
-  if (!hasTools && !hasMcpServers) {
+export function mapToolset(tool: BetaManagedAgentsAgent['tools'][number]): AgentToolDto[] {
+  if (tool.type !== 'agent_toolset_20260401') {
     return [];
   }
 
-  const payload: Record<string, unknown>[] = [];
+  return tool.configs
+    .filter((c) => c.enabled !== false)
+    .map((c) => ({
+      externalId: c.name,
+      name: c.name,
+      type: 'builtin' as const,
+    }));
+}
 
+/**
+ * Novu-owned tools always attached to managed agents (independent of user tool/MCP selections).
+ */
+export function buildPlatformToolsPayload(): BetaManagedAgentsCustomToolParams[] {
+  return [NOVU_TOOL_CATALOG_SCHEMA, NOVU_RESOLVE_SCHEMA, NOVU_HUMAN_SCHEMA].map(toCustomToolParam);
+}
+
+/** The shared schemas are `as const`; the SDK expects a mutable `required` array. */
+function toCustomToolParam(schema: {
+  name: string;
+  description: string;
+  input_schema: { type: 'object'; properties: Readonly<Record<string, unknown>>; required?: readonly string[] };
+}): BetaManagedAgentsCustomToolParams {
+  const { required, ...inputSchema } = schema.input_schema;
+
+  return {
+    type: 'custom',
+    ...schema,
+    input_schema: { ...inputSchema, ...(required ? { required: [...required] } : {}) },
+  };
+}
+
+function buildUserToolsetPayload(
+  toolTypes?: string[],
+  mcpServers?: Array<{ name: string; url: string }>
+): AgentToolParam[] {
+  const payload: AgentToolParam[] = [];
   const enabledSet = new Set(toolTypes ?? []);
-  const allToolNames = CLAUDE_BUILTIN_TOOLS.map((t) => t.type);
+  // CLAUDE_BUILTIN_TOOLS types `type` as string; its entries are the Anthropic built-in tool names.
+  const allToolNames = CLAUDE_BUILTIN_TOOLS.map((t) => t.type as BetaManagedAgentsAgentToolConfigParams['name']);
 
   payload.push({
     type: 'agent_toolset_20260401',
@@ -270,19 +337,71 @@ export function buildToolsPayload(
 }
 
 /**
+ * Anthropic Managed Agents require the `read` builtin to be enabled (and not
+ * `always_deny`) whenever skills are attached — skills are loaded by reading
+ * their bundle files. Omitting it yields a 400:
+ *   "Missing required tool: skills require the read tool…"
+ */
+export const SKILL_REQUIRED_BUILTIN_TOOL = 'read';
+
+/**
+ * Ensures `read` is present in the tool-type list when the agent has skills.
+ * Idempotent — returns `toolTypes` unchanged when skills are absent or `read`
+ * is already selected.
+ */
+export function ensureSkillRequiredTools(toolTypes: string[] | undefined, hasSkills: boolean): string[] {
+  const tools = [...(toolTypes ?? [])];
+
+  if (hasSkills && !tools.includes(SKILL_REQUIRED_BUILTIN_TOOL)) {
+    tools.push(SKILL_REQUIRED_BUILTIN_TOOL);
+  }
+
+  return tools;
+}
+
+/**
+ * Build the Anthropic `tools` payload array from builtin tool type strings
+ * and optional MCP server entries.
+ *
+ * We always emit the full toolset with every known tool explicitly set to
+ * enabled or disabled. Sending only the enabled subset causes the Anthropic
+ * API to default all omitted tools to enabled, which means the agent ends up
+ * with every tool regardless of what the user selected.
+ *
+ * Platform tools (e.g. `novu_tool_catalog`, `novu_resolve`, `novu_human`) are always included, even when the user
+ * has no builtin tools or MCP servers enabled.
+ *
+ * When `hasSkills` is true, `read` is force-enabled — Anthropic rejects skill
+ * attachments without a usable read tool on the agent toolset.
+ */
+export function buildToolsPayload(
+  toolTypes?: string[],
+  mcpServers?: Array<{ name: string; url: string }>,
+  hasSkills = false
+): AgentToolParam[] {
+  return [
+    ...buildUserToolsetPayload(ensureSkillRequiredTools(toolTypes, hasSkills), mcpServers),
+    ...buildPlatformToolsPayload(),
+  ];
+}
+
+/**
  * Build the Anthropic `mcp_oauth` create payload. The `refresh` block is only
  * emitted when both a refresh token and the OAuth client metadata are present
  * — that's what enables Anthropic-side automated refresh; otherwise the vault
  * stores an access-only credential that Novu re-pushes on refresh.
  */
-export function buildMcpOAuthCreateAuth(mcpServerUrl: string, auth: VaultCredentialAuth): Record<string, unknown> {
+export function buildMcpOAuthCreateAuth(
+  mcpServerUrl: string,
+  auth: VaultCredentialAuth
+): BetaManagedAgentsMCPOAuthCreateParams {
   if (!auth.accessToken) {
     // The interface marks accessToken optional (delete flow), but create
     // semantically requires it. Surface as a programmer error.
     throw new Error('Anthropic vault credential create requires an access token');
   }
 
-  const payload: Record<string, unknown> = {
+  const payload: BetaManagedAgentsMCPOAuthCreateParams = {
     type: 'mcp_oauth',
     access_token: auth.accessToken,
     mcp_server_url: mcpServerUrl,
@@ -296,8 +415,8 @@ export function buildMcpOAuthCreateAuth(mcpServerUrl: string, auth: VaultCredent
   return payload;
 }
 
-export function buildMcpOAuthUpdateAuth(auth: VaultCredentialAuth): Record<string, unknown> {
-  const payload: Record<string, unknown> = {
+export function buildMcpOAuthUpdateAuth(auth: VaultCredentialAuth): BetaManagedAgentsMCPOAuthUpdateParams {
+  const payload: BetaManagedAgentsMCPOAuthUpdateParams = {
     type: 'mcp_oauth',
   };
 
@@ -316,7 +435,42 @@ export function buildMcpOAuthUpdateAuth(auth: VaultCredentialAuth): Record<strin
   return payload;
 }
 
-export function buildMcpOAuthRefreshParams(auth: VaultCredentialAuth): Record<string, unknown> {
+/**
+ * Build Anthropic's `token_endpoint_auth` block from the negotiated DCR
+ * method. Mirrors `selectTokenEndpointAuthMethod` in the API service — the
+ * default for legacy credentials (no method persisted) is
+ * `client_secret_basic` per RFC 8414 §2. The exhaustive switch makes any
+ * future addition to `McpTokenEndpointAuthMethod` a typecheck failure here
+ * before it can silently downgrade a confidential client at refresh time.
+ */
+function buildAnthropicTokenEndpointAuth(
+  oauthClient: NonNullable<VaultCredentialAuth['oauthClient']>
+): BetaManagedAgentsMCPOAuthRefreshParams['token_endpoint_auth'] {
+  const method: McpTokenEndpointAuthMethod = resolvePersistedMcpTokenEndpointAuthMethod(
+    oauthClient.tokenEndpointAuthMethod
+  );
+
+  switch (method) {
+    case 'none':
+      return { type: 'none' };
+    case 'client_secret_basic':
+    case 'client_secret_post':
+      if (!oauthClient.clientSecret) {
+        throw new Error(
+          `MCP OAuth client registered with \`${method}\` is missing a client secret — refusing to downgrade to public-client semantics.`
+        );
+      }
+
+      return { type: method, client_secret: oauthClient.clientSecret };
+    default: {
+      const _exhaustive: never = method;
+
+      throw new Error(`Unknown token_endpoint_auth_method: ${_exhaustive as string}`);
+    }
+  }
+}
+
+export function buildMcpOAuthRefreshParams(auth: VaultCredentialAuth): BetaManagedAgentsMCPOAuthRefreshParams {
   // Caller guarantees both before invoking, but narrow defensively so we
   // never emit a half-built refresh block.
   if (!auth.refreshToken || !auth.oauthClient) {
@@ -324,9 +478,7 @@ export function buildMcpOAuthRefreshParams(auth: VaultCredentialAuth): Record<st
   }
 
   const { oauthClient } = auth;
-  const tokenEndpointAuth = oauthClient.clientSecret
-    ? { type: 'client_secret_post', client_secret: oauthClient.clientSecret }
-    : { type: 'none' };
+  const tokenEndpointAuth = buildAnthropicTokenEndpointAuth(oauthClient);
 
   return {
     client_id: oauthClient.clientId,
@@ -344,23 +496,31 @@ export function buildMcpOAuthRefreshParams(auth: VaultCredentialAuth): Record<st
  * update endpoint only accepts `refresh_token`, `scope`, and a partial
  * `token_endpoint_auth` (basic / post update params). Emitting any of the
  * immutable fields trips a 400 "Extra inputs are not permitted".
+ *
+ * The `token_endpoint_auth` is only emitted when a client secret exists —
+ * the update schema rejects `{ type: 'none' }` on a credential that was
+ * created with one of the secret-bearing methods.
  */
-export function buildMcpOAuthRefreshUpdateParams(auth: VaultCredentialAuth): Record<string, unknown> {
+export function buildMcpOAuthRefreshUpdateParams(
+  auth: VaultCredentialAuth
+): BetaManagedAgentsMCPOAuthRefreshUpdateParams {
   if (!auth.refreshToken || !auth.oauthClient) {
     throw new Error('buildMcpOAuthRefreshUpdateParams requires refreshToken and oauthClient');
   }
 
   const { oauthClient } = auth;
-  const tokenEndpointAuth = oauthClient.clientSecret
-    ? { type: 'client_secret_post', client_secret: oauthClient.clientSecret }
-    : undefined;
+  // The update schema rejects `{ type: 'none' }` on a credential that was
+  // created with one of the secret-bearing methods, so we only emit
+  // `token_endpoint_auth` when we have a secret-bearing block to send.
+  const tokenEndpointAuth = oauthClient.clientSecret ? buildAnthropicTokenEndpointAuth(oauthClient) : undefined;
+  const hasSecretBearingAuth = tokenEndpointAuth && tokenEndpointAuth.type !== 'none';
 
-  const payload: Record<string, unknown> = {
+  const payload: BetaManagedAgentsMCPOAuthRefreshUpdateParams = {
     refresh_token: auth.refreshToken,
     scope: auth.scopes && auth.scopes.length > 0 ? auth.scopes.join(' ') : null,
   };
 
-  if (tokenEndpointAuth) {
+  if (hasSecretBearingAuth) {
     payload.token_endpoint_auth = tokenEndpointAuth;
   }
 

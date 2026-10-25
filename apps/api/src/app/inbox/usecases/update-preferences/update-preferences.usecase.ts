@@ -200,6 +200,7 @@ export class UpdatePreferences {
       ...(command.in_app !== undefined && { in_app: command.in_app }),
       ...(command.push !== undefined && { push: command.push }),
       ...(command.sms !== undefined && { sms: command.sms }),
+      ...(command.tool !== undefined && { tool: command.tool }),
     };
   }
 
@@ -260,15 +261,19 @@ export class UpdatePreferences {
 
     if (command.level === PreferenceLevelEnum.TEMPLATE && command.workflowIdOrIdentifier && workflow) {
       const { preference } = await this.getSubscriberTemplatePreferenceUsecase.execute(
-        GetSubscriberTemplatePreferenceCommand.create({
-          organizationId: command.organizationId,
-          subscriberId: command.subscriberId,
-          environmentId: command.environmentId,
-          template: workflow,
-          subscriber,
-          includeInactiveChannels: command.includeInactiveChannels,
-          contextKeys: command.contextKeys,
-        } as GetSubscriberTemplatePreferenceCommand)
+        GetSubscriberTemplatePreferenceCommand.create(
+          {
+            organizationId: command.organizationId,
+            subscriberId: command.subscriberId,
+            environmentId: command.environmentId,
+            includeInactiveChannels: command.includeInactiveChannels,
+            contextKeys: command.contextKeys,
+          } as GetSubscriberTemplatePreferenceCommand,
+          {
+            template: workflow,
+            subscriber,
+          }
+        )
       );
 
       return {

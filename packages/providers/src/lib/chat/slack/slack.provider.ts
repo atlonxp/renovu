@@ -1,25 +1,54 @@
 import { ChatProviderIdEnum } from '@novu/shared';
 import {
+  CardElement,
   ChannelData,
   ChannelTypeEnum,
   ENDPOINT_TYPES,
   IChatOptions,
   IChatProvider,
+  IChatRenderResult,
   ISendMessageSuccessResponse,
   SlackChannelData,
   SlackUserData,
   WebhookData,
 } from '@novu/stateless';
-import axios from 'axios';
 import { BaseProvider, CasingEnum } from '../../../base.provider';
+import { esmImport } from '../../../utils/esm-import';
+import { createProviderHttpClient } from '../../../utils/http';
+import { safeChatWebhookJsonRequest } from '../../../utils/safe-chat-webhook-request';
 import { WithPassthrough } from '../../../utils/types';
+import { omitIncompleteLinkButtons } from '../card-render.utils';
+import { dedupeSlackActionIds, toSlackFlavoredCard, validateSlackCard } from './card-render.utils';
+
+type SlackBlocksModule = {
+  cardToBlockKit: (card: unknown) => unknown[];
+  cardToFallbackText: (card: unknown) => string;
+};
 
 export class SlackProvider extends BaseProvider implements IChatProvider {
   channelType = ChannelTypeEnum.CHAT as ChannelTypeEnum.CHAT;
   protected casing: CasingEnum = CasingEnum.SNAKE_CASE;
   public id = ChatProviderIdEnum.Slack;
   private slackAPI = 'https://slack.com/api';
-  private axiosInstance = axios.create();
+  private axiosInstance = createProviderHttpClient();
+
+  /**
+   * Rich Chat: serialize a `CardElement` to Slack Block Kit + mrkdwn fallback text.
+   */
+  async render(card: CardElement): Promise<IChatRenderResult> {
+    const { cardToBlockKit, cardToFallbackText } = await esmImport<SlackBlocksModule>('@chat-adapter/slack');
+
+    // Translate the card's provider-agnostic markdown into Slack mrkdwn (links `<url|label>`,
+    // strikethrough `~x~`) before serializing; the adapter only converts `**bold**` on its own.
+    // Incomplete Actions (empty URL) stay in the preview card but must not hit Slack.
+    const slackCard = toSlackFlavoredCard(omitIncompleteLinkButtons(card));
+
+    return {
+      nativePayload: { blocks: dedupeSlackActionIds(cardToBlockKit(slackCard)) },
+      content: cardToFallbackText(slackCard),
+      validation: validateSlackCard(slackCard),
+    };
+  }
 
   async sendMessage(
     data: IChatOptions,
@@ -32,14 +61,19 @@ export class SlackProvider extends BaseProvider implements IChatProvider {
       if (response.data !== 'ok') {
         throw new Error(`Slack Webhook Error`);
       }
-    } else {
-      if (!response.data.ok) {
-        throw new Error(`Slack API Error: ${response.data.error}`);
-      }
+
+      return {
+        id: response.headers['x-slack-req-id'] || `webhook-id-${Date.now()}`,
+        date: new Date().toISOString(),
+      };
+    }
+
+    if (!response.data.ok) {
+      throw new Error(`Slack API Error: ${response.data.error}`);
     }
 
     return {
-      id: response.headers['x-slack-req-id'] || `webhook-id-${Date.now()}`,
+      id: `${response.data.channel}:${response.data.ts}`,
       date: new Date().toISOString(),
     };
   }
@@ -72,7 +106,7 @@ export class SlackProvider extends BaseProvider implements IChatProvider {
       `${this.slackAPI}/chat.postMessage`,
       this.transform(bridgeProviderData, {
         text: data.content,
-        blocks: data.blocks,
+        ...data.nativePayload,
         channel: endpoint.channelId,
         ...(data.customData || {}),
       }).body,
@@ -98,7 +132,7 @@ export class SlackProvider extends BaseProvider implements IChatProvider {
       `${this.slackAPI}/chat.postMessage`,
       this.transform(bridgeProviderData, {
         text: data.content,
-        blocks: data.blocks,
+        ...data.nativePayload,
         channel: endpoint.userId,
         ...(data.customData || {}),
       }).body,
@@ -120,15 +154,18 @@ export class SlackProvider extends BaseProvider implements IChatProvider {
   ) {
     const { endpoint } = channelData;
 
-    const response = await this.axiosInstance.post(
-      endpoint.url,
-      this.transform(bridgeProviderData, {
+    const response = await safeChatWebhookJsonRequest<string>({
+      url: endpoint.url,
+      body: this.transform(bridgeProviderData, {
         text: data.content,
-        blocks: data.blocks,
+        ...data.nativePayload,
         ...(data.customData || {}),
-      }).body
-    );
+      }).body,
+    });
 
-    return response;
+    return {
+      data: response.body,
+      headers: response.headers,
+    };
   }
 }

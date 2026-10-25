@@ -12,12 +12,12 @@ import { useFeatureFlag } from '@/hooks/use-feature-flag';
 import { useFetchActivities } from '@/hooks/use-fetch-activities';
 import { useFetchSubscription } from '@/hooks/use-fetch-subscription';
 import { ActivityFiltersData } from '@/types/activity';
-import { getMaxAvailableActivityFeedDateRange } from '@/utils/activityFilters';
+import { type ActivityDateRangePreset, getMaxAvailableActivityFeedDateRange } from '@/utils/activityFilters';
 import { buildRoute, ROUTES } from '@/utils/routes';
 
-const getInitialFilters = (subscriberId: string, dateRange: string): ActivityFiltersData => ({
+const getInitialFilters = (subscriberId: string, dateRange: ActivityDateRangePreset): ActivityFiltersData => ({
   channels: [],
-  dateRange: dateRange || '24h',
+  dateRange: { kind: 'preset', preset: dateRange },
   subscriberId,
   transactionId: '',
   workflows: [],
@@ -112,14 +112,14 @@ export const SubscriberActivity = ({ subscriberId }: { subscriberId: string }) =
 
   return (
     <AnimatePresence mode="wait">
-      <div className="flex h-full flex-col">
+      <div className="flex h-full min-h-0 flex-col">
         <ActivityFilters
           filters={filters}
           showReset={hasChangesInFilters}
           onFiltersChange={setFilters}
           onReset={handleClearFilters}
           hide={['dateRange', 'subscriberId']}
-          className="py-2 px-2"
+          className="shrink-0 py-2 px-2"
         />
         <SubscriberActivityList
           isLoading={isLoading}
@@ -128,7 +128,7 @@ export const SubscriberActivity = ({ subscriberId }: { subscriberId: string }) =
           onClearFilters={handleClearFilters}
           onActivitySelect={handleActivitySelect}
         />
-        <span className="text-paragraph-2xs text-text-soft border-border-soft mt-auto border-t p-3 text-center">
+        <span className="text-paragraph-2xs text-text-soft border-border-soft mt-auto shrink-0 border-t p-3 text-center">
           To view more detailed activity, View{' '}
           <Link
             className="underline"

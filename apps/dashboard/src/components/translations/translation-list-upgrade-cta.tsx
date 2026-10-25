@@ -1,3 +1,4 @@
+import { FeatureNameEnum } from '@novu/shared';
 import { RiBookMarkedLine, RiSettings4Line, RiSparkling2Line } from 'react-icons/ri';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { LinkButton } from '@/components/primitives/button-link';
@@ -5,6 +6,7 @@ import { IS_SELF_HOSTED, SELF_HOSTED_UPGRADE_REDIRECT_URL } from '@/config';
 import { useTelemetry } from '@/hooks/use-telemetry';
 import { buildRoute, ROUTES } from '@/utils/routes';
 import { TelemetryEvent } from '@/utils/telemetry';
+import { getMinimumTierForFeature, getUpgradeButtonLabel } from '@/utils/upgrade-tier';
 import { openInNewTab } from '@/utils/url';
 import { Button } from '../primitives/button';
 import { EmptyTranslationsIllustration } from './empty-translations-illustration';
@@ -55,6 +57,8 @@ export const TranslationListUpgradeCta = () => {
   }
 
   // For cloud (Novu): show upgrade CTA
+  const requiredTier = getMinimumTierForFeature(FeatureNameEnum.AUTO_TRANSLATIONS);
+
   return (
     <div className="flex h-full w-full flex-col items-center justify-center gap-6">
       <EmptyTranslationsIllustration />
@@ -82,7 +86,7 @@ export const TranslationListUpgradeCta = () => {
           }}
           leadingIcon={RiSparkling2Line}
         >
-          Upgrade now
+          {getUpgradeButtonLabel(requiredTier)}
         </Button>
         <Link to={'https://docs.novu.co/platform/workflow/advanced-features/translations'} target="_blank">
           <LinkButton size="sm" leadingIcon={RiBookMarkedLine}>

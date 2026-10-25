@@ -8,7 +8,7 @@ test('should trigger pusher-beams library correctly', async () => {
   });
 
   const provider = new PusherBeamsPushProvider({
-    instanceId: '<instance-id>',
+    instanceId: 'test-instance-id',
     secretKey: '<secret-key',
   });
 
@@ -43,6 +43,9 @@ test('should trigger pusher-beams library correctly', async () => {
         },
         sound: 'custom_sound',
       },
+      data: {
+        custom_payload_1: 'custom_payload_1',
+      },
     },
     fcm: {
       notification: {
@@ -74,7 +77,7 @@ test('should trigger pusher-beams library correctly with _passthrough', async ()
   });
 
   const provider = new PusherBeamsPushProvider({
-    instanceId: '<instance-id>',
+    instanceId: 'test-instance-id',
     secretKey: '<secret-key',
   });
 
@@ -118,6 +121,9 @@ test('should trigger pusher-beams library correctly with _passthrough', async ()
         },
         sound: 'custom_sound',
       },
+      data: {
+        custom_payload_1: 'custom_payload_1',
+      },
     },
     fcm: {
       notification: {
@@ -141,4 +147,14 @@ test('should trigger pusher-beams library correctly with _passthrough', async ()
   });
 
   expect(result.id).toEqual('pubid-3a7e97ee-a4bc-4d8f-a40b-74915ce808ae');
+});
+
+test('rejects malicious instance IDs at construction', () => {
+  expect(
+    () =>
+      new PusherBeamsPushProvider({
+        instanceId: 'internal.example/path?x=',
+        secretKey: 'secret',
+      })
+  ).toThrow('Pusher Beams instance ID blocked: Invalid instance ID format.');
 });

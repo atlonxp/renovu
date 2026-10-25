@@ -1,18 +1,19 @@
 import { Injectable } from '@nestjs/common';
 import {
   BuildStepIssuesUsecase,
+  computeWorkflowStatus,
   GetWorkflowUseCase,
   GetWorkflowWithPreferencesUseCase,
   Instrument,
   InstrumentUsecase,
   PinoLogger,
+  resolveStepControlSchemas,
   SendWebhookMessage,
-  stepTypeToControlSchema,
   WorkflowResponseDto,
   WorkflowWithPreferencesResponseDto,
 } from '@novu/application-generic';
 import { LocalizationResourceEnum, NotificationTemplateEntity, NotificationTemplateRepository } from '@novu/dal';
-import { UserSessionData, WebhookEventEnum, WebhookObjectTypeEnum, WorkflowStatusEnum } from '@novu/shared';
+import { UserSessionData, WebhookEventEnum, WebhookObjectTypeEnum } from '@novu/shared';
 import {
   AutoTranslate,
   LocalizationResourceEnum as TranslationResourceEnum,
@@ -57,11 +58,15 @@ export class PatchWorkflowUsecase {
       );
     }
 
+    transientWorkflow.status = computeWorkflowStatus(transientWorkflow.active ?? false, transientWorkflow.steps);
+
     await this.persistWorkflow(transientWorkflow, command.user);
 
     const updatedWorkflow = await this.getWorkflowUseCase.execute({
       workflowIdOrInternalId: command.workflowIdOrInternalId,
       user: command.user,
+      // Read-after-write: must reflect the preferences we just persisted.
+      skipPreferencesCache: true,
     });
 
     await this.sendWebhookMessage.execute({
@@ -97,7 +102,12 @@ export class PatchWorkflowUsecase {
     for (const step of workflow.steps) {
       if (!step._templateId || !step.template?.type) continue;
 
-      const controlSchemas = step.template?.controls || stepTypeToControlSchema[step.template.type];
+      const controlSchemas = resolveStepControlSchemas({
+        stepType: step.template.type,
+        workflowOrigin: workflow.origin!,
+        existingControls: step.template?.controls,
+        stepResolverHash: step.template?.stepResolverHash,
+      });
 
       const stepIssues = await this.buildStepIssuesUsecase.execute({
         workflowOrigin: workflow.origin!,
@@ -139,10 +149,6 @@ export class PatchWorkflowUsecase {
 
     if (command.tags !== undefined && command.tags !== null) {
       transientWorkflow.tags = command.tags;
-    }
-
-    if (command.active !== undefined && command.active !== null) {
-      transientWorkflow.status = command.active ? WorkflowStatusEnum.ACTIVE : WorkflowStatusEnum.INACTIVE;
     }
 
     if (command.isTranslationEnabled !== undefined && command.isTranslationEnabled !== null) {

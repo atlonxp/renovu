@@ -16,9 +16,10 @@ import {
   RiSparklingLine,
   RiUserLine,
 } from 'react-icons/ri';
-import { useAiDrawer } from '@/components/ai-drawer';
+import { useHelpPanel } from '@/components/help-panel';
 import { IS_AI_FEATURES_ENABLED } from '@/config';
 import { useTelemetry } from '@/hooks/use-telemetry';
+import { openMintlifyAssistant } from '@/utils/mintlify-assistant';
 import { TelemetryEvent } from '@/utils/telemetry';
 import { cn } from '@/utils/ui';
 import { Button } from '../primitives/button';
@@ -105,14 +106,14 @@ function CommandFooter({ commands }: { commands: CommandType[] }) {
 
 export function CommandPalette() {
   const { isOpen, closeCommandPalette } = useCommandPalette();
-  const { openAiDrawer } = useAiDrawer();
+  const { closeHelpPanel } = useHelpPanel();
   const track = useTelemetry();
   const [search, setSearch] = useState('');
   const commandGroups = useCommandRegistry(search);
 
   // Create a flat list of all commands for easy lookup
   const allCommands = commandGroups.flatMap((group) => group.commands);
-  const hasInkeep = IS_AI_FEATURES_ENABLED && !!import.meta.env.VITE_INKEEP_API_KEY;
+  const showDocsAssistant = IS_AI_FEATURES_ENABLED;
 
   // Reset search when dialog closes
   useEffect(() => {
@@ -121,16 +122,17 @@ export function CommandPalette() {
     }
   }, [isOpen]);
 
-  const openAiDrawerWithQuery = useCallback(() => {
+  const openAskAiWithQuery = useCallback(() => {
     track(TelemetryEvent.COMMAND_PALETTE_COMMAND_SELECTED, {
       commandId: 'help-ai-search',
       commandLabel: `Ask AI "${search}"`,
       commandCategory: 'help',
     });
 
-    openAiDrawer(search);
     closeCommandPalette();
-  }, [search, openAiDrawer, closeCommandPalette, track]);
+    closeHelpPanel();
+    void openMintlifyAssistant({ source: 'command-palette', query: search });
+  }, [search, closeCommandPalette, closeHelpPanel, track]);
 
   const executeCommand = useCallback(
     async (command: CommandType) => {
@@ -207,11 +209,11 @@ export function CommandPalette() {
           </CommandMenu.Group>
         ))}
 
-        {hasInkeep && search.trim() && (
+        {showDocsAssistant && search.trim() && (
           <CommandMenu.Group heading="AI Assistant" className="px-2.5">
             <CommandMenu.Item
               value={`Ask AI ${search} ai assistant help question`}
-              onSelect={openAiDrawerWithQuery}
+              onSelect={openAskAiWithQuery}
               className="px-1.5 rounded-8"
             >
               <div className="flex items-center gap-1.5 flex-1">

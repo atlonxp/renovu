@@ -11,6 +11,7 @@ import { Switch, SwitchState } from '../../primitives/Switch';
 import { IconRendererWrapper } from '../../shared/IconRendererWrapper';
 import { ChannelRow } from './ChannelRow';
 import { PreferencesRow } from './PreferencesRow';
+import { isRenderablePreferenceChannel } from './renderable-preference-channels';
 
 export const GroupedPreferencesRow = (props: {
   group: { name: string; preferences: Preference[] };
@@ -25,6 +26,10 @@ export const GroupedPreferencesRow = (props: {
     return props.group.preferences.reduce(
       (acc, preference) => {
         Object.keys(preference.channels).forEach((el) => {
+          if (!isRenderablePreferenceChannel(el)) {
+            return;
+          }
+
           const channel = el as keyof ChannelPreference;
           const currentState = acc[channel];
           const preferenceState = preference.channels[channel] ? 'enabled' : 'disabled';
@@ -169,7 +174,7 @@ export const GroupedPreferencesRow = (props: {
               class={style({
                 key: 'preferencesGroupActionsContainerRight__icon',
                 className:
-                  'nt-text-foreground-alpha-600 nt-transition-all nt-duration-200 data-[open=true]:nt-transform data-[open=true]:nt-rotate-180',
+                  'nt-text-foreground-alpha-600 nt-transition-transform nt-duration-base data-[open=true]:nt-rotate-180',
                 context: { preferenceGroup: props.group } satisfies Parameters<
                   InboxAppearanceCallback['preferencesGroupActionsContainerRight__icon']
                 >[0],

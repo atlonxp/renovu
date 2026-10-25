@@ -203,9 +203,17 @@ subscriberSchema.index({
   _id: 1,
 });
 
+/*
+ * Supports the per-organization cap on agent-auto-provisioned subscribers
+ * (`AgentSubscriberResolver.resolveOrProvision` counts rows whose
+ * `data.__novu_source === 'agent-platform-provision'`). Sparse so subscribers
+ * without a provenance marker — i.e. everything created through the normal
+ * customer API or the dashboard — don't bloat the index. Flat key shape
+ * because `SubscriberCustomData` is a `Record<string, scalar>`.
+ */
 subscriberSchema.index(
-  { _environmentId: 1, subscriberId: 1 },
-  { name: 'unique_subscriber_per_environment', unique: true, partialFilterExpression: { deleted: false } }
+  { _organizationId: 1, 'data.__novu_source': 1 },
+  { name: 'subscriber_provenance_count', sparse: true }
 );
 
 subscriberSchema.plugin(mongooseDelete, {

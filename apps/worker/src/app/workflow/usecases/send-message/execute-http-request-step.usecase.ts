@@ -1,16 +1,20 @@
 import { Injectable } from '@nestjs/common';
 import {
   assertSafeOutboundUrl,
+  buildInvalidJsonBodyDetail,
   buildNovuSignatureHeader,
+  buildWorkflowVariables,
   CreateExecutionDetails,
   CreateExecutionDetailsCommand,
+  CreateStepConditionEvaluationDetail,
+  createSchemaValidationAjv,
   DetailEnum,
   dashboardSanitizeControlValues,
   evaluateRules,
+  extractRuleVariables,
   GetDecryptedSecretKey,
   GetDecryptedSecretKeyCommand,
   HttpClientService,
-  ICompileContext,
   InstrumentUsecase,
   PinoLogger,
   resolveHttpRequestBody,
@@ -18,20 +22,27 @@ import {
   shouldIncludeBody,
   toHeadersRecord,
 } from '@novu/application-generic';
-import { ControlValuesRepository, JobRepository, MessageRepository, NotificationTemplateRepository } from '@novu/dal';
-import { createLiquidEngine } from '@novu/framework/internal';
+import {
+  ControlValuesRepository,
+  JobRepository,
+  MessageRepository,
+  NotificationTemplateEntity,
+  NotificationTemplateRepository,
+} from '@novu/dal';
+import { compileJsonControlValues, createLiquidEngine, repairJsonString } from '@novu/framework/internal';
 import {
   ControlValuesLevelEnum,
   DeliveryLifecycleDetail,
   DeliveryLifecycleStatusEnum,
+  EnvironmentSystemVariables,
   ExecutionDetailsSourceEnum,
   ExecutionDetailsStatusEnum,
+  isOutboundSsrfProtectionEnabled,
   ResourceOriginEnum,
 } from '@novu/shared';
-import Ajv from 'ajv';
-import addFormats from 'ajv-formats';
 import { AdditionalOperation, RulesLogic } from 'json-logic-js';
 
+import { ExecuteBridgeJob } from '../execute-bridge-job';
 import { SendMessageChannelCommand } from './send-message-channel.command';
 import { SendMessageResult, SendMessageStatus, SendMessageType } from './send-message-type.usecase';
 
@@ -48,6 +59,8 @@ export class ExecuteHttpRequestStep extends SendMessageType {
     private notificationTemplateRepository: NotificationTemplateRepository,
     private logger: PinoLogger,
     private getDecryptedSecretKey: GetDecryptedSecretKey,
+    private executeBridgeJob: ExecuteBridgeJob,
+    private createStepConditionEvaluationDetail: CreateStepConditionEvaluationDetail,
     protected messageRepository: MessageRepository,
     protected createExecutionDetails: CreateExecutionDetails
   ) {
@@ -56,23 +69,37 @@ export class ExecuteHttpRequestStep extends SendMessageType {
   }
 
   @InstrumentUsecase()
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: pre-existing sequential guard pipeline; each stage reports its own execution detail before returning
   public async execute(command: SendMessageChannelCommand): Promise<SendMessageResult> {
-    const controlValues = await this.fetchControlValues(command);
-    const compileContext = this.buildCompileContect(command.compileContext);
-    const shouldSkip = this.evaluateSkipCondition(controlValues, compileContext);
+    const workflow = await this.resolveWorkflow(command);
+    const controlValues = await this.fetchControlValues(command, workflow);
+    const compileContext = await this.buildCompileContext(command, workflow);
+    const skipRules = getSkipRules(controlValues);
+    const shouldSkip = skipRules ? this.evaluateSkipCondition(skipRules, compileContext) : false;
+
+    const wasConditionEvaluationTraced = skipRules
+      ? await this.createStepConditionEvaluationDetail.execute({
+          job: command.job,
+          conditions: skipRules,
+          evaluatedValues: extractRuleVariables(skipRules, compileContext),
+          passed: !shouldSkip,
+        })
+      : false;
 
     if (shouldSkip) {
-      await this.createExecutionDetails.execute(
-        CreateExecutionDetailsCommand.create({
-          ...CreateExecutionDetailsCommand.getDetailsFromJob(command.job),
-          detail: DetailEnum.SKIPPED_BRIDGE_EXECUTION,
-          source: ExecutionDetailsSourceEnum.INTERNAL,
-          status: ExecutionDetailsStatusEnum.FAILED,
-          isTest: false,
-          isRetry: false,
-          raw: JSON.stringify({ skip: true }),
-        })
-      );
+      if (!wasConditionEvaluationTraced) {
+        await this.createExecutionDetails.execute(
+          CreateExecutionDetailsCommand.create({
+            ...CreateExecutionDetailsCommand.getDetailsFromJob(command.job),
+            detail: DetailEnum.SKIPPED_BRIDGE_EXECUTION,
+            source: ExecutionDetailsSourceEnum.INTERNAL,
+            status: ExecutionDetailsStatusEnum.FAILED,
+            isTest: false,
+            isRetry: false,
+            raw: JSON.stringify({ skip: true }),
+          })
+        );
+      }
 
       return {
         status: SendMessageStatus.SKIPPED,
@@ -122,7 +149,7 @@ export class ExecuteHttpRequestStep extends SendMessageType {
     const url = compiled.url as string | undefined;
     const method = (compiled.method as string) ?? 'POST';
     const rawHeaders = (compiled.headers as Array<{ key: string; value: string }> | undefined) ?? [];
-    const rawBody = compiled.body as string | Array<{ key: string; value: string }> | undefined;
+    const compiledBody = compiled.body as string | Array<{ key: string; value: string }> | undefined;
     const timeout = (compiled.timeout as number | undefined) ?? 5000;
 
     if (!url) {
@@ -175,10 +202,12 @@ export class ExecuteHttpRequestStep extends SendMessageType {
 
     let bodyObject: Record<string, unknown> | unknown[] | undefined;
     try {
+      // `repairJsonString` throws on bodies it cannot repair, so it has to stay inside this
+      // try/catch to surface the failure as an execution detail instead of an unhandled job error.
+      const rawBody =
+        typeof compiledBody === 'string' && compiledBody.trim() ? repairJsonString(compiledBody) : compiledBody;
       bodyObject = resolveHttpRequestBody(rawBody);
     } catch (parseError) {
-      const errorMessage = parseError instanceof Error ? parseError.message : 'Failed to parse raw JSON body';
-
       await this.createExecutionDetails.execute(
         CreateExecutionDetailsCommand.create({
           ...CreateExecutionDetailsCommand.getDetailsFromJob(command.job),
@@ -187,7 +216,9 @@ export class ExecuteHttpRequestStep extends SendMessageType {
           status: ExecutionDetailsStatusEnum.FAILED,
           isTest: false,
           isRetry: false,
-          raw: JSON.stringify({ error: `Invalid raw JSON body: ${errorMessage}` }),
+          raw: JSON.stringify(
+            buildInvalidJsonBodyDetail(parseError, compiledBody, collectSecretEnvValues(command.compileContext?.env))
+          ),
         })
       );
 
@@ -216,7 +247,7 @@ export class ExecuteHttpRequestStep extends SendMessageType {
         headers: mergedHeaders,
         timeout,
         responseType: 'text',
-        enforceSsrfProtection: true,
+        enforceSsrfProtection: isOutboundSsrfProtectionEnabled(),
         ...(hasBody ? { body: bodyObject } : {}),
       });
 
@@ -317,9 +348,7 @@ export class ExecuteHttpRequestStep extends SendMessageType {
     schema: Record<string, unknown>
   ): { isValid: true; errors?: undefined } | { isValid: false; errors: { path: string; message: string }[] } {
     try {
-      const ajv = new Ajv({ strict: false });
-      addFormats(ajv);
-      const validate = ajv.compile(schema);
+      const validate = createSchemaValidationAjv({ schema }).compile(schema);
       const valid = validate(responseBody);
 
       if (valid) {
@@ -345,16 +374,16 @@ export class ExecuteHttpRequestStep extends SendMessageType {
     values: Record<string, unknown>,
     context: Record<string, unknown>
   ): Promise<unknown> {
-    const compiled = await this.liquidEngine.parseAndRender(JSON.stringify(values), context);
-
-    try {
-      return JSON.parse(compiled);
-    } catch {
-      throw new Error('Rendered template output is not valid JSON');
-    }
+    return compileJsonControlValues(values, context, this.liquidEngine);
   }
 
-  private buildCompileContect(compileContext: ICompileContext): Record<string, unknown> {
+  private async buildCompileContext(
+    command: SendMessageChannelCommand,
+    workflow: NotificationTemplateEntity | null | undefined
+  ): Promise<Record<string, unknown>> {
+    const { compileContext } = command;
+    const steps = await this.executeBridgeJob.buildStepsMap(command.job, command.environmentId);
+
     return {
       subscriber: compileContext.subscriber ?? {},
       payload: compileContext.payload ?? {},
@@ -362,21 +391,17 @@ export class ExecuteHttpRequestStep extends SendMessageType {
       tenant: compileContext.tenant ?? {},
       context: compileContext.context ?? {},
       step: compileContext.step,
+      steps,
       webhook: compileContext.webhook ?? {},
       env: compileContext.env ?? {},
+      workflow: workflow ? buildWorkflowVariables(workflow) : {},
     };
   }
 
   private evaluateSkipCondition(
-    controlValues: Record<string, unknown>,
+    skipRules: RulesLogic<AdditionalOperation>,
     compileContext: Record<string, unknown>
   ): boolean {
-    const skipRules = controlValues.skip as RulesLogic<AdditionalOperation> | undefined;
-
-    if (!skipRules || (typeof skipRules === 'object' && Object.keys(skipRules).length === 0)) {
-      return false;
-    }
-
     const { result, error } = evaluateRules(skipRules, compileContext);
 
     if (error) {
@@ -386,13 +411,24 @@ export class ExecuteHttpRequestStep extends SendMessageType {
     return !result;
   }
 
-  private async fetchControlValues(command: SendMessageChannelCommand): Promise<Record<string, unknown>> {
-    const workflow =
-      command.workflow ??
-      (command._templateId
-        ? await this.notificationTemplateRepository.findById(command._templateId, command.environmentId)
-        : null);
+  private async resolveWorkflow(
+    command: SendMessageChannelCommand
+  ): Promise<NotificationTemplateEntity | null | undefined> {
+    if (command.workflow) {
+      return command.workflow;
+    }
 
+    if (!command._templateId) {
+      return null;
+    }
+
+    return this.notificationTemplateRepository.findById(command._templateId, command.environmentId);
+  }
+
+  private async fetchControlValues(
+    command: SendMessageChannelCommand,
+    workflow: NotificationTemplateEntity | null | undefined
+  ): Promise<Record<string, unknown>> {
     if (!workflow) {
       return {};
     }
@@ -418,9 +454,42 @@ export class ExecuteHttpRequestStep extends SendMessageType {
   }
 }
 
-function tryParseJson(text: string): unknown {
+/**
+ * Compile-safe: adding a field to EnvironmentSystemVariables will cause a TS error here.
+ */
+const SYSTEM_ENV_KEYS: Record<keyof EnvironmentSystemVariables, true> = { name: true, type: true };
+
+/**
+ * `env` merges decrypted environment variables, which can hold API keys and tokens, with the
+ * environment's system variables. Only the user-defined values are treated as secrets: the system
+ * values are not sensitive, and masking strings as common as `prod` would gut the excerpt.
+ */
+function collectSecretEnvValues(env: unknown): string[] {
+  if (!env || typeof env !== 'object') {
+    return [];
+  }
+
+  return Object.entries(env as Record<string, unknown>)
+    .filter(([key, value]) => !(key in SYSTEM_ENV_KEYS) && typeof value === 'string' && value.length > 0)
+    .map(([, value]) => value as string);
+}
+
+function getSkipRules(controlValues: Record<string, unknown>): RulesLogic<AdditionalOperation> | undefined {
+  const skipRules = controlValues.skip as RulesLogic<AdditionalOperation> | undefined;
+
+  if (!skipRules || (typeof skipRules === 'object' && Object.keys(skipRules).length === 0)) {
+    return undefined;
+  }
+
+  return skipRules;
+}
+
+/** A parsed JSON document, or the raw text when the response body is not JSON. */
+type HttpResponseBody = string | number | boolean | null | HttpResponseBody[] | { [key: string]: HttpResponseBody };
+
+function tryParseJson(text: string): HttpResponseBody {
   try {
-    return JSON.parse(text);
+    return JSON.parse(text) as HttpResponseBody;
   } catch {
     return text;
   }

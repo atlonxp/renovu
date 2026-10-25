@@ -1,16 +1,17 @@
-import type { StepCreateDto } from "@novu/shared";
-import { PopoverPortal } from "@radix-ui/react-popover";
-import type React from "react";
-import { type ReactNode, useState } from "react";
-import { RiAddLine, RiSparkling2Fill } from "react-icons/ri";
-import { STEP_TYPE_TO_COLOR } from "@/utils/color";
-import { StepTypeEnum } from "@/utils/enums";
-import { cn } from "@/utils/ui";
-import { STEP_TYPE_TO_ICON } from "../icons/utils";
-import { Badge } from "../primitives/badge";
-import { Popover, PopoverContent, PopoverTrigger } from "../primitives/popover";
-import { AiGenerateStepDialog } from "./ai-generate-step-dialog";
-import { Node } from "./base-node";
+import { ChannelTypeEnum, FeatureFlagsKeysEnum, type StepCreateDto } from '@novu/shared';
+import { PopoverPortal } from '@radix-ui/react-popover';
+import React, { ReactNode, useState } from 'react';
+import { RiAddLine, RiSparkling2Fill } from 'react-icons/ri';
+import { useFeatureFlag } from '@/hooks/use-feature-flag';
+import { isChannelVisibleInUi } from '@/utils/channels';
+import { STEP_TYPE_TO_COLOR } from '@/utils/color';
+import { StepTypeEnum } from '@/utils/enums';
+import { cn } from '@/utils/ui';
+import { STEP_TYPE_TO_ICON } from '../icons/utils';
+import { Badge } from '../primitives/badge';
+import { Popover, PopoverContent, PopoverTrigger } from '../primitives/popover';
+import { AiGenerateStepDialog } from './ai-generate-step-dialog';
+import { Node } from './base-node';
 
 export type AddStepMenuSelection = {
 	type: StepTypeEnum;
@@ -95,143 +96,125 @@ export const AddStepMenu = ({
 	/** When set, exposes the "Generate with AI" option which opens a dialog for the brief + step type. */
 	onAiGenerate?: (step: StepCreateDto) => void;
 }) => {
-	const [isPopoverOpen, setIsPopoverOpen] = useState(false);
-	const [isAiDialogOpen, setIsAiDialogOpen] = useState(false);
+  const [isPopoverOpen, setIsPopoverOpen] = useState(false);
+  const [isAiDialogOpen, setIsAiDialogOpen] = useState(false);
+  const isToolChannelEnabled = useFeatureFlag(FeatureFlagsKeysEnum.IS_TOOL_CHANNEL_ENABLED);
 
 	const handleMenuItemClick = (stepType: StepTypeEnum) => {
 		onMenuItemClick({ type: stepType });
 		setIsPopoverOpen(false);
 	};
 
-	const openAiDialog = () => {
-		setIsPopoverOpen(false);
-		setIsAiDialogOpen(true);
-	};
+  const openAiDialog = () => {
+    setIsPopoverOpen(false);
+    setIsAiDialogOpen(true);
+  };
 
-	return (
-		<Popover
-			open={isPopoverOpen && !disabled}
-			onOpenChange={(newIsOpen) => {
-				setIsPopoverOpen(newIsOpen);
-			}}
-		>
-			<PopoverTrigger asChild disabled={disabled}>
-				<span data-testid="add-step-menu-button">
-					<Node
-						variant="sm"
-						className={cn(
-							"opacity-0 transition duration-300 ease-out hover:opacity-100",
-							{
-								"opacity-100": isPopoverOpen || visible,
-							},
-							className,
-						)}
-					>
-						<RiAddLine className="h-4 w-4" />
-					</Node>
-				</span>
-			</PopoverTrigger>
-			<PopoverPortal>
-				<PopoverContent
-					side="right"
-					className="flex w-[200px] flex-col rounded-lg p-0"
-				>
-					<div>
-						{onAiGenerate && (
-							<MenuGroup>
-								<MenuTitle>AI</MenuTitle>
-								<MenuItemsGroup>
-									<button
-										type="button"
-										onClick={openAiDialog}
-										className="shadow-xs text-foreground-700 hover:bg-accent flex cursor-pointer items-center gap-2 rounded-lg p-1.5 text-left"
-										data-testid="add-step-menu-item-ai"
-									>
-										<span className="bg-primary-alpha-10 text-primary-base flex h-6 w-6 items-center justify-center rounded-md">
-											<RiSparkling2Fill className="h-3.5 w-3.5" />
-										</span>
-										<span className="text-xs">Generate with AI</span>
-									</button>
-								</MenuItemsGroup>
-							</MenuGroup>
-						)}
-						<MenuGroup>
-							<MenuTitle>Channels</MenuTitle>
-							<MenuItemsGroup>
-								<MenuItem
-									stepType={StepTypeEnum.EMAIL}
-									onClick={() => handleMenuItemClick(StepTypeEnum.EMAIL)}
-								>
-									Email
-								</MenuItem>
-								<MenuItem
-									stepType={StepTypeEnum.IN_APP}
-									disabled={false}
-									onClick={() => handleMenuItemClick(StepTypeEnum.IN_APP)}
-								>
-									In-App
-								</MenuItem>
-								<MenuItem
-									stepType={StepTypeEnum.PUSH}
-									onClick={() => handleMenuItemClick(StepTypeEnum.PUSH)}
-								>
-									Push
-								</MenuItem>
-								<MenuItem
-									stepType={StepTypeEnum.CHAT}
-									onClick={() => handleMenuItemClick(StepTypeEnum.CHAT)}
-								>
-									Chat
-								</MenuItem>
-								<MenuItem
-									stepType={StepTypeEnum.SMS}
-									onClick={() => handleMenuItemClick(StepTypeEnum.SMS)}
-								>
-									SMS
-								</MenuItem>
-							</MenuItemsGroup>
-						</MenuGroup>
-						<MenuGroup>
-							<MenuTitle>Actions</MenuTitle>
-							<MenuItemsGroup>
-								<MenuItem
-									stepType={StepTypeEnum.DELAY}
-									onClick={() => handleMenuItemClick(StepTypeEnum.DELAY)}
-								>
-									Delay
-								</MenuItem>
-								<MenuItem
-									stepType={StepTypeEnum.DIGEST}
-									onClick={() => handleMenuItemClick(StepTypeEnum.DIGEST)}
-								>
-									Digest
-								</MenuItem>
-								<MenuItem
-									stepType={StepTypeEnum.THROTTLE}
-									onClick={() => handleMenuItemClick(StepTypeEnum.THROTTLE)}
-								>
-									Throttle
-								</MenuItem>
-								<MenuItem
-									stepType={StepTypeEnum.HTTP_REQUEST}
-									onClick={() => handleMenuItemClick(StepTypeEnum.HTTP_REQUEST)}
-								>
-									HTTP Request
-								</MenuItem>
-							</MenuItemsGroup>
-						</MenuGroup>
-					</div>
-				</PopoverContent>
-			</PopoverPortal>
-			{onAiGenerate && (
-				<AiGenerateStepDialog
-					open={isAiDialogOpen}
-					onOpenChange={setIsAiDialogOpen}
-					onGenerated={(step) => {
-						onAiGenerate(step);
-					}}
-				/>
-			)}
-		</Popover>
-	);
+  return (
+    <Popover
+      open={isPopoverOpen && !disabled}
+      onOpenChange={(newIsOpen) => {
+        setIsPopoverOpen(newIsOpen);
+      }}
+    >
+      <PopoverTrigger asChild disabled={disabled}>
+        <span data-testid="add-step-menu-button">
+          <Node
+            variant="sm"
+            className={cn(
+              'opacity-0 transition duration-300 ease-out hover:opacity-100',
+              {
+                'opacity-100': isPopoverOpen || visible,
+              },
+              className
+            )}
+          >
+            <RiAddLine className="h-4 w-4" />
+          </Node>
+        </span>
+      </PopoverTrigger>
+      <PopoverPortal>
+        <PopoverContent side="right" className="flex w-[200px] flex-col rounded-lg p-0">
+          <div>
+            {onAiGenerate && (
+              <MenuGroup>
+                <MenuTitle>AI</MenuTitle>
+                <MenuItemsGroup>
+                  <button
+                    type="button"
+                    onClick={openAiDialog}
+                    className="shadow-xs text-foreground-700 hover:bg-accent flex cursor-pointer items-center gap-2 rounded-lg p-1.5 text-left"
+                    data-testid="add-step-menu-item-ai"
+                  >
+                    <span className="bg-primary-alpha-10 text-primary-base flex h-6 w-6 items-center justify-center rounded-md">
+                      <RiSparkling2Fill className="h-3.5 w-3.5" />
+                    </span>
+                    <span className="text-xs">Generate with AI</span>
+                  </button>
+                </MenuItemsGroup>
+              </MenuGroup>
+            )}
+            <MenuGroup>
+              <MenuTitle>Channels</MenuTitle>
+              <MenuItemsGroup>
+                <MenuItem stepType={StepTypeEnum.EMAIL} onClick={() => handleMenuItemClick(StepTypeEnum.EMAIL)}>
+                  Email
+                </MenuItem>
+                <MenuItem
+                  stepType={StepTypeEnum.IN_APP}
+                  disabled={false}
+                  onClick={() => handleMenuItemClick(StepTypeEnum.IN_APP)}
+                >
+                  In-App
+                </MenuItem>
+                <MenuItem stepType={StepTypeEnum.PUSH} onClick={() => handleMenuItemClick(StepTypeEnum.PUSH)}>
+                  Push
+                </MenuItem>
+                <MenuItem stepType={StepTypeEnum.CHAT} onClick={() => handleMenuItemClick(StepTypeEnum.CHAT)}>
+                  Chat
+                </MenuItem>
+                <MenuItem stepType={StepTypeEnum.SMS} onClick={() => handleMenuItemClick(StepTypeEnum.SMS)}>
+                  SMS
+                </MenuItem>
+                {isChannelVisibleInUi(ChannelTypeEnum.TOOL, isToolChannelEnabled) && (
+                  <MenuItem stepType={StepTypeEnum.TOOL} onClick={() => handleMenuItemClick(StepTypeEnum.TOOL)}>
+                    Tool
+                  </MenuItem>
+                )}
+              </MenuItemsGroup>
+            </MenuGroup>
+            <MenuGroup>
+              <MenuTitle>Actions</MenuTitle>
+              <MenuItemsGroup>
+                <MenuItem stepType={StepTypeEnum.DELAY} onClick={() => handleMenuItemClick(StepTypeEnum.DELAY)}>
+                  Delay
+                </MenuItem>
+                <MenuItem stepType={StepTypeEnum.DIGEST} onClick={() => handleMenuItemClick(StepTypeEnum.DIGEST)}>
+                  Digest
+                </MenuItem>
+                <MenuItem stepType={StepTypeEnum.THROTTLE} onClick={() => handleMenuItemClick(StepTypeEnum.THROTTLE)}>
+                  Throttle
+                </MenuItem>
+                <MenuItem
+                  stepType={StepTypeEnum.HTTP_REQUEST}
+                  onClick={() => handleMenuItemClick(StepTypeEnum.HTTP_REQUEST)}
+                >
+                  HTTP Request
+                </MenuItem>
+              </MenuItemsGroup>
+            </MenuGroup>
+          </div>
+        </PopoverContent>
+      </PopoverPortal>
+      {onAiGenerate && (
+        <AiGenerateStepDialog
+          open={isAiDialogOpen}
+          onOpenChange={setIsAiDialogOpen}
+          onGenerated={(step) => {
+            onAiGenerate(step);
+          }}
+        />
+      )}
+    </Popover>
+  );
 };

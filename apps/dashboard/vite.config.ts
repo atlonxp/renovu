@@ -68,7 +68,7 @@ export default defineConfig(({ mode }) => {
         silent: true,
         targets: [
           {
-            src: path.resolve(__dirname, './legacy') + '/[!.]*',
+            src: path.resolve(import.meta.dirname, './legacy') + '/[!.]*',
             dest: './legacy',
           },
         ],
@@ -93,35 +93,33 @@ export default defineConfig(({ mode }) => {
         : []),
     ],
     resolve: {
+      // @vitejs/plugin-react <5 injected this; workspace packages like @novu/react link React 18 as a devDependency.
+      dedupe: ['react', 'react-dom'],
       alias: {
         ...(isCommunitySelHosted
           ? {
-              '@/context/region': path.resolve(__dirname, './src/context/region/index.self-hosted.ts'),
-              '@clerk/react': path.resolve(__dirname, './src/utils/self-hosted/index.tsx'),
-              '@/components/side-navigation/organization-dropdown-clerk': path.resolve(
-                __dirname,
-                './src/utils/self-hosted/organization-switcher.tsx'
-              ),
+              '@/context/region': path.resolve(import.meta.dirname, './src/context/region/index.self-hosted.ts'),
+              '@clerk/react': path.resolve(import.meta.dirname, './src/utils/self-hosted/index.tsx'),
             }
           : eeAuthProvider === 'better-auth'
             ? {
-                '@clerk/react': path.resolve(__dirname, './src/utils/better-auth/index.tsx'),
-                '@/context/region': path.resolve(__dirname, './src/context/region/index.self-hosted.ts'),
+                '@clerk/react': path.resolve(import.meta.dirname, './src/utils/better-auth/index.tsx'),
+                '@/context/region': path.resolve(import.meta.dirname, './src/context/region/index.self-hosted.ts'),
                 '@/components/side-navigation/organization-dropdown-clerk': path.resolve(
-                  __dirname,
+                  import.meta.dirname,
                   './src/utils/better-auth/components/organization-dropdown.tsx'
                 ),
                 '@/components/auth/create-organization': path.resolve(
-                  __dirname,
+                  import.meta.dirname,
                   './src/utils/better-auth/components/organization-create.tsx'
                 ),
               }
             : {}),
-        '@': path.resolve(__dirname, './src'),
+        '@': path.resolve(import.meta.dirname, './src'),
         // Explicitly map prettier imports to browser-compatible versions
-        'prettier/standalone': path.resolve(__dirname, './node_modules/prettier/standalone.js'),
-        'prettier/plugins/html': path.resolve(__dirname, './node_modules/prettier/plugins/html.js'),
-        prettier: path.resolve(__dirname, './node_modules/prettier/standalone.js'),
+        'prettier/standalone': path.resolve(import.meta.dirname, './node_modules/prettier/standalone.js'),
+        'prettier/plugins/html': path.resolve(import.meta.dirname, './node_modules/prettier/plugins/html.js'),
+        prettier: path.resolve(import.meta.dirname, './node_modules/prettier/standalone.js'),
       },
     },
     server: {
@@ -137,11 +135,10 @@ export default defineConfig(({ mode }) => {
       include: ['@novu/api'],
     },
     build: {
+      // Vite 6 default ('modules'); Vite 8 defaults to Safari 16.4 / Chrome 111.
+      target: ['es2020', 'edge88', 'firefox78', 'chrome87', 'safari14'],
       sourcemap: true,
       chunkSizeWarningLimit: 12000,
-      commonjsOptions: {
-        include: [/@novu\/api/, /node_modules/],
-      },
     },
   };
 });

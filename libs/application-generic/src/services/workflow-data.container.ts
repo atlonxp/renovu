@@ -16,6 +16,7 @@ import { WorkflowResponseDto } from '../dtos/workflow/workflow-response.dto';
 import { BuildStepDataUsecase } from '../usecases/build-step-data';
 import { emptyJsonSchema } from '../utils/jsonToSchema';
 import { toResponseWorkflowDto } from '../utils/notification-template-mapper';
+import { STEP_OVERRIDE_CONTROL_LEVELS, type StepOverrides, stitchStepOverridesFromDocs } from '../utils/step-overrides';
 
 export interface IWorkflowPreferences {
   workflowResourcePreference?: PreferencesEntity;
@@ -26,6 +27,7 @@ export interface IWorkflowWithControlValues {
   workflow: NotificationTemplateEntity;
   identifier: string;
   controlValuesByStep: Map<string, ControlValuesEntity>;
+  overridesByStep: Map<string, StepOverrides>;
   preferences?: IWorkflowPreferences;
   workflowDto?: WorkflowResponseDto;
   steps?: Map<string, StepResponseDto>;
@@ -65,16 +67,17 @@ export class WorkflowDataContainer {
 
     const lookupMaps = this.buildLookupMaps(workflows);
 
-    const [controlValues, preferences] = await this.fetchRelatedData(
+    const [controlValues, overrideControlValues, preferences] = await this.fetchRelatedData(
       Array.from(lookupMaps.workflowLookup.values()).map((data) => data.objectId),
       environmentIds,
       organizationId
     );
 
     const controlValuesByWorkflowAndStep = this.organizeControlValues(controlValues, lookupMaps.objectIdToKey);
+    const overridesByWorkflowAndStep = this.organizeStepOverrides(overrideControlValues, lookupMaps.objectIdToKey);
     const preferencesByWorkflow = this.organizePreferences(preferences, lookupMaps.objectIdToKey);
 
-    this.processWorkflows(workflows, controlValuesByWorkflowAndStep, preferencesByWorkflow);
+    this.processWorkflows(workflows, controlValuesByWorkflowAndStep, overridesByWorkflowAndStep, preferencesByWorkflow);
     this.isDataLoaded = true;
   }
 
@@ -104,13 +107,19 @@ export class WorkflowDataContainer {
     workflowObjectIds: string[],
     environmentIds: string[],
     organizationId: string
-  ): Promise<[ControlValuesEntity[], PreferencesEntity[]]> {
+  ): Promise<[ControlValuesEntity[], ControlValuesEntity[], PreferencesEntity[]]> {
     return Promise.all([
       this.controlValuesRepository.find({
         _environmentId: { $in: environmentIds },
         _organizationId: organizationId,
         _workflowId: { $in: workflowObjectIds },
         level: ControlValuesLevelEnum.STEP_CONTROLS,
+      }),
+      this.controlValuesRepository.find({
+        _environmentId: { $in: environmentIds },
+        _organizationId: organizationId,
+        _workflowId: { $in: workflowObjectIds },
+        level: { $in: STEP_OVERRIDE_CONTROL_LEVELS },
       }),
       this.preferencesRepository.find({
         _environmentId: { $in: environmentIds },
@@ -134,6 +143,36 @@ export class WorkflowDataContainer {
     }
 
     return byWorkflowAndStep;
+  }
+
+  private organizeStepOverrides(controlValues: ControlValuesEntity[], objectIdToKey: Map<string, string>) {
+    const byWorkflowAndStep = new Map<string, Map<string, ControlValuesEntity[]>>();
+
+    for (const cv of controlValues) {
+      if (!cv._workflowId || !cv._stepId) continue;
+
+      const lookupKey = objectIdToKey.get(`${cv._workflowId}:${cv._environmentId}`);
+      if (!lookupKey) continue;
+
+      const stepMap = this.ensureMapEntry(byWorkflowAndStep, lookupKey, new Map());
+      const existing = stepMap.get(cv._stepId) ?? [];
+      existing.push(cv);
+      stepMap.set(cv._stepId, existing);
+    }
+
+    const stitchedByWorkflowAndStep = new Map<string, Map<string, StepOverrides>>();
+    for (const [workflowKey, stepMap] of byWorkflowAndStep) {
+      const stitchedStepMap = new Map<string, StepOverrides>();
+      for (const [stepId, docs] of stepMap) {
+        const stitched = stitchStepOverridesFromDocs(docs);
+        if (stitched.providerOverrides || stitched.integrationOverrides) {
+          stitchedStepMap.set(stepId, stitched);
+        }
+      }
+      stitchedByWorkflowAndStep.set(workflowKey, stitchedStepMap);
+    }
+
+    return stitchedByWorkflowAndStep;
   }
 
   private organizePreferences(
@@ -163,6 +202,7 @@ export class WorkflowDataContainer {
   private processWorkflows(
     workflows: NotificationTemplateEntity[],
     controlValuesByWorkflowAndStep: Map<string, Map<string, ControlValuesEntity>>,
+    overridesByWorkflowAndStep: Map<string, Map<string, StepOverrides>>,
     preferencesByWorkflow: Map<string, IWorkflowPreferences>
   ) {
     for (const workflow of workflows) {
@@ -171,13 +211,15 @@ export class WorkflowDataContainer {
 
       const key = this.makeKey(workflow._environmentId, identifier);
       const controlValuesByStep = controlValuesByWorkflowAndStep.get(key) || new Map();
+      const overridesByStep = overridesByWorkflowAndStep.get(key) || new Map();
       const preferences = preferencesByWorkflow.get(key);
 
       const workflowWithPreferences = this.buildWorkflowWithPreferences(workflow, preferences);
-      const stepDtos = this.buildStepDtos(workflow, workflowWithPreferences, controlValuesByStep);
+      const stepDtos = this.buildStepDtos(workflow, workflowWithPreferences, controlValuesByStep, overridesByStep);
 
       this.storeWorkflowData(key, workflow, identifier, {
         controlValuesByStep,
+        overridesByStep,
         preferences,
         workflowDto: toResponseWorkflowDto(workflowWithPreferences, stepDtos),
         steps: new Map(stepDtos.map((step) => [step._id, step])),
@@ -207,12 +249,19 @@ export class WorkflowDataContainer {
       userPreferences: WorkflowPreferences | null;
       defaultPreferences: WorkflowPreferences;
     },
-    controlValuesByStep: Map<string, ControlValuesEntity>
+    controlValuesByStep: Map<string, ControlValuesEntity>,
+    overridesByStep: Map<string, StepOverrides>
   ): StepResponseDto[] {
     return workflowWithPreferences.steps.map((step) => {
       const controlValues = controlValuesByStep.get(step._templateId);
 
-      return BuildStepDataUsecase.mapToStepResponse(workflow, step, controlValues?.controls || {}, emptyJsonSchema());
+      return BuildStepDataUsecase.mapToStepResponse(
+        workflow,
+        step,
+        controlValues?.controls || {},
+        emptyJsonSchema(),
+        overridesByStep.get(step._templateId)
+      );
     });
   }
 

@@ -16,6 +16,7 @@ import {
   PreviewErrorHandler,
   PreviewPayloadProcessorService,
   PreviewUsecase,
+  ResolveAgentInboundAddresses,
   ResourceValidatorService,
   TierRestrictionsValidateUsecase,
   UpdateWorkflowV0,
@@ -24,6 +25,7 @@ import {
   UpsertWorkflowUseCase,
 } from '@novu/application-generic';
 import { CommunityOrganizationRepository } from '@novu/dal';
+import { AgentsModule } from '../agents/agents.module';
 import { AuthModule } from '../auth/auth.module';
 import { BridgeModule } from '../bridge';
 import { ChangeModule } from '../change/change.module';
@@ -41,6 +43,7 @@ import {
   ListWorkflowsUseCase,
   SyncToEnvironmentUseCase,
   TestHttpEndpointUsecase,
+  UpsertWorkflow,
 } from './usecases';
 
 import { DuplicateWorkflowUseCase } from './usecases/duplicate-workflow/duplicate-workflow.usecase';
@@ -57,6 +60,7 @@ const MODULES = [
   BridgeModule,
   IntegrationModule,
   LayoutsV2Module,
+  AgentsModule,
   OutboundWebhooksModule.forRoot(),
   StepResolversModule,
 ];
@@ -69,6 +73,8 @@ const MODULES = [
     CreateWorkflowV0,
     UpdateWorkflowV0,
     UpsertWorkflowUseCase,
+    UpsertWorkflow,
+    ResolveAgentInboundAddresses,
     ListWorkflowsUseCase,
     DeleteWorkflowUseCase,
     UpsertPreferences,
@@ -97,8 +103,16 @@ const MODULES = [
     TestHttpEndpointUsecase,
     GenerateWorkflowUsecase,
   ],
-  exports: [UpsertWorkflowUseCase, SyncToEnvironmentUseCase, GetWorkflowUseCase, DeleteWorkflowUseCase],
+  exports: [
+    UpsertWorkflowUseCase,
+    SyncToEnvironmentUseCase,
+    GetWorkflowUseCase,
+    DeleteWorkflowUseCase,
+    ResolveAgentInboundAddresses,
+  ],
 })
 export class WorkflowModule implements NestModule {
-  configure(consumer: MiddlewareConsumer): MiddlewareConsumer | void {}
+  configure(_consumer: MiddlewareConsumer): undefined {
+    return undefined;
+  }
 }

@@ -2,6 +2,7 @@ import { NodeViewProps, NodeViewRendererProps } from '@tiptap/core';
 import { NodeViewContent, NodeViewWrapper } from '@tiptap/react';
 import { useEffect, useMemo, useRef } from 'react';
 import { RiCodeBlock } from 'react-icons/ri';
+import { sanitizeEmailHtml } from '@/utils/sanitize-email-html';
 import { cn } from '@/utils/ui';
 
 type HtmlCodeBlockAttributes = {
@@ -38,9 +39,11 @@ const EMAIL_RESET_MARGIN_STYLES = `
   </style>
 `;
 
-function CodeView() {
+function CodeView(props: { isHidden: boolean }) {
+  const { isHidden } = props;
+
   return (
-    <div className="-mx-2 rounded-md border p-[2px]">
+    <div className={cn('-mx-2 rounded-md border p-[2px]', isHidden && 'hidden')}>
       <pre className="text-black font-code my-0 rounded-md border border-dashed border-gray-300 bg-white p-2 text-xs leading-[18px]">
         <NodeViewContent as="code" className={'is-editable language-html'} />
       </pre>
@@ -48,7 +51,7 @@ function CodeView() {
   );
 }
 
-function PreviewView(props: { node: NodeViewRendererProps['node']; onClick: () => void }) {
+function PreviewView(props: { node: NodeViewRendererProps['node']; onClick?: () => void }) {
   const { node, onClick } = props;
 
   const parseNodeContent = (content: NodeContent[]): string => {
@@ -84,11 +87,11 @@ function PreviewView(props: { node: NodeViewRendererProps['node']; onClick: () =
       .join('');
 
     // combine styles with body content
-    return styles + htmlDoc.body.innerHTML;
+    return sanitizeEmailHtml(styles + htmlDoc.body.innerHTML);
   }, [node.content]);
 
   return (
-    <div className="group relative cursor-pointer" onClick={onClick}>
+    <div className={cn('group relative', onClick && 'cursor-pointer')} onClick={onClick}>
       <div
         className={cn(
           '-mx-2 min-h-[42px] rounded-md border px-2',
@@ -113,13 +116,15 @@ function PreviewView(props: { node: NodeViewRendererProps['node']; onClick: () =
 }
 
 export function HTMLCodeBlockView(props: NodeViewProps) {
-  const { node, updateAttributes } = props;
+  const { editor, node, updateAttributes } = props;
   const { activeTab: rawActiveTab } = node.attrs as HtmlCodeBlockAttributes;
   const activeTab = rawActiveTab || 'code';
 
   const nodeRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (!editor.isEditable) return;
+
     /*
      * When clicking outside the code block (except for the bubble menu),
      * switch to preview mode.
@@ -137,23 +142,31 @@ export function HTMLCodeBlockView(props: NodeViewProps) {
 
       if (!isClickingOutside) return;
 
-      // manually select text to force hiding the bubble menu
-      props.editor?.commands.setTextSelection(0);
+      editor.commands.blur();
       updateAttributes({ activeTab: 'preview' });
     };
 
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [activeTab, updateAttributes, props.editor]);
+  }, [activeTab, editor, updateAttributes]);
 
   const handlePreviewClick = () => {
     updateAttributes({ activeTab: 'code' });
-    props.editor?.commands.setTextSelection(props.getPos() + 1);
+    editor.commands.setTextSelection(props.getPos() + 1);
   };
+
+  // `activeTab` persists as 'code' and a locked editor exposes no way to switch tabs, so it
+  // always shows the preview rather than stranding the reader on the raw source.
+  const isCodeTab = activeTab === 'code' && editor.isEditable;
 
   return (
     <NodeViewWrapper draggable={false} data-drag-handle={false} data-type="htmlCodeBlock" ref={nodeRef}>
-      {activeTab === 'code' ? <CodeView /> : <PreviewView node={node} onClick={handlePreviewClick} />}
+      {/*
+       * NodeViewContent must stay mounted when switching to preview. Unmounting it removes
+       * ProseMirror's contentDOM and clears the block before autosave runs.
+       */}
+      <CodeView isHidden={!isCodeTab} />
+      {!isCodeTab && <PreviewView node={node} onClick={editor.isEditable ? handlePreviewClick : undefined} />}
     </NodeViewWrapper>
   );
 }

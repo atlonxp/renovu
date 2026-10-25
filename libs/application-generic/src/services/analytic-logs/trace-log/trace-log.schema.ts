@@ -79,7 +79,7 @@ export const TTL: keyof typeof schemaDefinition = 'expires_at';
 const clickhouseSchemaOptions = {
   table_name: TABLE_NAME,
   engine: 'MergeTree',
-  order_by: `(${ORDER_BY.join(', ')})` as any,
+  order_by: `(${ORDER_BY.join(', ')})` as keyof typeof schemaDefinition,
   additional_options: ['PARTITION BY toYYYYMM(created_at)', `TTL toDateTime(${TTL})`],
 };
 
@@ -152,6 +152,7 @@ export type EventType =
   | 'webhook_filter_retrying'
   | 'webhook_filter_failed'
   | 'integration_selected'
+  | 'integration_conditions_matched'
   | 'layout_not_found'
   | 'layout_selected'
   | 'tenant_selected'
@@ -161,6 +162,11 @@ export type EventType =
   | 'chat_phone_missing'
   | 'push_tokens_missing'
   | 'chat_some_channels_skipped'
+  | 'chat_agent_integration_not_linked'
+  | 'chat_agent_unsupported_endpoint'
+  | 'chat_agent_no_eligible_channels'
+  | 'chat_agent_channels_fallback'
+  | 'chat_agent_platform_thread_persist_failed'
   | 'msteams_bot_not_installed'
   | 'msteams_channel_not_found'
   | 'msteams_user_not_found'
@@ -183,6 +189,7 @@ export type EventType =
   | 'step_canceled'
   | 'request_received'
   | 'request_queued'
+  | 'request_delivered'
   | 'request_failed'
   | 'request_organization_not_found'
   | 'request_environment_not_found'
@@ -204,6 +211,7 @@ export type EventType =
   | 'workflow_context_resolution_completed'
   | 'workflow_execution_failed'
   | 'step_skipped'
+  | 'step_conditions_passed'
   | 'step_skipped_outside_of_the_schedule'
   | 'step_extended_to_schedule'
   | 'step_skipped_max_extensions_reached'

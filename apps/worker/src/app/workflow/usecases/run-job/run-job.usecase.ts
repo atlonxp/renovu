@@ -6,14 +6,20 @@ import {
   FeatureFlagsService,
   GetSubscriberSchedule,
   GetSubscriberScheduleCommand,
+  getEffectiveJobPayload,
   getJobDigest,
   InMemoryLRUCacheService,
   InMemoryLRUCacheStore,
   Instrument,
   InstrumentUsecase,
+  isRetryableWebhookFilterError,
+  NotificationPayloadService,
   PinoLogger,
   StepRunRepository,
+  StepTemplateHydrationService,
+  StepTemplateHydrationStatus,
   StorageHelperService,
+  type WorkflowForTrace,
   WorkflowRunService,
   WorkflowRunStatusEnum,
 } from '@novu/application-generic';
@@ -24,6 +30,7 @@ import {
   NotificationRepository,
   NotificationTemplateEntity,
   NotificationTemplateRepository,
+  RUNNING_CLAIM_RENEW_INTERVAL_MS,
   SubscriberRepository,
 } from '@novu/dal';
 import {
@@ -36,7 +43,7 @@ import {
 import { setUser } from '@sentry/node';
 import { differenceInMilliseconds } from 'date-fns';
 import { formatInTimeZone } from 'date-fns-tz';
-import { EXCEPTION_MESSAGE_ON_WEBHOOK_FILTER, PlatformException, shouldHaltOnStepFailure } from '../../../shared/utils';
+import { PlatformException, shouldHaltOnStepFailure } from '../../../shared/utils';
 import { AddJob } from '../add-job';
 import { PartialNotificationEntity } from '../add-job/add-job.command';
 import { ExecuteBridgeJob, ExecuteBridgeJobCommand } from '../execute-bridge-job';
@@ -66,6 +73,7 @@ export class RunJob {
     private storageHelperService: StorageHelperService,
     private notificationRepository: NotificationRepository,
     private notificationTemplateRepository: NotificationTemplateRepository,
+    private stepTemplateHydrationService: StepTemplateHydrationService,
     private processUnsnoozeJob: ProcessUnsnoozeJob,
     private stepRunRepository: StepRunRepository,
     private workflowRunService: WorkflowRunService,
@@ -75,7 +83,8 @@ export class RunJob {
     private subscriberRepository: SubscriberRepository,
     private featureFlagsService: FeatureFlagsService,
     private executeBridgeJob: ExecuteBridgeJob,
-    private inMemoryLRUCacheService: InMemoryLRUCacheService
+    private inMemoryLRUCacheService: InMemoryLRUCacheService,
+    private notificationPayloadService: NotificationPayloadService
   ) {
     this.logger.setContext(this.constructor.name);
   }
@@ -92,10 +101,6 @@ export class RunJob {
     if (!job) {
       throw new PlatformException(`Job with id ${command.jobId} not found`);
     }
-
-    await this.stepRunRepository.create(job, {
-      status: JobStatusEnum.RUNNING,
-    });
 
     this.assignLogger(job);
 
@@ -118,6 +123,23 @@ export class RunJob {
       this.assignLogger(job);
     }
 
+    const claimed = await this.jobRepository.claimAsRunning(job._environmentId, job._id);
+    if (!claimed) {
+      this.logger.info(
+        { nv: { jobId: job._id, currentStatus: job.status } },
+        'Skipping job: could not atomically claim (freshly running, completed, or canceled by another worker)'
+      );
+
+      await this.resumeChainIfStrandedAfterCompletion(job);
+
+      return;
+    }
+    job = claimed;
+
+    await this.stepRunRepository.create(job, {
+      status: JobStatusEnum.RUNNING,
+    });
+
     nr.addCustomAttributes({
       transactionId: job.transactionId,
       environmentId: job._environmentId,
@@ -131,43 +153,53 @@ export class RunJob {
     let error: Error | undefined;
     let notification: PartialNotificationEntity | null = null;
 
+    /*
+     * Heartbeat: keep the RUNNING claim's lease fresh while this worker is
+     * alive, so a slow-but-healthy execution that outlives the SQS visibility
+     * timeout / BullMQ lock cannot be reclaimed by a redelivered message and
+     * run twice. A stale lease then always means the claiming worker died.
+     *
+     * Created immediately before the try block — nothing throwable may sit
+     * between here and the `finally` that clears it, or a failure would leak
+     * the interval and renew the claim forever.
+     */
+    const claimHeartbeat = setInterval(() => {
+      this.jobRepository.renewRunningClaim(claimed._environmentId, claimed._id).catch((renewError: unknown) => {
+        this.logger.warn({ err: renewError, nv: { jobId: claimed._id } }, 'Failed to renew running claim lease');
+      });
+    }, RUNNING_CLAIM_RENEW_INTERVAL_MS);
+    claimHeartbeat.unref();
+
     try {
-      notification = await this.notificationRepository.findOne(
-        {
-          _id: job._notificationId,
-          _environmentId: job._environmentId,
-        },
-        {
-          _id: 1,
-          _templateId: 1,
-          _organizationId: 1,
-          _environmentId: 1,
-          _subscriberId: 1,
-          transactionId: 1,
-          channels: 1,
-          to: 1,
-          payload: 1,
-          controls: 1,
-          topics: 1,
-          _digestedNotificationId: 1,
-          createdAt: 1,
-          severity: 1,
-          critical: 1,
-          contextKeys: 1,
-          tags: 1,
-        }
-      );
+      notification = await this.findNotification(job);
 
       if (!notification) {
         throw new PlatformException(`Notification with id ${job._notificationId} not found`);
       }
 
-      const workflow = await this.getWorkflow(
-        job._templateId,
-        job._environmentId,
-        job._organizationId,
-        job.payload?.__source
+      const { isPayloadDedupEnabled, digestEvents } = await this.notificationPayloadService.prepareJobExecutionPayload(
+        job,
+        notification
       );
+
+      // Purely stateless jobs have no persisted workflow id. Synced workflows
+      // triggered with an override `bridgeUrl` still have `_templateId`, but
+      // step content comes from the bridge (`job.step.bridgeUrl`) — hydration
+      // skips those stubs; every downstream consumer tolerates either shape.
+      const workflow = job._templateId
+        ? await this.getWorkflow(job._templateId, job._environmentId, job._organizationId, job.payload?.__source)
+        : undefined;
+
+      nr.addCustomAttributes({
+        workflow: workflow?.name ?? job.identifier,
+      });
+
+      // Restore a lean step's full template up front (in memory only — never
+      // written back) so every downstream consumer sees it (the
+      // extend-to-schedule bridge call below and SendMessage). No-op for
+      // full-snapshot / stateless jobs; the UNRESOLVED outcome is enforced
+      // later, only for render-bound jobs.
+      const stepTemplateHydration = await this.stepTemplateHydrationService.hydrateJobStep(job, workflow);
 
       const schedule = await this.getSubscriberSchedule.execute(
         GetSubscriberScheduleCommand.create({
@@ -251,8 +283,6 @@ export class RunJob {
         return;
       }
 
-      await this.jobRepository.updateStatus(job._environmentId, job._id, JobStatusEnum.RUNNING);
-
       await this.storageHelperService.getAttachments(job.payload?.attachments);
 
       if (this.isUnsnoozeJob(job)) {
@@ -265,6 +295,12 @@ export class RunJob {
         );
 
         return;
+      }
+
+      // A render-bound job whose lean template could not be resolved anywhere
+      // cannot produce a message — fail it before dispatch.
+      if (stepTemplateHydration === StepTemplateHydrationStatus.UNRESOLVED) {
+        await this.failUnresolvedStepTemplate(job);
       }
 
       const sendMessageResult = await this.sendMessage.execute(
@@ -283,7 +319,8 @@ export class RunJob {
           // backward compatibility - ternary needed to be removed once the queue renewed
           _subscriberId: job._subscriberId ? job._subscriberId : job.subscriberId,
           jobId: job._id,
-          events: job.digest?.events,
+          events: digestEvents,
+          isPayloadDedupEnabled,
           job,
           tags: notification.tags || [],
           severity: notification.severity,
@@ -396,8 +433,13 @@ export class RunJob {
       if (shouldHaltOnStepFailure(job) || this.shouldBackoff(error)) {
         shouldQueueNextJob = false;
       }
+
+      if (this.shouldBackoff(error)) {
+        await this.jobRepository.releaseRunningClaim(job._environmentId, job._id);
+      }
       throw caughtError;
     } finally {
+      clearInterval(claimHeartbeat);
       if (shouldQueueNextJob && !isJobExtendedToSubscriberSchedule) {
         await this.tryQueueNextJobs(job, notification, !!error);
       } else if (!isJobExtendedToSubscriberSchedule && !error) {
@@ -412,11 +454,81 @@ export class RunJob {
           _subscriberId: job._subscriberId,
           notification,
           currentJob: { type: job.type, _id: job._id },
+          workflow: this.buildStatelessWorkflowForRuns(job),
         });
         // Remove the attachments if the job should not be queued
-        await this.storageHelperService.deleteAttachments(job.payload?.attachments);
+        await this.deleteChainAttachments(job, notification);
       }
     }
+  }
+
+  @Instrument()
+  private async findNotification(job: JobEntity): Promise<PartialNotificationEntity | null> {
+    return this.notificationRepository.findOne(
+      {
+        _id: job._notificationId,
+        _environmentId: job._environmentId,
+      },
+      {
+        _id: 1,
+        _templateId: 1,
+        _organizationId: 1,
+        _environmentId: 1,
+        _subscriberId: 1,
+        transactionId: 1,
+        channels: 1,
+        to: 1,
+        payload: 1,
+        controls: 1,
+        topics: 1,
+        _digestedNotificationId: 1,
+        createdAt: 1,
+        severity: 1,
+        critical: 1,
+        contextKeys: 1,
+        tags: 1,
+      }
+    );
+  }
+
+  /**
+   * If a completed job still has a stranded child, resume the chain. Two crash
+   * windows leave a child stranded:
+   * - PENDING child: the worker died after COMPLETED but before claiming the child.
+   * - stale QUEUED child: the worker died after claimNextChildAsQueued but before
+   *   AddJob enqueued it, so the child has no queue message. Staleness (lease TTL)
+   *   distinguishes this from a child whose AddJob is still in flight; releasing it
+   *   back to PENDING funnels both windows through the same recovery path.
+   * No-op when there is no stranded child.
+   */
+  @Instrument()
+  private async resumeChainIfStrandedAfterCompletion(job: JobEntity): Promise<void> {
+    const currentJob = await this.jobRepository.findOne({ _id: job._id, _environmentId: job._environmentId }, 'status');
+    if (currentJob?.status !== JobStatusEnum.COMPLETED) {
+      return;
+    }
+
+    const strandedChild =
+      (await this.jobRepository.findOne(
+        {
+          _environmentId: job._environmentId,
+          _parentId: job._id,
+          status: JobStatusEnum.PENDING,
+        },
+        '_id'
+      )) ?? (await this.jobRepository.releaseStaleQueuedChildToPending(job._environmentId, job._id));
+    if (!strandedChild) {
+      return;
+    }
+
+    this.logger.info(
+      { nv: { jobId: job._id, strandedChildJobId: strandedChild._id } },
+      'Redelivered completed job still has a stranded child: resuming the workflow chain'
+    );
+
+    const notification = await this.findNotification(job);
+
+    await this.tryQueueNextJobs(job, notification);
   }
 
   @Instrument()
@@ -446,6 +558,34 @@ export class RunJob {
     }
 
     return workflow;
+  }
+
+  /**
+   * A lean channel step whose message template is gone everywhere (live
+   * workflow, direct lookup, and soft-deleted) cannot render — record the
+   * failure and abort, consistent with the job's other lifecycle details.
+   */
+  private async failUnresolvedStepTemplate(job: JobEntity): Promise<never> {
+    await this.createExecutionDetails.execute(
+      CreateExecutionDetailsCommand.create({
+        ...CreateExecutionDetailsCommand.getDetailsFromJob(job),
+        detail: DetailEnum.MESSAGE_CONTENT_NOT_GENERATED,
+        source: ExecutionDetailsSourceEnum.INTERNAL,
+        status: ExecutionDetailsStatusEnum.FAILED,
+        isTest: false,
+        isRetry: false,
+        raw: JSON.stringify({
+          error: 'Message template for the step could not be resolved for rendering',
+          messageTemplateId: job.step._templateId,
+          stepId: job.step.stepId,
+          type: job.step.template?.type,
+        }),
+      })
+    );
+
+    throw new PlatformException(
+      `Message template ${job.step._templateId} for job ${job._id} could not be resolved while hydrating the step`
+    );
   }
 
   private isUnsnoozeJob(job: JobEntity) {
@@ -480,10 +620,7 @@ export class RunJob {
           return;
         }
 
-        nextJob = await this.jobRepository.findOne({
-          _environmentId: currentJob._environmentId,
-          _parentId: currentJob._id,
-        });
+        nextJob = await this.jobRepository.claimNextChildAsQueued(currentJob._environmentId, currentJob._id);
 
         if (!nextJob) {
           if (!hasCurrentJobError) {
@@ -497,6 +634,15 @@ export class RunJob {
               notification,
               currentJob: { type: currentJob.type, _id: currentJob._id },
             });
+
+            /*
+             * The chain is finished, so no later step needs the stored
+             * attachments anymore. Cleaned up from the executed job rather than
+             * the chain cursor, which may be a skipped tail step whose payload
+             * was never hydrated. Skipped when the current job errored, so its
+             * retries still find the files.
+             */
+            await this.deleteChainAttachments(job, notification);
           }
 
           return;
@@ -618,6 +764,11 @@ export class RunJob {
               'Failed to cancel pending jobs after next job failure'
             );
           }
+
+          // The remaining steps were just cancelled, so this chain is over and
+          // nothing will read the attachments again. The retryable case below
+          // deliberately keeps them for the retry.
+          await this.deleteChainAttachments(job, notification);
         }
 
         if (shouldHaltOnStepFailure(nextJob) || this.shouldBackoff(error as Error)) {
@@ -625,11 +776,31 @@ export class RunJob {
         }
 
         currentJob = nextJob;
-      } finally {
-        if (nextJob) {
-          await this.storageHelperService.deleteAttachments(nextJob.payload?.attachments);
-        }
       }
+    }
+  }
+
+  /**
+   * Deletes the trigger attachments of a finished workflow chain. Under
+   * payload-dedup the payload lives on the parent notification when the job
+   * carries none.
+   *
+   * Best-effort by design: the job and the workflow run are already marked
+   * completed by the time this runs, so a storage failure must not escape and
+   * push the chain down a failure path that would rewrite that state.
+   */
+  private async deleteChainAttachments(job: JobEntity, notification?: PartialNotificationEntity | null): Promise<void> {
+    // Left as a local: writing it back would put a payload on a job that
+    // payload-dedup deliberately persists without one.
+    const payload: JobEntity['payload'] = getEffectiveJobPayload(job, notification);
+
+    try {
+      await this.storageHelperService.deleteAttachments(payload?.attachments);
+    } catch (error: unknown) {
+      this.logger.warn(
+        { err: error, nv: { jobId: job._id, transactionId: job.transactionId } },
+        'Failed to delete the attachments of a finished workflow chain'
+      );
     }
   }
 
@@ -712,14 +883,21 @@ export class RunJob {
     };
 
     if (digestKey && digestValue) {
-      jobQuery[`payload.${digestKey}`] = digestValue;
+      // Payload-dedup jobs persist `digest.digestValue`; legacy digest jobs
+      // (created before it was persisted) still carry the value in the trigger
+      // payload, so fall back to matching it there. Without this, a canceled
+      // legacy delayed digest wouldn't find its follower and the chain stalls.
+      (jobQuery as Record<string, unknown>).$or = [
+        { 'digest.digestValue': digestValue },
+        { [`payload.${digestKey}`]: digestValue },
+      ];
     }
 
     return await this.jobRepository.findOne(jobQuery);
   }
 
   public shouldBackoff(error: Error): boolean {
-    return error?.message?.includes(EXCEPTION_MESSAGE_ON_WEBHOOK_FILTER);
+    return isRetryableWebhookFilterError(error);
   }
 
   /**
@@ -813,7 +991,9 @@ export class RunJob {
       defaultValue: false,
     });
 
-    if (isTransitionEnabled) {
+    // Stateless (bridge-URL) jobs have no persisted workflow to analyze —
+    // skip the last-step/action-step optimizations and update unconditionally.
+    if (isTransitionEnabled && job._templateId) {
       const workflowWithSteps: SelectedWorkflowFields | null =
         workflow ??
         (await this.notificationTemplateRepository.findOne(
@@ -858,7 +1038,24 @@ export class RunJob {
       _subscriberId: job._subscriberId,
       notification,
       currentJob: { type: job.type, _id: job._id },
+      workflow: workflow ?? this.buildStatelessWorkflowForRuns(job),
     });
+  }
+
+  /**
+   * Stateless (bridge-URL) jobs have no notification template in Mongo, which
+   * the workflow-run analytics need for name/trigger metadata. Derive them
+   * from the job so local-mode runs still resolve in the activity feed.
+   */
+  private buildStatelessWorkflowForRuns(job: JobEntity): WorkflowForTrace | undefined {
+    if (job._templateId) {
+      return undefined;
+    }
+
+    return {
+      name: job.identifier,
+      triggers: [{ identifier: job.identifier }],
+    };
   }
 
   private shouldSkipScheduleCheck(job: JobEntity, critical: boolean | undefined): boolean {

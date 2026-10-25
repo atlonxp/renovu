@@ -1,105 +1,24 @@
-import { FeatureFlagsKeysEnum } from '@novu/shared';
-import {
-  Bot,
-  CalendarDays,
-  ChevronDown,
-  ChevronRight,
-  Mail,
-  MessageCircle,
-  MessagesSquare,
-  MoreHorizontal,
-  Settings,
-  Smartphone,
-} from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
-import { RiArrowLeftSLine, RiCheckLine } from 'react-icons/ri';
-import { Navigate, useNavigate, useSearchParams } from 'react-router-dom';
-import { BOOK_DEMO_URL } from '@/components/header-navigation/support-drawer-constants';
+import { ProductUseCasesEnum } from '@novu/shared';
+import { Bot, ChevronDown, Mail, MessageCircle, MoreHorizontal, Settings, Smartphone } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
+import { useEffect, useState } from 'react';
+import { RiCheckLine } from 'react-icons/ri';
+import { Navigate, useNavigate } from 'react-router-dom';
 import { LogoCircle } from '@/components/icons/logo-circle';
 import { Notification5Fill } from '@/components/icons/notification-5-fill';
-import { AgentUsecasePreviewIllustration } from '@/components/onboarding/agent-usecase-preview-illustration';
+import { AgentOnboardingPreview } from '@/components/onboarding/agent-onboarding-preview';
+import { OnboardingContinueFooter } from '@/components/onboarding/onboarding-continue-footer';
 import { OnboardingShell } from '@/components/onboarding/onboarding-shell';
+import { OnboardingStepHeader } from '@/components/onboarding/step-header';
 import { PageMeta } from '@/components/page-meta';
-import { useFeatureFlag } from '@/hooks/use-feature-flag';
+import { useAreConversationalAgentsAvailable } from '@/hooks/use-are-conversational-agents-available';
+import { useOnboardingProvisioningActive, useOnboardingProvisioningDismiss } from '@/hooks/use-onboarding-provisioning';
 import { useTelemetry } from '@/hooks/use-telemetry';
-import { getOnboardingAppId, withAppId } from '@/utils/onboarding-redirect';
+import { useUpdateProductUseCases } from '@/hooks/use-update-product-use-cases';
+import { trackAgentsUsecaseSelected } from '@/utils/agents-org-funnel';
+import { beginOnboardingProvisioning } from '@/utils/connect/onboarding-session';
 import { ROUTES } from '@/utils/routes';
 import { TelemetryEvent } from '@/utils/telemetry';
-
-function SubscriberAvatar() {
-  return (
-    <svg className="size-4 shrink-0" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path
-        d="M0 8C0 3.58172 3.58172 0 8 0C12.4183 0 16 3.58172 16 8C16 12.4183 12.4183 16 8 16C3.58172 16 0 12.4183 0 8Z"
-        fill="#E1E4EA"
-      />
-      <g clipPath="url(#sub-avatar-clip)">
-        <ellipse cx="8" cy="15.6" rx="6.4" ry="4.8" fill="white" fillOpacity="0.72" />
-        <circle opacity="0.9" cx="8" cy="6.4" r="3.2" fill="white" />
-      </g>
-      <defs>
-        <clipPath id="sub-avatar-clip">
-          <rect width="16" height="16" rx="8" fill="white" />
-        </clipPath>
-      </defs>
-    </svg>
-  );
-}
-
-function Pill({ icon, children, rotate = 0 }: { icon?: React.ReactNode; children: React.ReactNode; rotate?: number }) {
-  return (
-    <span
-      className="inline-flex items-center gap-1 rounded border border-[#e8ebef] bg-[#f8f9fa] px-1 py-0.5 align-middle text-xs font-medium text-[#3a3f47]"
-      style={rotate ? { transform: `rotate(${rotate}deg)` } : undefined}
-    >
-      {icon}
-      {children}
-    </span>
-  );
-}
-
-function FeatureList() {
-  return (
-    <div className="flex flex-col gap-1 px-4 text-xs font-medium text-[#525866]">
-      <div className="flex min-h-6 items-center gap-1.5">
-        <RiCheckLine className="size-3 shrink-0 text-[#b0b8c4]" />
-        <span className="flex flex-wrap items-center gap-1">
-          Cross-channel conversations across
-          <Pill icon={<img src="/images/providers/light/square/slack.svg" alt="" className="size-4" />} rotate={-1}>
-            Slack
-          </Pill>
-          <Pill
-            icon={<img src="/images/providers/light/square/whatsapp-business.svg" alt="" className="size-4" />}
-            rotate={1}
-          >
-            Whatsapp
-          </Pill>
-          and a lot more.
-        </span>
-      </div>
-      <div className="flex min-h-6 items-center gap-1.5">
-        <RiCheckLine className="size-3 shrink-0 text-[#b0b8c4]" />
-        <span className="flex flex-wrap items-center gap-1">
-          Access conversation history
-          <Pill icon={<MessagesSquare className="size-3.5 text-[#99a1af]" />} rotate={-1}>
-            5
-          </Pill>
-          and state via unified agent() handler.
-        </span>
-      </div>
-      <div className="flex min-h-6 items-center gap-1.5">
-        <RiCheckLine className="size-3 shrink-0 text-[#b0b8c4]" />
-        <span className="flex flex-wrap items-center gap-1">
-          Provider identities resolved →
-          <Pill icon={<SubscriberAvatar />} rotate={1}>
-            Subscriber
-          </Pill>
-          mapping.
-        </span>
-      </div>
-    </div>
-  );
-}
 
 function InboxPreview() {
   return (
@@ -233,6 +152,21 @@ function InboxFeatureList() {
       <div className="flex min-h-6 items-center gap-1.5">
         <RiCheckLine className="size-3 shrink-0 text-[#b0b8c4]" />
         <span className="flex flex-wrap items-center gap-1">
+          Setup agents for conversations across
+          <span className="inline-flex items-center gap-0.5 rounded border border-[#f2f5f8] bg-[#fbfbfb] px-1 py-0.5 align-middle text-xs font-medium text-[#0e121b]">
+            <img src="/images/providers/light/square/slack.svg" alt="" className="size-4" />
+            <span>Slack</span>
+          </span>
+          <span className="inline-flex items-center gap-0.5 rounded border border-[#f2f5f8] bg-[#fbfbfb] px-1 py-0.5 align-middle text-xs font-medium text-[#0e121b]">
+            <img src="/images/providers/light/square/whatsapp-business.svg" alt="" className="size-4" />
+            <span>Whatsapp</span>
+          </span>
+          and a lot more
+        </span>
+      </div>
+      <div className="flex min-h-6 items-center gap-1.5">
+        <RiCheckLine className="size-3 shrink-0 text-[#b0b8c4]" />
+        <span className="flex flex-wrap items-center gap-1">
           Embed the powerful
           <span className="inline-flex items-center gap-0.5 rounded border border-[#f2f5f8] bg-[#fbfbfb] px-1 py-0.5 align-middle text-xs font-medium text-[#0e121b]">
             <LogoCircle className="size-4 p-0.5" />
@@ -247,33 +181,69 @@ function InboxFeatureList() {
 
 const USECASE_OPTIONS = [
   {
-    id: 'agents' as const,
-    icon: Bot,
-    title: "I'm building an AI agent",
-    description:
-      'Connect your agent to Novu and Novu gives it voice. Distribute your agent across multiple channels with a unified API.',
+    id: 'inbox' as const,
+    title: 'Implement notifications for your product',
+    description: 'Notification infrastructure. Embed <Inbox /> and send transactional notifications with workflows.',
   },
   {
-    id: 'inbox' as const,
-    icon: Notification5Fill,
-    title: "I'm adding notifications to my app",
-    description:
-      'Plug in <Inbox />, connect providers, and orchestrate workflows. Go from event → trigger → delivery with full control.',
+    id: 'agents' as const,
+    title: 'Connect your agent',
+    description: 'Agent communication infrastructure. Connect your agents to Slack, Teams, WhatsApp and more.',
   },
 ] as const;
 
 type UsecaseId = 'agents' | 'inbox';
 
+function UsecaseTag({ id }: { id: UsecaseId }) {
+  if (id === 'agents') {
+    return (
+      <span
+        className="inline-flex w-fit items-center gap-0.5 self-start rounded border py-0.5 pl-[3px] pr-[5px] font-mono text-xs font-medium uppercase tracking-tight text-[#7d52f4]"
+        style={{ backgroundColor: 'rgba(125,82,244,0.1)', borderColor: 'rgba(125,82,244,0.05)' }}
+      >
+        <Bot className="size-4" strokeWidth={1.5} />
+        Conversations
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className="inline-flex w-fit items-center gap-0.5 self-start rounded border py-0.5 pl-[3px] pr-[5px] font-mono text-xs font-medium uppercase tracking-tight"
+      style={{ backgroundColor: 'rgba(251,55,72,0.1)', borderColor: 'rgba(251,55,72,0.05)' }}
+    >
+      <Notification5Fill className="size-3.5 p-px text-[#dd2450]" />
+      <span className="bg-linear-to-br from-[#dd2450] to-[#ff512f] bg-clip-text text-transparent">Notifications</span>
+    </span>
+  );
+}
+
 function UsecaseSelector({ selected, onSelect }: { selected: UsecaseId; onSelect: (id: UsecaseId) => void }) {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const appId = useMemo(() => getOnboardingAppId(searchParams), [searchParams]);
+  const telemetry = useTelemetry();
+  const updateProductUseCases = useUpdateProductUseCases();
 
   const handleContinue = () => {
+    telemetry(TelemetryEvent.USECASE_SELECTED, { usecase: selected });
+
     if (selected === 'inbox') {
-      navigate(withAppId(ROUTES.INBOX_USECASE, appId));
-    } else if (selected === 'agents') {
-      navigate(withAppId(ROUTES.AGENTS_SETUP, appId));
+      // Persist the picked usecase on the org (fire-and-forget — navigation continues regardless).
+      updateProductUseCases.mutate({ [ProductUseCasesEnum.IN_APP]: true, [ProductUseCasesEnum.AGENTS]: false });
+      // Restart the provisioning loader so it plays a full cycle (with the inbox/notification copy)
+      // while the destination page boots, instead of flickering off as soon as data resolves.
+      beginOnboardingProvisioning('platform');
+      void navigate(ROUTES.INBOX_USECASE);
+
+      return;
+    }
+
+    if (selected === 'agents') {
+      void trackAgentsUsecaseSelected('usecase_picker');
+      updateProductUseCases.mutate({ [ProductUseCasesEnum.AGENTS]: true, [ProductUseCasesEnum.IN_APP]: false });
+      // No provisioning loader here: the personalize step renders instantly and has no data
+      // dependency, so the overlay would just hide the questions. It starts when that step hands
+      // off to the agents setup page, which is what actually waits on the org.
+      void navigate(ROUTES.AGENTS_PERSONALIZE);
     }
   };
 
@@ -282,7 +252,6 @@ function UsecaseSelector({ selected, onSelect }: { selected: UsecaseId; onSelect
       <div className="flex max-w-[400px] flex-col gap-4">
         {USECASE_OPTIONS.map((option) => {
           const isSelected = selected === option.id;
-          const Icon = option.icon;
 
           return (
             <button
@@ -301,105 +270,97 @@ function UsecaseSelector({ selected, onSelect }: { selected: UsecaseId; onSelect
                     : '0 1px 2px 0 rgba(16,24,40,0.05)',
                 }}
               >
-                <div className="flex items-start justify-between">
-                  <Icon className="text-text-sub size-8" strokeWidth={1.5} />
-                  <div className="relative size-5">
-                    {isSelected ? (
-                      <>
-                        <div className="bg-primary-base absolute inset-[10%] rounded-full" />
-                        <div className="absolute inset-[30%] rounded-full bg-white" />
-                      </>
-                    ) : (
-                      <div className="size-5 rounded-full border border-[#e1e4ea]" />
-                    )}
+                <div className="absolute right-[11px] top-[11px] size-5">
+                  {isSelected ? (
+                    <>
+                      <div className="bg-primary-base absolute inset-[10%] rounded-full" />
+                      <div className="absolute inset-[30%] rounded-full bg-white" />
+                    </>
+                  ) : (
+                    <>
+                      <div className="absolute inset-[10%] rounded-full bg-[#e1e4ea]" />
+                      <div className="absolute inset-[17.5%] rounded-full bg-white shadow-[0px_2px_2px_0px_rgba(27,28,29,0.12)]" />
+                    </>
+                  )}
+                </div>
+                <div className="flex flex-col gap-4">
+                  <UsecaseTag id={option.id} />
+                  <div className="flex flex-col gap-1.5">
+                    <h3 className="text-text-strong text-base font-medium tracking-tight">{option.title}</h3>
+                    <p className="text-text-soft text-xs font-normal leading-4">{option.description}</p>
                   </div>
                 </div>
-                <h3 className="text-text-strong mt-2 text-base font-medium">{option.title}</h3>
-                <p className="text-text-soft mt-1 text-xs font-medium leading-4">{option.description}</p>
               </div>
             </button>
           );
         })}
       </div>
 
-      <button
-        type="button"
-        onClick={handleContinue}
-        className="mt-8 inline-flex items-center gap-1 rounded-lg border border-white/[0.12] px-2.5 py-2 text-xs font-medium text-white transition-opacity hover:opacity-90"
-        style={{
-          backgroundImage:
-            'linear-gradient(180deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0) 100%), linear-gradient(90deg, #0e121b 0%, #0e121b 100%)',
-          boxShadow: '0 1px 2px 0 rgba(27,28,29,0.48), 0 0 0 1px #242628',
-        }}
-      >
-        Continue setup
-        <ChevronRight className="size-4" />
-      </button>
-
-      <div className="text-text-sub mt-4 flex items-center gap-2 text-xs">
-        <span>Have questions?</span>
-        <a
-          href={BOOK_DEMO_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-text-strong inline-flex items-center gap-1 text-xs font-medium hover:underline"
-        >
-          <CalendarDays className="size-4" />
-          Book a demo
-        </a>
-      </div>
+      <OnboardingContinueFooter onContinue={handleContinue} />
     </div>
   );
 }
 
 export function UsecaseSelectPage() {
-  const isAgentsEnabled = useFeatureFlag(FeatureFlagsKeysEnum.IS_CONVERSATIONAL_AGENTS_ENABLED, false);
+  const areAgentsAvailable = useAreConversationalAgentsAvailable();
   const telemetry = useTelemetry();
-  const [selected, setSelected] = useState<UsecaseId>('agents');
+  const [selected, setSelected] = useState<UsecaseId>('inbox');
+  const provisioningActive = useOnboardingProvisioningActive();
+
+  useOnboardingProvisioningDismiss({
+    isReady: true,
+    fallbackVariant: 'platform',
+  });
 
   useEffect(() => {
     telemetry(TelemetryEvent.USECASE_SELECT_PAGE_VIEWED);
   }, [telemetry]);
 
-  if (!isAgentsEnabled) {
+  if (provisioningActive) {
+    return null;
+  }
+
+  if (!areAgentsAvailable) {
     return <Navigate to={ROUTES.INBOX_USECASE} replace />;
   }
 
   const leftContent = (
     <>
-      <PageMeta title="What are you building?" />
-      <div className="mb-5 flex items-center gap-0.5">
-        <RiArrowLeftSLine className="text-text-sub size-4" />
-        <span className="text-text-sub text-xs">1/3</span>
-      </div>
-      <h1 className="text-foreground text-xl font-semibold">What are you building?</h1>
-      <p className="text-text-sub mt-2 text-sm leading-relaxed">
+      <PageMeta title="Get started with Novu" />
+      <OnboardingStepHeader current={1} total={selected === 'agents' ? 3 : 2} />
+      <h1 className="text-foreground text-xl font-normal text-label-lg">Get started with Novu</h1>
+      <p className="text-text-soft text-label-xs font-normal mt-2">
         Pick what you would like to start with, you can always set up the other path anytime.
       </p>
       <UsecaseSelector selected={selected} onSelect={setSelected} />
     </>
   );
 
-  const rightContent =
-    selected === 'agents' ? (
-      <div className="flex flex-col items-start">
-        <div className="self-center">
-          <AgentUsecasePreviewIllustration />
-        </div>
-        <div className="mt-10">
-          <FeatureList />
-        </div>
-      </div>
-    ) : (
-      <div className="flex flex-col items-start">
-        <div className="self-center">
-          <InboxPreview />
-        </div>
-        <div className="mt-10">
-          <InboxFeatureList />
-        </div>
-      </div>
-    );
+  const rightContent = (
+    <AnimatePresence mode="wait" initial={false}>
+      <motion.div
+        key={selected}
+        className="flex flex-col items-start"
+        initial={{ opacity: 0, y: 12, filter: 'blur(4px)' }}
+        animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+        exit={{ opacity: 0, y: -12, filter: 'blur(4px)' }}
+        transition={{ duration: 0.28, ease: [0.4, 0, 0.2, 1] }}
+      >
+        {selected === 'agents' ? (
+          <AgentOnboardingPreview />
+        ) : (
+          <>
+            <div className="self-center">
+              <InboxPreview />
+            </div>
+            <div className="mt-10">
+              <InboxFeatureList />
+            </div>
+          </>
+        )}
+      </motion.div>
+    </AnimatePresence>
+  );
 
   return <OnboardingShell left={leftContent} right={rightContent} />;
 }

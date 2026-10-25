@@ -1,5 +1,5 @@
-import { ApiServiceLevelEnum, FeatureFlagsKeysEnum, GetSubscriptionDto, PermissionsEnum } from '@novu/shared';
-import { ReactNode, SVGProps } from 'react';
+import { FeatureFlagsKeysEnum, GetSubscriptionDto, PermissionsEnum } from '@novu/shared';
+import { SVGProps } from 'react';
 import {
   RiBarChartBoxLine,
   RiBuildingLine,
@@ -18,30 +18,27 @@ import {
   RiTranslate2,
   RiUserAddLine,
 } from 'react-icons/ri';
-import { Badge } from '@/components/primitives/badge';
+import { useNavigate } from 'react-router-dom';
+import { useUsageLimitsView } from '@/components/billing/usage-limits/use-usage-limits-view';
 import { SidebarContent } from '@/components/side-navigation/sidebar';
 import { useEnvironment } from '@/context/environment/hooks';
+import { useLocalMode } from '@/context/local-mode';
+import { useAreConversationalAgentsAvailable } from '@/hooks/use-are-conversational-agents-available';
 import { useFeatureFlag } from '@/hooks/use-feature-flag';
+import { useHasPermission } from '@/hooks/use-has-permission';
 import { Protect } from '@/utils/protect';
 import { buildRoute, ROUTES } from '@/utils/routes';
-import { IS_ENTERPRISE, IS_SELF_HOSTED } from '../../config';
+import { IS_SELF_HOSTED, IS_SELF_HOSTED_CE } from '../../config';
 import { useFetchSubscription } from '../../hooks/use-fetch-subscription';
 import { ChangelogStack } from './changelog-cards';
-import { EnvironmentDropdown } from './environment-dropdown';
+import { EnvironmentDropdown, LOCAL_ENVIRONMENT_VALUE } from './environment-dropdown';
 import { FreeTrialCard } from './free-trial-card';
 import { HomeMenuItem } from './getting-started-menu-item';
+import { NavigationGroup } from './navigation-group';
 import { NavigationLink } from './navigation-link';
 import { OrganizationDropdown } from './organization-dropdown';
-import { UsageCard } from './usage-card';
-
-const NavigationGroup = ({ children, label }: { children: ReactNode; label?: string }) => {
-  return (
-    <div className="flex flex-col last:mt-auto">
-      {!!label && <span className="text-foreground-400 px-2 py-1 text-sm">{label}</span>}
-      {children}
-    </div>
-  );
-};
+import { getSidebarPlanCardVariant, type SidebarPlanCardVariant } from './sidebar-plan-card-variant';
+import { FreeUsageCard, PausedUsageCard } from './usage-card';
 
 function MailAiLineIcon(props: SVGProps<SVGSVGElement>) {
   return (
@@ -51,21 +48,42 @@ function MailAiLineIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
-type BottomNavigationProps = {
-  isTrialActive?: boolean;
-  isFreeTier?: boolean;
-  isLoadingSubscription: boolean;
-  subscription?: GetSubscriptionDto | undefined;
-  daysLeft?: number;
+function buildEnvironmentRoute(route: string, environmentSlug: string | undefined): string | undefined {
+  return environmentSlug ? buildRoute(route, { environmentSlug }) : undefined;
+}
+
+type SidebarPlanCardProps = {
+  variant: SidebarPlanCardVariant;
+  subscription: GetSubscriptionDto;
+  daysLeft: number;
+  canEditUsageLimits: boolean;
 };
 
-const BottomSection = ({
-  isTrialActive,
-  isFreeTier,
-  isLoadingSubscription,
-  subscription,
-  daysLeft,
-}: BottomNavigationProps) => {
+function SidebarPlanCard({ variant, subscription, daysLeft, canEditUsageLimits }: SidebarPlanCardProps) {
+  switch (variant) {
+    case 'trial':
+      return <FreeTrialCard subscription={subscription} daysLeft={daysLeft} />;
+    case 'free_usage':
+      return <FreeUsageCard subscription={subscription} />;
+    case 'paused_usage':
+      return <PausedUsageCard subscription={subscription} canEditUsageLimits={canEditUsageLimits} />;
+    default: {
+      const exhaustiveCheck: never = variant;
+
+      return exhaustiveCheck;
+    }
+  }
+}
+
+type BottomNavigationProps = {
+  isLoadingSubscription: boolean;
+  subscription: GetSubscriptionDto | undefined;
+  daysLeft: number;
+};
+
+const BottomSection = ({ isLoadingSubscription, subscription, daysLeft }: BottomNavigationProps) => {
+  const usageLimits = useUsageLimitsView();
+
   if (IS_SELF_HOSTED) {
     return (
       <div className="relative mt-auto gap-8 pt-4">
@@ -74,14 +92,19 @@ const BottomSection = ({
     );
   }
 
+  const planCardVariant = getSidebarPlanCardVariant(subscription, usageLimits?.pausedPlan ?? null);
+
   return (
     <div className="relative mt-auto gap-8 pt-4">
-      {!isTrialActive && !isLoadingSubscription && <ChangelogStack />}
-      {isTrialActive && !isLoadingSubscription && daysLeft !== undefined && (
-        <FreeTrialCard subscription={subscription} daysLeft={daysLeft} />
+      {planCardVariant !== 'trial' && !isLoadingSubscription && <ChangelogStack />}
+      {subscription && planCardVariant && (
+        <SidebarPlanCard
+          variant={planCardVariant}
+          subscription={subscription}
+          daysLeft={daysLeft}
+          canEditUsageLimits={usageLimits?.canEdit ?? false}
+        />
       )}
-
-      {!isTrialActive && isFreeTier && !isLoadingSubscription && <UsageCard subscription={subscription} />}
       <NavigationGroup>
         <NavigationLink to={ROUTES.SETTINGS_TEAM}>
           <RiUserAddLine className="size-4" />
@@ -95,127 +118,111 @@ const BottomSection = ({
 
 export const LegacySideNavigation = () => {
   const { subscription, daysLeft, isLoading: isLoadingSubscription } = useFetchSubscription();
-  const isTrialActive = subscription?.trial.isActive;
-  const isFreeTier = subscription?.apiServiceLevel === ApiServiceLevelEnum.FREE;
   const isWebhooksManagementEnabled = useFeatureFlag(FeatureFlagsKeysEnum.IS_WEBHOOKS_MANAGEMENT_ENABLED);
   const isDomainsPageEnabled = useFeatureFlag(FeatureFlagsKeysEnum.IS_DOMAINS_PAGE_ENABLED);
   const isHttpLogsPageEnabled = useFeatureFlag(FeatureFlagsKeysEnum.IS_HTTP_LOGS_PAGE_ENABLED, false);
   const isAnalyticsPageEnabled = useFeatureFlag(FeatureFlagsKeysEnum.IS_ANALYTICS_PAGE_ENABLED, false);
+  const showAgents = useAreConversationalAgentsAvailable();
 
   const { currentEnvironment, environments, switchEnvironment } = useEnvironment();
+  const environmentSlug = currentEnvironment?.slug;
+  const localMode = useLocalMode();
+  const has = useHasPermission();
+  const navigate = useNavigate();
+
+  // Local mode makes the API sign requests to the caller's tunnel with the
+  // environment key, so it is gated on BRIDGE_WRITE (see bridge.controller.ts).
+  // Hide the picker entry from members who would only hit a 403.
+  const canUseLocalMode = has({ permission: PermissionsEnum.BRIDGE_WRITE });
+  const showLocalEntry = canUseLocalMode && Boolean(localMode.session);
 
   const onEnvironmentChange = (value: string) => {
+    if (value === LOCAL_ENVIRONMENT_VALUE) {
+      if (localMode.session) {
+        navigate(buildRoute(ROUTES.LOCAL_WORKFLOWS, { environmentSlug: localMode.session.environmentSlug }));
+      }
+
+      return;
+    }
+
     const environment = environments?.find((env) => env.name === value);
+
+    if (localMode.isLocalRoute) {
+      // Leaving local mode: land on the regular workflows list of the target
+      // environment instead of rewriting the /local/* path.
+      navigate(buildRoute(ROUTES.WORKFLOWS, { environmentSlug: environment?.slug ?? '' }));
+
+      return;
+    }
+
     switchEnvironment(environment?.slug);
   };
 
   return (
-    <aside className="relative flex h-full w-[225px] shrink-0 flex-col">
+    <aside className="relative flex h-full w-[275px] shrink-0 flex-col">
       <SidebarContent className="h-full">
         <OrganizationDropdown />
         <EnvironmentDropdown
           currentEnvironment={currentEnvironment}
           data={environments}
           onChange={onEnvironmentChange}
+          localEntry={showLocalEntry ? { status: localMode.healthStatus } : undefined}
+          isLocalSelected={localMode.isLocalRoute}
         />
         <nav className="flex h-full flex-1 flex-col overflow-auto">
           <div className="flex flex-col gap-4">
-            <NavigationGroup>
+            {showAgents && (
+              <NavigationGroup label="Agents">
+                <NavigationLink to={buildEnvironmentRoute(ROUTES.AGENTS, environmentSlug)}>
+                  <RiRobot2Line className="size-4" />
+                  <span>Agents</span>
+                </NavigationLink>
+              </NavigationGroup>
+            )}
+
+            <NavigationGroup label="Notifications">
               <Protect permission={PermissionsEnum.WORKFLOW_READ}>
                 <NavigationLink
-                  to={
-                    currentEnvironment?.slug
-                      ? buildRoute(ROUTES.WORKFLOWS, { environmentSlug: currentEnvironment?.slug ?? '' })
-                      : undefined
-                  }
+                  to={buildEnvironmentRoute(
+                    // Workflows is the one resource the Local pseudo-environment
+                    // overlays — keep the nav inside local mode instead of
+                    // silently dropping the user back to the synced dev list.
+                    localMode.isLocalRoute ? ROUTES.LOCAL_WORKFLOWS : ROUTES.WORKFLOWS,
+                    environmentSlug
+                  )}
                 >
                   <RiRouteFill className="size-4" />
                   <span>Workflows</span>
                 </NavigationLink>
               </Protect>
-
-              <NavigationLink
-                to={
-                  currentEnvironment?.slug
-                    ? buildRoute(ROUTES.AGENTS, { environmentSlug: currentEnvironment?.slug ?? '' })
-                    : undefined
-                }
-              >
-                <RiRobot2Line className="size-4" />
-                <span>
-                  Agents{' '}
-                  <Badge variant="lighter" className="text-xs">
-                    BETA
-                  </Badge>
-                </span>
-              </NavigationLink>
-            </NavigationGroup>
-
-            <NavigationGroup label="Content">
               <Protect permission={PermissionsEnum.WORKFLOW_READ}>
-                <NavigationLink
-                  to={
-                    currentEnvironment?.slug
-                      ? buildRoute(ROUTES.LAYOUTS, { environmentSlug: currentEnvironment?.slug ?? '' })
-                      : undefined
-                  }
-                >
+                <NavigationLink to={buildEnvironmentRoute(ROUTES.LAYOUTS, environmentSlug)}>
                   <RiLayout5Line className="size-4" />
-                  <span>Email Layouts</span>
+                  <span>Layouts</span>
                 </NavigationLink>
               </Protect>
-
-              <NavigationLink
-                to={
-                  currentEnvironment?.slug
-                    ? buildRoute(ROUTES.TRANSLATIONS, { environmentSlug: currentEnvironment?.slug ?? '' })
-                    : undefined
-                }
-              >
+              <NavigationLink to={buildEnvironmentRoute(ROUTES.TRANSLATIONS, environmentSlug)}>
                 <RiTranslate2 className="size-4" />
                 <span>Translations</span>
               </NavigationLink>
             </NavigationGroup>
             <NavigationGroup label="Data">
               <Protect permission={PermissionsEnum.SUBSCRIBER_READ}>
-                <NavigationLink
-                  to={
-                    currentEnvironment?.slug
-                      ? buildRoute(ROUTES.SUBSCRIBERS, { environmentSlug: currentEnvironment?.slug ?? '' })
-                      : undefined
-                  }
-                >
+                <NavigationLink to={buildEnvironmentRoute(ROUTES.SUBSCRIBERS, environmentSlug)}>
                   <RiGroup2Line className="size-4" />
                   <span>Subscribers</span>
                 </NavigationLink>
               </Protect>
-              <Protect permission={PermissionsEnum.TOPIC_READ}>
-                <NavigationLink
-                  to={
-                    currentEnvironment?.slug
-                      ? buildRoute(ROUTES.TOPICS, { environmentSlug: currentEnvironment?.slug ?? '' })
-                      : undefined
-                  }
-                >
-                  <RiDiscussLine className="size-4" />
-                  <span>Topics</span>
+              <Protect permission={PermissionsEnum.WORKFLOW_READ}>
+                <NavigationLink to={buildEnvironmentRoute(ROUTES.CONTEXTS, environmentSlug)}>
+                  <RiBuildingLine className="size-4" />
+                  <span>Contexts</span>
                 </NavigationLink>
               </Protect>
-              <Protect permission={PermissionsEnum.WORKFLOW_READ}>
-                <NavigationLink
-                  to={
-                    currentEnvironment?.slug
-                      ? buildRoute(ROUTES.CONTEXTS, { environmentSlug: currentEnvironment?.slug ?? '' })
-                      : undefined
-                  }
-                >
-                  <RiBuildingLine className="size-4" />
-                  <span>
-                    Contexts{' '}
-                    <Badge variant="lighter" className="text-xs">
-                      BETA
-                    </Badge>
-                  </span>
+              <Protect permission={PermissionsEnum.TOPIC_READ}>
+                <NavigationLink to={buildEnvironmentRoute(ROUTES.TOPICS, environmentSlug)}>
+                  <RiDiscussLine className="size-4" />
+                  <span>Topics</span>
                 </NavigationLink>
               </Protect>
             </NavigationGroup>
@@ -223,37 +230,28 @@ export const LegacySideNavigation = () => {
               <NavigationGroup label="Monitor">
                 <Protect permission={PermissionsEnum.NOTIFICATION_READ}>
                   <NavigationLink
-                    to={
-                      currentEnvironment?.slug
-                        ? buildRoute(isHttpLogsPageEnabled ? ROUTES.ACTIVITY_WORKFLOW_RUNS : ROUTES.ACTIVITY_FEED, {
-                            environmentSlug: currentEnvironment?.slug ?? '',
-                          })
-                        : undefined
-                    }
+                    to={buildEnvironmentRoute(
+                      isHttpLogsPageEnabled ? ROUTES.ACTIVITY_WORKFLOW_RUNS : ROUTES.ACTIVITY_FEED,
+                      environmentSlug
+                    )}
                     matchPaths={
-                      currentEnvironment?.slug
+                      environmentSlug
                         ? [
-                            buildRoute(ROUTES.ACTIVITY_FEED, { environmentSlug: currentEnvironment.slug }),
-                            buildRoute(ROUTES.ACTIVITY_WORKFLOW_RUNS, { environmentSlug: currentEnvironment.slug }),
-                            buildRoute(ROUTES.ACTIVITY_REQUESTS, { environmentSlug: currentEnvironment.slug }),
-                            buildRoute(ROUTES.ACTIVITY_CONVERSATIONS, { environmentSlug: currentEnvironment.slug }),
+                            buildRoute(ROUTES.ACTIVITY_FEED, { environmentSlug }),
+                            buildRoute(ROUTES.ACTIVITY_WORKFLOW_RUNS, { environmentSlug }),
+                            buildRoute(ROUTES.ACTIVITY_REQUESTS, { environmentSlug }),
+                            buildRoute(ROUTES.ACTIVITY_CONVERSATIONS, { environmentSlug }),
                           ]
                         : undefined
                     }
                   >
                     <RiBarChartBoxLine className="size-4" />
-                    <span>Activity Feed</span>
+                    <span>Activity</span>
                   </NavigationLink>
                 </Protect>
                 {isAnalyticsPageEnabled && (
                   <Protect permission={PermissionsEnum.NOTIFICATION_READ}>
-                    <NavigationLink
-                      to={
-                        currentEnvironment?.slug
-                          ? buildRoute(ROUTES.ANALYTICS, { environmentSlug: currentEnvironment?.slug ?? '' })
-                          : undefined
-                      }
-                    >
+                    <NavigationLink to={buildEnvironmentRoute(ROUTES.ANALYTICS, environmentSlug)}>
                       <RiLineChartLine className="size-4" />
                       <span>Usage</span>
                     </NavigationLink>
@@ -264,20 +262,13 @@ export const LegacySideNavigation = () => {
             <Protect
               condition={(has) =>
                 has({ permission: PermissionsEnum.API_KEY_READ }) ||
-                has({ permission: PermissionsEnum.INTEGRATION_READ }) ||
                 has({ permission: PermissionsEnum.WEBHOOK_READ }) ||
                 has({ permission: PermissionsEnum.WEBHOOK_WRITE })
               }
             >
               <NavigationGroup label="Developer">
                 <Protect permission={PermissionsEnum.API_KEY_READ}>
-                  <NavigationLink
-                    to={
-                      currentEnvironment?.slug
-                        ? buildRoute(ROUTES.API_KEYS, { environmentSlug: currentEnvironment?.slug ?? '' })
-                        : undefined
-                    }
-                  >
+                  <NavigationLink to={buildEnvironmentRoute(ROUTES.API_KEYS, environmentSlug)}>
                     <RiKey2Line className="size-4" />
                     <span>API Keys</span>
                   </NavigationLink>
@@ -289,76 +280,50 @@ export const LegacySideNavigation = () => {
                       has({ permission: PermissionsEnum.WEBHOOK_WRITE })
                     }
                   >
-                    <NavigationLink
-                      to={
-                        currentEnvironment?.slug
-                          ? buildRoute(ROUTES.WEBHOOKS, { environmentSlug: currentEnvironment?.slug ?? '' })
-                          : undefined
-                      }
-                    >
+                    <NavigationLink to={buildEnvironmentRoute(ROUTES.WEBHOOKS, environmentSlug)}>
                       <RiSignalTowerLine className="size-4" />
                       <span className="flex items-center gap-2">Webhooks</span>
                     </NavigationLink>
                   </Protect>
                 )}
-                {isDomainsPageEnabled && (!IS_SELF_HOSTED || IS_ENTERPRISE) && (
-                  <NavigationLink
-                    to={
-                      currentEnvironment?.slug
-                        ? buildRoute(ROUTES.DOMAINS, { environmentSlug: currentEnvironment?.slug ?? '' })
-                        : undefined
-                    }
-                  >
+                {isDomainsPageEnabled && !IS_SELF_HOSTED_CE && (
+                  <NavigationLink to={buildEnvironmentRoute(ROUTES.DOMAINS, environmentSlug)}>
                     <MailAiLineIcon className="size-4" />
                     <span>Inbound Email</span>
                   </NavigationLink>
                 )}
-                <NavigationLink
-                  to={
-                    currentEnvironment?.slug
-                      ? buildRoute(ROUTES.ENVIRONMENTS, { environmentSlug: currentEnvironment?.slug ?? '' })
-                      : undefined
-                  }
-                >
+                <NavigationLink to={buildEnvironmentRoute(ROUTES.ENVIRONMENTS, environmentSlug)}>
                   <RiDatabase2Line className="size-4" />
                   <span>Environments</span>
                 </NavigationLink>
-                <NavigationLink
-                  to={
-                    currentEnvironment?.slug
-                      ? buildRoute(ROUTES.VARIABLES, { environmentSlug: currentEnvironment?.slug ?? '' })
-                      : undefined
-                  }
-                >
+                <NavigationLink to={buildEnvironmentRoute(ROUTES.VARIABLES, environmentSlug)}>
                   <RiCodeSSlashLine className="size-4" />
                   <span>Variables</span>
                 </NavigationLink>
+              </NavigationGroup>
+            </Protect>
+            <Protect
+              condition={(has) =>
+                has({ permission: PermissionsEnum.INTEGRATION_READ }) || IS_SELF_HOSTED || !IS_SELF_HOSTED_CE
+              }
+            >
+              <NavigationGroup label="Platform">
                 <Protect permission={PermissionsEnum.INTEGRATION_READ}>
-                  <NavigationLink
-                    to={
-                      currentEnvironment?.slug
-                        ? buildRoute(ROUTES.INTEGRATIONS, { environmentSlug: currentEnvironment?.slug ?? '' })
-                        : undefined
-                    }
-                  >
+                  <NavigationLink to={buildEnvironmentRoute(ROUTES.INTEGRATIONS, environmentSlug)}>
                     <RiStore3Line className="size-4" />
                     <span>Integration Store</span>
                   </NavigationLink>
                 </Protect>
+                {/* ReNovu: Settings menu accessible for self-hosted deployments */}
+                <NavigationLink to={ROUTES.SETTINGS}>
+                  <RiSettings4Line className="size-4" />
+                  <span>Settings</span>
+                </NavigationLink>
               </NavigationGroup>
             </Protect>
-            {/* ReNovu: Settings menu accessible for self-hosted deployments */}
-            <NavigationGroup label="Application">
-              <NavigationLink to={ROUTES.SETTINGS}>
-                <RiSettings4Line className="size-4" />
-                <span>Settings</span>
-              </NavigationLink>
-            </NavigationGroup>
           </div>
 
           <BottomSection
-            isTrialActive={isTrialActive}
-            isFreeTier={isFreeTier}
             isLoadingSubscription={isLoadingSubscription}
             subscription={subscription}
             daysLeft={daysLeft}

@@ -98,6 +98,63 @@ describe('Novu Client', () => {
       expect(newClient.strictAuthentication).toBe(true);
       process.env = { ...process.env, NOVU_STRICT_AUTHENTICATION_ENABLED: originalEnv };
     });
+
+    it('should set logger to the global console by default', () => {
+      const newClient = new Client({ secretKey: 'some-secret-key' });
+      expect(newClient.logger).toBe(console);
+    });
+
+    it('should set logger to the provided logger', () => {
+      const customLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+      const newClient = new Client({ secretKey: 'some-secret-key', logger: customLogger });
+      expect(newClient.logger).toBe(customLogger);
+    });
+  });
+
+  describe('logger option', () => {
+    it('should route verbose discovery and execution logs through the provided logger', async () => {
+      const customLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+      const consoleSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+
+      const loggingWorkflow = workflow('logging-workflow', async ({ step }) => {
+        await step.email('send-email', async () => ({ body: 'Test Body', subject: 'Subject' }));
+      });
+
+      const newClient = new Client({ secretKey: 'some-secret-key', verbose: true, logger: customLogger });
+      await newClient.addWorkflows([loggingWorkflow]);
+
+      const event: Event = {
+        action: PostActionEnum.EXECUTE,
+        workflowId: 'logging-workflow',
+        stepId: 'send-email',
+        subscriber: {},
+        state: [],
+        payload: {},
+        controls: {},
+        context: {},
+        env: testEventEnv,
+      };
+
+      await newClient.executeWorkflow(event);
+
+      expect(customLogger.info).toHaveBeenCalled();
+      expect(consoleSpy).not.toHaveBeenCalled();
+
+      consoleSpy.mockRestore();
+    });
+
+    it('should not emit discovery or execution logs when verbose is false', async () => {
+      const customLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+      const silentWorkflow = workflow('silent-workflow', async ({ step }) => {
+        await step.email('send-email', async () => ({ body: 'Test Body', subject: 'Subject' }));
+      });
+
+      const newClient = new Client({ secretKey: 'some-secret-key', verbose: false, logger: customLogger });
+      await newClient.addWorkflows([silentWorkflow]);
+
+      expect(customLogger.info).not.toHaveBeenCalled();
+    });
   });
 
   describe('discover method', () => {
@@ -252,12 +309,7 @@ describe('Novu Client', () => {
       expect(stepBackoffDigest.type).toBe('digest');
       expect(stepBackoffDigest.code).toContain(`amount: 1`);
       expect(stepBackoffDigest.code).toContain(`unit: "hours"`);
-      expect(stepBackoffDigest.code.trim()).toContain(
-        `lookBackWindow: {
-            amount: 1,
-            unit: "hours"
-          }`.trim()
-      );
+      expect(stepBackoffDigest.code.replace(/\s+/g, ' ')).toContain('lookBackWindow: { amount: 1, unit: "hours" }');
 
       const stepTimedDigest = foundWorkflow?.steps.find((stepX) => stepX.stepId === 'timed-digest');
       expect(stepTimedDigest).toBeDefined();
@@ -338,6 +390,8 @@ describe('Novu Client', () => {
               return {
                 subject: `body static prefix ${controls.name}`,
                 body: controls.name,
+                from: controls.from,
+                preheader: controls.preheader,
               };
             },
             {
@@ -345,6 +399,13 @@ describe('Novu Client', () => {
                 type: 'object',
                 properties: {
                   name: { type: 'string', default: '{{payload.name}}' },
+                  from: {
+                    type: 'object',
+                    properties: { name: { type: 'string' } },
+                    required: ['name'],
+                    additionalProperties: false,
+                  },
+                  preheader: { type: 'string' },
                 },
                 required: [],
                 additionalProperties: false,
@@ -375,8 +436,11 @@ describe('Novu Client', () => {
           lastName: "Smith's",
         },
         state: [],
-        controls: {},
-        context: {},
+        controls: {
+          from: { name: '{{payload.name}} {{subscriber.lastName}}' },
+          preheader: '{{env.name}} {{context.traceId}} {{t.preheader}}',
+        },
+        context: { traceId: 'trace-123' },
         env: testEventEnv,
       };
 
@@ -385,8 +449,10 @@ describe('Novu Client', () => {
       expect(emailExecutionResult).toBeDefined();
       expect(emailExecutionResult.outputs).toBeDefined();
       if (!emailExecutionResult.outputs) throw new Error('executionResult.outputs is undefined');
-      const { subject } = emailExecutionResult.outputs;
+      const { subject, from, preheader } = emailExecutionResult.outputs;
       expect(subject).toBe('body static prefix John');
+      expect(from?.name).toBe("John Smith's");
+      expect(preheader).toBe('Test trace-123 {{t.preheader}}');
     });
 
     it('should render step results in preview', async () => {
@@ -1610,6 +1676,167 @@ describe('Novu Client', () => {
       });
     });
 
+    it('should pass Liquid-compiled control values to the provider resolver on execute', async () => {
+      const newWorkflow = workflow(
+        'test-workflow',
+        async ({ step }) => {
+          await step.email('send-email', async () => ({ body: 'Test Body', subject: 'Subject' }), {
+            controlSchema: {
+              type: 'object',
+              properties: {
+                foo: { type: 'string' },
+              },
+              required: ['foo'],
+              additionalProperties: false,
+            } as const,
+            providers: {
+              sendgrid: async ({ controls }) => ({
+                ipPoolName: controls.foo,
+              }),
+            },
+          });
+        },
+        {
+          payloadSchema: {
+            type: 'object',
+            properties: {
+              pool: { type: 'string' },
+            },
+            required: [],
+            additionalProperties: false,
+          } as const,
+        }
+      );
+
+      await client.addWorkflows([newWorkflow]);
+
+      const event: Event = {
+        action: PostActionEnum.EXECUTE,
+        workflowId: 'test-workflow',
+        stepId: 'send-email',
+        subscriber: {},
+        state: [],
+        payload: { pool: 'transactional' },
+        controls: {
+          foo: '{{payload.pool}}',
+        },
+        context: {},
+        env: testEventEnv,
+      };
+
+      const executionResult = await client.executeWorkflow(event);
+
+      expect(executionResult.providers).toEqual({
+        sendgrid: {
+          ipPoolName: 'transactional',
+        },
+      });
+    });
+
+    it('should execute the provider resolver on preview when it succeeds', async () => {
+      const newWorkflow = workflow('test-workflow', async ({ step }) => {
+        await step.email('send-email', async () => ({ body: 'Test Body', subject: 'Subject' }), {
+          providers: {
+            sendgrid: async ({ outputs }) => ({
+              ipPoolName: `preview-${outputs.subject}`,
+            }),
+          },
+        });
+      });
+
+      await client.addWorkflows([newWorkflow]);
+
+      const event: Event = {
+        action: PostActionEnum.PREVIEW,
+        workflowId: 'test-workflow',
+        stepId: 'send-email',
+        subscriber: {},
+        state: [],
+        payload: {},
+        controls: {},
+        context: {},
+        env: testEventEnv,
+      };
+
+      const executionResult = await client.executeWorkflow(event);
+
+      expect(executionResult.providers).toEqual({
+        sendgrid: {
+          ipPoolName: 'preview-Subject',
+        },
+      });
+    });
+
+    it('should fall back to mocked provider output on preview when the resolver throws', async () => {
+      const newWorkflow = workflow('test-workflow', async ({ step }) => {
+        await step.email('send-email', async () => ({ body: 'Test Body', subject: 'Subject' }), {
+          providers: {
+            sendgrid: () => {
+              throw new Error('Preview resolver failed');
+            },
+          },
+        });
+      });
+
+      await client.addWorkflows([newWorkflow]);
+
+      const event: Event = {
+        action: PostActionEnum.PREVIEW,
+        workflowId: 'test-workflow',
+        stepId: 'send-email',
+        subscriber: {},
+        state: [],
+        payload: {},
+        controls: {},
+        context: {},
+        env: testEventEnv,
+      };
+
+      await expect(client.executeWorkflow(event)).resolves.toEqual(
+        expect.objectContaining({
+          providers: expect.objectContaining({
+            sendgrid: expect.any(Object),
+          }),
+        })
+      );
+    });
+
+    it('should execute a tool-webhook provider resolver', async () => {
+      const newWorkflow = workflow('test-workflow', async ({ step }) => {
+        await step.tool('send-webhook', async () => ({ body: 'Default body' }), {
+          providers: {
+            'tool-webhook': async ({ outputs }) => ({
+              alert_type: 'incident',
+              title: outputs.body,
+            }),
+          },
+        });
+      });
+
+      await client.addWorkflows([newWorkflow]);
+
+      const event: Event = {
+        action: PostActionEnum.EXECUTE,
+        workflowId: 'test-workflow',
+        stepId: 'send-webhook',
+        subscriber: {},
+        state: [],
+        payload: {},
+        controls: {},
+        context: {},
+        env: testEventEnv,
+      };
+
+      const executionResult = await client.executeWorkflow(event);
+
+      expect(executionResult.providers).toEqual({
+        'tool-webhook': {
+          alert_type: 'incident',
+          title: 'Default body',
+        },
+      });
+    });
+
     it('should support a passthrough object for the provider execution', async () => {
       const newWorkflow = workflow('test-workflow', async ({ step }) => {
         await step.email('send-email', async () => ({ body: 'Test Body', subject: 'Subject' }), {
@@ -2188,12 +2415,13 @@ describe('Novu Client', () => {
         env: testEventEnv,
       };
 
+      await expect(client.executeWorkflow(event)).rejects.toThrow(StepExecutionFailedError);
       await expect(client.executeWorkflow(event)).rejects.toThrow(
-        new StepExecutionFailedError('send-email', PostActionEnum.EXECUTE, new Error('Step execution failed'))
+        'Failed to execute Step with id: `send-email`: Step execution failed'
       );
     });
 
-    it('should throw a ProviderExecutionFailed error when preview execution fails', async () => {
+    it('should throw a ProviderExecutionFailed error when provider execution fails', async () => {
       const newWorkflow = workflow('test-workflow', async ({ step }) => {
         await step.email(
           'send-email',
@@ -2206,7 +2434,7 @@ describe('Novu Client', () => {
           {
             providers: {
               sendgrid: () => {
-                throw new Error('Preview execution failed');
+                throw new Error('Provider execution failed');
               },
             },
           }
@@ -2227,8 +2455,9 @@ describe('Novu Client', () => {
         env: testEventEnv,
       };
 
+      await expect(client.executeWorkflow(event)).rejects.toThrow(ProviderExecutionFailedError);
       await expect(client.executeWorkflow(event)).rejects.toThrow(
-        new ProviderExecutionFailedError('sendgrid', PostActionEnum.EXECUTE, new Error('Preview execution failed'))
+        'Failed to execute Provider with id: `sendgrid`: Provider execution failed'
       );
     });
 

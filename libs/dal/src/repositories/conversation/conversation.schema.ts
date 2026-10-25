@@ -12,6 +12,10 @@ const conversationSchema = new Schema<ConversationDBModel>(
       type: Schema.Types.ObjectId,
       required: true,
     },
+    _notificationId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Notification',
+    },
     participants: {
       type: [
         new Schema(
@@ -51,6 +55,14 @@ const conversationSchema = new Schema<ConversationDBModel>(
             firstPlatformMessageId: {
               type: Schema.Types.String,
             },
+            workspace: {
+              type: new Schema(
+                {
+                  id: { type: Schema.Types.String, required: true },
+                },
+                { _id: false }
+              ),
+            },
           },
           { _id: false }
         ),
@@ -84,6 +96,9 @@ const conversationSchema = new Schema<ConversationDBModel>(
     managedSessionVaultId: {
       type: Schema.Types.String,
     },
+    activePlanMessageId: {
+      type: Schema.Types.String,
+    },
     pendingManagedAgentSetup: {
       type: new Schema(
         {
@@ -105,7 +120,35 @@ const conversationSchema = new Schema<ConversationDBModel>(
         { _id: false }
       ),
     },
+    billing: {
+      type: new Schema(
+        {
+          lastCountedPeriodKey: { type: Schema.Types.String },
+          lastEngagementAt: { type: Schema.Types.String },
+          activationStartedAt: { type: Schema.Types.String },
+          resolvedAt: { type: Schema.Types.String },
+        },
+        { _id: false }
+      ),
+    },
+    isDirectMessage: {
+      type: Schema.Types.Boolean,
+    },
+    eventSequence: {
+      type: Schema.Types.Number,
+      default: 0,
+    },
+    contextKeys: {
+      type: [Schema.Types.String],
+      default: undefined,
+    },
     lastActivityAt: {
+      type: Schema.Types.String,
+    },
+    lastHumanMessageAt: {
+      type: Schema.Types.String,
+    },
+    lastReadAt: {
       type: Schema.Types.String,
     },
     _environmentId: {
@@ -125,9 +168,12 @@ const conversationSchema = new Schema<ConversationDBModel>(
 conversationSchema.index({ _environmentId: 1, identifier: 1 }, { unique: true });
 conversationSchema.index({ _environmentId: 1, 'channels.platformThreadId': 1 });
 conversationSchema.index({ _environmentId: 1, 'participants.id': 1, status: 1 });
+// Multikey alone — do not compound with participants (Mongo forbids parallel arrays).
+conversationSchema.index({ _environmentId: 1, contextKeys: 1 });
 conversationSchema.index({ _environmentId: 1, _agentId: 1, _id: 1 });
 conversationSchema.index({ _environmentId: 1, _agentId: 1, createdAt: 1 });
 conversationSchema.index({ _environmentId: 1, _agentId: 1, lastActivityAt: 1 });
+conversationSchema.index({ _environmentId: 1, _organizationId: 1, _agentId: 1, status: 1, lastHumanMessageAt: 1 });
 
 export const Conversation =
   (mongoose.models.Conversation as mongoose.Model<ConversationDBModel>) ||

@@ -1,8 +1,14 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { encryptCredentials, PinoLogger } from '@novu/application-generic';
-import { IntegrationRepository } from '@novu/dal';
-import { ChatProviderIdEnum, SLACK_AGENT_OAUTH_SCOPES } from '@novu/shared';
+import { AgentIntegrationRepository, AgentRepository, IntegrationRepository } from '@novu/dal';
+import {
+  ChatProviderIdEnum,
+  SLACK_AGENT_BOT_EVENTS,
+  SLACK_AGENT_DEFAULT_DESCRIPTION,
+  SLACK_AGENT_OAUTH_SCOPES,
+} from '@novu/shared';
 import axios, { AxiosError } from 'axios';
+import { humanRelayProfile } from '../../../agents/human-relay/human-relay-identity';
 import { CHAT_OAUTH_CALLBACK_PATH } from '../generate-chat-oath-url/chat-oauth.constants';
 import { SlackQuickSetupCommand } from './slack-quick-setup.command';
 
@@ -27,12 +33,17 @@ type SlackManifestCreateResponse = {
 
 export type SlackQuickSetupResult = Record<string, never>;
 
+/** The longest short description Slack takes in an app manifest. */
+const SLACK_DESCRIPTION_MAX_LENGTH = 140;
+
 @Injectable()
 export class SlackQuickSetup {
   private readonly SLACK_MANIFEST_CREATE_URL = 'https://slack.com/api/apps.manifest.create';
 
   constructor(
     private integrationRepository: IntegrationRepository,
+    private agentIntegrationRepository: AgentIntegrationRepository,
+    private agentRepository: AgentRepository,
     private logger: PinoLogger
   ) {
     this.logger.setContext(SlackQuickSetup.name);
@@ -53,7 +64,15 @@ export class SlackQuickSetup {
       throw new BadRequestException('Slack quick setup is only supported for Slack integrations');
     }
 
-    const manifest = this.buildManifest(integration.name ?? 'Novu Bot', integration.identifier, command.agentId);
+    const agent = await this.findAgent(command);
+    const nameFallback = agent?.runtime === 'human_relay' ? 'Agent' : 'Novu Bot';
+    const manifest = this.buildManifest(
+      integration.name ?? nameFallback,
+      integration.identifier,
+      command.agentId,
+      this.resolveDescription(agent),
+      nameFallback
+    );
 
     this.logger.info(`Slack quick setup: creating app for integrationId=${command.integrationId}`);
 
@@ -77,6 +96,7 @@ export class SlackQuickSetup {
 
     const { client_id, client_secret, signing_secret } = slackResponse.credentials;
 
+    await this.ensureAgentIntegrationLink(command);
     await this.saveCredentials(command, client_id, client_secret, signing_secret, slackResponse.app_id);
 
     this.logger.info(`Slack quick setup: credentials saved for integrationId=${command.integrationId}`);
@@ -84,17 +104,85 @@ export class SlackQuickSetup {
     return {};
   }
 
+  private async ensureAgentIntegrationLink(command: SlackQuickSetupCommand): Promise<void> {
+    const existing = await this.agentIntegrationRepository.findOne(
+      {
+        _agentId: command.agentId,
+        _integrationId: command.integrationId,
+        _environmentId: command.environmentId,
+        _organizationId: command.organizationId,
+      },
+      ['_id']
+    );
+
+    if (existing) {
+      return;
+    }
+
+    const linkedElsewhere = await this.agentIntegrationRepository.findOne(
+      {
+        _integrationId: command.integrationId,
+        _environmentId: command.environmentId,
+        _organizationId: command.organizationId,
+      },
+      ['_agentId']
+    );
+
+    if (linkedElsewhere) {
+      throw new ConflictException('Integration is already linked to a different agent');
+    }
+
+    // Revives a tombstoned (disconnected) link when one exists for this pair —
+    // a plain create would violate the unique (_agentId, _integrationId) index.
+    await this.agentIntegrationRepository.createOrReviveLink({
+      agentId: command.agentId,
+      integrationId: command.integrationId,
+      environmentId: command.environmentId,
+      organizationId: command.organizationId,
+    });
+  }
+
   /**
    * Slack rejects display_name values that are or contain the reserved word "slack"
    * (case-insensitive). Strip it and fall back to a safe default when nothing is left.
    */
-  private sanitizeBotDisplayName(name: string): string {
+  private sanitizeBotDisplayName(name: string, fallback: string): string {
     const sanitized = name.replace(/slack/gi, '').trim();
 
-    return sanitized.length > 0 ? sanitized : 'Novu Bot';
+    return sanitized.length > 0 ? sanitized : fallback;
   }
 
-  private buildManifest(botName: string, integrationIdentifier: string, agentId: string): object {
+  private async findAgent(command: SlackQuickSetupCommand): Promise<{ runtime?: string; description?: string } | null> {
+    return this.agentRepository.findOne(
+      { _id: command.agentId, _environmentId: command.environmentId, _organizationId: command.organizationId },
+      ['runtime', 'description']
+    );
+  }
+
+  /**
+   * A Human agent speaks as itself when its operator wrote a description. With none, the Slack
+   * app says "AI agent" rather than the Novu default used by every other agent.
+   */
+  private resolveDescription(agent: { runtime?: string; description?: string } | null): string {
+    const description = agent?.runtime === 'human_relay' ? humanRelayProfile(agent).description : undefined;
+    if (description) {
+      return description.slice(0, SLACK_DESCRIPTION_MAX_LENGTH);
+    }
+
+    if (agent?.runtime === 'human_relay') {
+      return 'AI agent';
+    }
+
+    return SLACK_AGENT_DEFAULT_DESCRIPTION;
+  }
+
+  private buildManifest(
+    botName: string,
+    integrationIdentifier: string,
+    agentId: string,
+    description: string,
+    nameFallback: string
+  ): object {
     // Slack must reach both the OAuth callback and the agent webhook over the
     // public internet — so `api.novu.localhost` and any LAN-only hostname are
     // unreachable. `AGENT_API_HOSTNAME` (e.g. an ngrok URL) takes precedence
@@ -106,14 +194,14 @@ export class SlackQuickSetup {
       ''
     );
     const oauthCallbackUrl = `${apiBaseUrl}${CHAT_OAUTH_CALLBACK_PATH}`;
-    const displayName = this.sanitizeBotDisplayName(botName);
+    const displayName = this.sanitizeBotDisplayName(botName, nameFallback);
 
     const webhookUrl = `${apiBaseUrl}/v1/agents/${agentId}/webhook/${integrationIdentifier}`;
 
     return {
       display_information: {
         name: displayName,
-        description: 'Agent built with Novu',
+        description,
       },
       features: {
         app_home: {
@@ -121,8 +209,8 @@ export class SlackQuickSetup {
           messages_tab_enabled: true,
           messages_tab_read_only_enabled: false,
         },
-        assistant_view: {
-          assistant_description: 'Agent built with Novu',
+        agent_view: {
+          agent_description: description,
         },
         bot_user: {
           display_name: displayName,
@@ -138,18 +226,7 @@ export class SlackQuickSetup {
       settings: {
         event_subscriptions: {
           request_url: webhookUrl,
-          bot_events: [
-            'app_mention',
-            'message.channels',
-            'message.groups',
-            'message.im',
-            'message.mpim',
-            'member_joined_channel',
-            'assistant_thread_started',
-            'assistant_thread_context_changed',
-            'reaction_added',
-            'reaction_removed',
-          ],
+          bot_events: [...SLACK_AGENT_BOT_EVENTS],
         },
         interactivity: {
           is_enabled: true,
@@ -157,7 +234,7 @@ export class SlackQuickSetup {
         },
         org_deploy_enabled: false,
         socket_mode_enabled: false,
-        token_rotation_enabled: false,
+        token_rotation_enabled: true,
       },
     };
   }

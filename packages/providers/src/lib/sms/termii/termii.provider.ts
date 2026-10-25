@@ -8,6 +8,7 @@ import {
   SmsEventStatusEnum,
 } from '@novu/stateless';
 import { BaseProvider, CasingEnum } from '../../../base.provider';
+import { providerFetch } from '../../../utils/http';
 import { WithPassthrough } from '../../../utils/types';
 import { MessageChannel, SmsJsonResponse, SmsParams } from './sms';
 
@@ -43,7 +44,7 @@ export class TermiiSmsProvider extends BaseProvider implements ISmsProvider {
       'Content-Type': 'application/json',
       ...params.headers,
     };
-    const opts: RequestInit = {
+    const opts = {
       agent: undefined,
       cache: undefined,
       credentials: undefined,
@@ -54,9 +55,9 @@ export class TermiiSmsProvider extends BaseProvider implements ISmsProvider {
       method: 'POST',
       headers,
       body: JSON.stringify(params.body),
-    };
+    } as RequestInit;
 
-    const response = await fetch(TermiiSmsProvider.BASE_URL, opts);
+    const response = await providerFetch(TermiiSmsProvider.BASE_URL, opts);
     const body = (await response.json()) as SmsJsonResponse;
 
     return {

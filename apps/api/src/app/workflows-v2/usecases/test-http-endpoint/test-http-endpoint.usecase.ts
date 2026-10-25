@@ -1,7 +1,9 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import {
   assertSafeOutboundUrl,
+  buildInvalidJsonBodyDetail,
   buildNovuSignatureHeader,
+  enhanceStepsMap,
   GetDecryptedSecretKey,
   GetDecryptedSecretKeyCommand,
   HttpClientError,
@@ -14,7 +16,8 @@ import {
   SsrfBlockedError,
   shouldIncludeBody,
 } from '@novu/application-generic';
-import { createLiquidEngine } from '@novu/framework/internal';
+import { compileJsonControlValues, createLiquidEngine, repairJsonString } from '@novu/framework/internal';
+import { isOutboundSsrfProtectionEnabled } from '@novu/shared';
 import { Liquid } from 'liquidjs';
 import { TestHttpEndpointResponseDto } from '../../dtos/test-http-endpoint.dto';
 import { TestHttpEndpointCommand } from './test-http-endpoint.command';
@@ -73,13 +76,15 @@ export class TestHttpEndpointUsecase {
 
     let resolvedBody: Record<string, unknown> | unknown[] | undefined;
     try {
-      resolvedBody = resolveHttpRequestBody(compiledBody);
+      // `repairJsonString` throws on bodies it cannot repair, so it has to stay inside this
+      // try/catch to return a 400 with the reason instead of an unhandled 500.
+      const resolvedBodyInput =
+        typeof compiledBody === 'string' && compiledBody.trim() ? repairJsonString(compiledBody) : compiledBody;
+      resolvedBody = resolveHttpRequestBody(resolvedBodyInput);
     } catch (parseError) {
-      const errorMessage = parseError instanceof Error ? parseError.message : 'Failed to parse raw JSON body';
-
       return {
         statusCode: 400,
-        body: { error: `Invalid raw JSON body: ${errorMessage}` },
+        body: buildInvalidJsonBodyDetail(parseError, compiledBody),
         headers: {},
         durationMs: Math.round(performance.now() - startTime),
         resolvedRequest: {
@@ -128,7 +133,7 @@ export class TestHttpEndpointUsecase {
         ...(hasBody ? { body: resolvedBody } : {}),
         timeout: 30_000,
         responseType: 'text',
-        enforceSsrfProtection: true,
+        enforceSsrfProtection: isOutboundSsrfProtectionEnabled(),
       });
       const durationMs = Math.round(performance.now() - startTime);
 
@@ -180,7 +185,7 @@ export class TestHttpEndpointUsecase {
     return {
       subscriber: previewPayload.subscriber ?? {},
       payload: previewPayload.payload ?? {},
-      steps: previewPayload.steps ?? {},
+      steps: enhanceStepsMap((previewPayload.steps ?? {}) as Record<string, Record<string, unknown>>),
       env: previewPayload.env ?? {},
       ...(previewPayload.context ? { context: previewPayload.context } : {}),
     };
@@ -190,13 +195,7 @@ export class TestHttpEndpointUsecase {
     values: Record<string, unknown>,
     context: Record<string, unknown>
   ): Promise<unknown> {
-    const compiled = await this.liquidEngine.parseAndRender(JSON.stringify(values), context);
-
-    try {
-      return JSON.parse(compiled);
-    } catch {
-      throw new Error('Rendered template output is not valid JSON');
-    }
+    return compileJsonControlValues(values, context, this.liquidEngine);
   }
 }
 

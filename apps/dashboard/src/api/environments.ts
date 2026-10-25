@@ -27,13 +27,18 @@ export interface IResourceDependency {
   resourceId: string;
   resourceName: string;
   isBlocking: boolean;
-  reason: 'LAYOUT_REQUIRED_FOR_WORKFLOW' | 'LAYOUT_EXISTS_IN_TARGET';
+  reason:
+    | 'LAYOUT_REQUIRED_FOR_WORKFLOW'
+    | 'LAYOUT_EXISTS_IN_TARGET'
+    | 'AGENT_REQUIRED_FOR_WORKFLOW'
+    | 'AGENT_EXISTS_IN_TARGET';
 }
 
 export interface IResourceDiffResult {
   resourceType: string;
   sourceResource?: IResourceInfo | null;
   targetResource?: IResourceInfo | null;
+  // biome-ignore lint/suspicious/noExplicitAny: the change shape is defined by the API sync types and not shared with the dashboard
   changes: any[];
   summary: IDiffSummary;
   dependencies?: IResourceDependency[];
@@ -115,6 +120,26 @@ export async function getApiKeys({ environment }: { environment: IEnvironment })
   return get<{ data: IApiKey[] }>(`/environments/api-keys`, { environment });
 }
 
+export type DashboardInboxHashes = {
+  subscriberHash: string;
+  webChatSubscriberHash: string;
+};
+
+export async function getDashboardInboxHashes({
+  environment,
+  signal,
+}: {
+  environment: IEnvironment;
+  signal?: AbortSignal;
+}): Promise<DashboardInboxHashes> {
+  const { data } = await get<{ data: DashboardInboxHashes }>(`/environments/me/dashboard-inbox-hashes`, {
+    environment,
+    signal,
+  });
+
+  return data;
+}
+
 export async function getTags({ environment }: { environment: IEnvironment }): Promise<ITagsResponse> {
   const { data } = await getV2<{ data: ITagsResponse }>(`/environments/${environment._id}/tags`);
   return data;
@@ -132,6 +157,14 @@ export async function deleteEnvironment({ environment }: { environment: IEnviron
 
 export async function regenerateApiKeys({ environment }: { environment: IEnvironment }): Promise<{ data: IApiKey[] }> {
   return post<{ data: IApiKey[] }>(`/environments/api-keys/regenerate`, { environment });
+}
+
+export async function createApiKey({ environment }: { environment: IEnvironment }): Promise<{ data: IApiKey[] }> {
+  return post<{ data: IApiKey[] }>(`/environments/api-keys`, { environment });
+}
+
+export async function deleteApiKey({ environment, hash }: { environment: IEnvironment; hash: string }): Promise<void> {
+  return del<void>(`/environments/api-keys/${hash}`, { environment });
 }
 
 export async function diffEnvironments({

@@ -1,10 +1,17 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ResourceOriginEnum, Slug, StepTypeEnum } from '@novu/shared';
+import {
+  type ContentOverrideProviderId,
+  ResourceOriginEnum,
+  Slug,
+  type StepIntegrationOverrides,
+  StepTypeEnum,
+} from '@novu/shared';
 import { Type } from 'class-transformer';
-import { IsEnum, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { IsEnum, IsObject, IsOptional, IsString, ValidateNested } from 'class-validator';
 import { ControlsMetadataDto } from '../controls-metadata.dto';
 import { JSONSchemaDto } from '../json-schema.dto';
 import { StepIssuesDto } from '../step-issues.dto';
+import { INTEGRATION_OVERRIDES_API_PROPERTY, PROVIDER_OVERRIDES_API_PROPERTY } from './provider-overrides.dto';
 
 export class StepResponseDto<T = Record<string, unknown>> {
   @ApiProperty({
@@ -14,7 +21,7 @@ export class StepResponseDto<T = Record<string, unknown>> {
   })
   @ValidateNested()
   @Type(() => ControlsMetadataDto)
-  controls: ControlsMetadataDto;
+  controls: ControlsMetadataDto<T>;
 
   @ApiPropertyOptional({
     description: 'Control values for the step (alias for controls.values)',
@@ -22,6 +29,20 @@ export class StepResponseDto<T = Record<string, unknown>> {
     additionalProperties: true,
   })
   controlValues?: T;
+
+  @ApiPropertyOptional({
+    ...PROVIDER_OVERRIDES_API_PROPERTY,
+  })
+  @IsOptional()
+  @IsObject()
+  providerOverrides?: Partial<Record<ContentOverrideProviderId, Record<string, unknown>>> | null;
+
+  @ApiPropertyOptional({
+    ...INTEGRATION_OVERRIDES_API_PROPERTY,
+  })
+  @IsOptional()
+  @IsObject()
+  integrationOverrides?: StepIntegrationOverrides | null;
 
   @ApiProperty({
     description: 'JSON Schema for variables, follows the JSON Schema standard',

@@ -1235,6 +1235,43 @@ describe('Session - /inbox/session (POST) #novu-v2', async () => {
     expect(contextKeys).to.include('projectId:project-456');
   });
 
+  it('does not let a session context payload set a root bridgeUrl override', async () => {
+    // Security regression: agent bridge routing reads the Context root `bridgeUrl`, which is writable
+    // only via the trusted /v2/contexts API. A subscriber-facing session payload only carries
+    // `{ id, data }`, so a `data.bridgeUrl` must never surface as a routable root override.
+    await setIntegrationConfig({
+      _environmentId: session.environment._id,
+      _organizationId: session.environment._organizationId,
+      hmac: false,
+    });
+
+    const context: ContextPayload = {
+      tenant: { id: 'attacker', data: { bridgeUrl: 'https://attacker.example.com/api/novu' } },
+    };
+
+    const { body, status } = await initializeSession({
+      applicationIdentifier: session.environment.identifier,
+      subscriberId: mockSubscriberId,
+      context,
+    });
+
+    expect(status).to.equal(201);
+    expect(body.data.contextKeys).to.deep.equal(['tenant:attacker']);
+
+    const stored = await contextRepository.findOne({
+      _environmentId: session.environment._id,
+      _organizationId: session.organization._id,
+      type: 'tenant',
+      id: 'attacker',
+    });
+
+    expect(stored, 'context created from session payload').to.exist;
+    expect(stored?.bridgeUrl, 'root bridgeUrl must not be settable via a session context payload').to.equal(undefined);
+    expect((stored?.data as Record<string, unknown>)?.bridgeUrl, 'the value stays inert inside data').to.equal(
+      'https://attacker.example.com/api/novu'
+    );
+  });
+
   it('should reuse existing contexts on subsequent sessions', async () => {
     await setIntegrationConfig({
       _environmentId: session.environment._id,
@@ -1273,6 +1310,54 @@ describe('Session - /inbox/session (POST) #novu-v2', async () => {
     });
 
     expect(contextsAfter.length).to.equal(contextsBefore.length);
+  });
+
+  it('should not mutate existing context data during inbox session', async () => {
+    await setIntegrationConfig({
+      _environmentId: session.environment._id,
+      _organizationId: session.environment._organizationId,
+      hmac: false,
+    });
+
+    const initialData = { name: 'Acme Corp', plan: 'basic' };
+    const initialContext: ContextPayload = {
+      tenant: {
+        id: 'org-acme',
+        data: initialData,
+      },
+    };
+
+    const firstSession = await initializeSession({
+      applicationIdentifier: session.environment.identifier,
+      subscriberId: mockSubscriberId,
+      context: initialContext,
+    });
+
+    expect(firstSession.status).to.equal(201);
+
+    const attemptedUpdate: ContextPayload = {
+      tenant: {
+        id: 'org-acme',
+        data: { name: 'Malicious Corp', plan: 'enterprise' },
+      },
+    };
+
+    const secondSession = await initializeSession({
+      applicationIdentifier: session.environment.identifier,
+      subscriberId: mockSubscriberId,
+      context: attemptedUpdate,
+    });
+
+    expect(secondSession.status).to.equal(201);
+
+    const storedContext = await contextRepository.findOne({
+      _environmentId: session.environment._id,
+      _organizationId: session.organization._id,
+      type: 'tenant',
+      id: 'org-acme',
+    });
+
+    expect(storedContext?.data).to.deep.equal(initialData);
   });
 
   it('should return empty contextKeys array when no context provided', async () => {

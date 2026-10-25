@@ -29,7 +29,7 @@ export const SignUpPage = () => {
       <div className="w-full md:w-auto">
         <AuthSideBanner />
       </div>
-      <div className="flex flex-1 justify-end px-4 py-0 sm:py-0 md:items-center md:px-0">
+      <div className="flex flex-1 justify-center items-center px-4 py-0 sm:py-0 xl:justify-end md:px-0">
         <div className="flex w-full max-w-[400px] flex-col items-start justify-start gap-[18px]">
           <SignUpForm
             path={ROUTES.SIGN_UP}

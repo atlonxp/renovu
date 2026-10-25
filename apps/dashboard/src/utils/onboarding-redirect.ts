@@ -1,17 +1,12 @@
-import { IS_HOSTNAME_SPLIT_ENABLED } from '@/config';
-import { APP_IDS, type AppId, buildOtherAppExternalUrl, getCurrentAppId, isAbsoluteUrl } from './apps';
+import { isAbsoluteUrl } from './apps';
+import type { ProductType } from './product-type-pending';
 import { buildRoute, ROUTES } from './routes';
 
-const APP_ID_PARAM = 'appId';
-
-const APP_ID_VALUES = new Set<string>([APP_IDS.NOVU, APP_IDS.CONNECT]);
-
 // Query-param signal stamped on the onboarding -> product-home navigation. A query param is used
-// (instead of router state) because the Connect onboarding -> dashboard hop is a full document load
-// — it has to be, so Clerk re-boots and resyncs the freshly created org — and router state does not
-// survive that. The destination reads it once and strips it, so it behaves as a one-shot "where you
-// came from" marker without persistent storage or metadata; a later refresh has no param and so
-// doesn't re-trigger onboarding.
+// (instead of router state) because the onboarding -> dashboard hop can be a full document load, and
+// router state does not survive that. The destination reads it once and strips it, so it behaves as
+// a one-shot "where you came from" marker; a later refresh has no param and doesn't re-trigger
+// onboarding.
 const ONBOARDING_SOURCE_PARAM = 'fromOnboarding';
 const ONBOARDING_SOURCE_VALUE = '1';
 
@@ -41,54 +36,17 @@ export function stripOnboardingSource(search: URLSearchParams): URLSearchParams 
   return next;
 }
 
-export function getOnboardingAppId(search: URLSearchParams): AppId | undefined {
-  const raw = search.get(APP_ID_PARAM);
-
-  if (raw && APP_ID_VALUES.has(raw)) {
-    return raw as AppId;
+// `product_type=agents` skips the usecase picker and lands on the personalize step, so deeplinked
+// signups are surveyed like everyone else on the agents path. The EU/feature-flag gating on that
+// page still redirects to the inbox path when needed.
+export function getPostOrgCreateRoute(productType?: ProductType | null): string {
+  if (productType === 'agents') {
+    return ROUTES.AGENTS_PERSONALIZE;
   }
 
-  return undefined;
+  return ROUTES.USECASE_SELECT;
 }
 
-// Prefers explicit `?appId=` (cross-host handoff) and falls back to the current hostname.
-export function resolveOnboardingAppId(search: URLSearchParams): AppId {
-  return getOnboardingAppId(search) ?? getCurrentAppId();
-}
-
-export function withAppId(path: string, appId: AppId | undefined): string {
-  if (!appId) {
-    return path;
-  }
-
-  const separator = path.includes('?') ? '&' : '?';
-
-  return `${path}${separator}${APP_ID_PARAM}=${appId}`;
-}
-
-export function getPostOrgCreateRoute(appId: AppId, _isAgentsEnabled: boolean): string {
-  if (appId === APP_IDS.CONNECT) {
-    return ROUTES.AGENTS_SETUP;
-  }
-
-  // Platform skips the usecase picker and starts directly with notifications/inbox.
-  return ROUTES.INBOX_USECASE;
-}
-
-// May return an absolute URL when crossing to the other product host — callers must check
-// `apps.isAbsoluteUrl` and use `window.location.assign` so the cross-origin navigation happens.
-export function getPostOnboardingRoute(appId: AppId | undefined, environmentSlug: string): string {
-  if (appId === APP_IDS.CONNECT) {
-    if (IS_HOSTNAME_SPLIT_ENABLED) {
-      const external = buildOtherAppExternalUrl(APP_IDS.CONNECT, environmentSlug);
-
-      if (external) {
-        return external;
-      }
-    }
-
-    return buildRoute(ROUTES.CONNECT_HOME, { environmentSlug });
-  }
-
-  return buildRoute(ROUTES.WORKFLOWS, { environmentSlug });
+export function getPostOnboardingRoute(environmentSlug: string): string {
+  return buildRoute(ROUTES.WELCOME, { environmentSlug });
 }

@@ -7,6 +7,7 @@ export {
   InboxContent,
   MsTeamsConnectButton,
   MsTeamsLinkUser,
+  NotificationItem,
   Notifications,
   NovuProvider,
   PreferenceLevel,
@@ -16,6 +17,7 @@ export {
   SlackLinkUser,
   SubscriptionButton,
   SubscriptionPreferences,
+  TelegramConnectButton,
   useNovu,
   WorkflowCriticalityEnum,
 } from '@novu/react';

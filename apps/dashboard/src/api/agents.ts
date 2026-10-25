@@ -1,11 +1,16 @@
 import type {
+  AgentAnalyticsSource,
   AgentMcpServerEnablementDto,
+  AgentReplyPolicyEnum,
   AgentRuntime,
   AgentRuntimeProviderIdEnum,
+  AgentSubscriberAccessEnum,
   ChannelTypeEnum,
   DirectionEnum,
   IEnvironment,
 } from '@novu/shared';
+import { NOVU_ANALYTICS_SOURCE_HEADER } from '@novu/shared';
+import type { AgentPlanUsage, PlanUsage } from '@/api/agents-plan-usage';
 import { del, get, getApiBaseUrl, NovuApiError, patch, post, put } from '@/api/api.client';
 
 /** Root segment for TanStack Query keys; use with {@link getAgentsListQueryKey}. */
@@ -36,6 +41,14 @@ export function getAgentsListQueryKey(
   return [AGENTS_LIST_QUERY_KEY, environmentId, params] as const;
 }
 
+/** Separate from {@link getAgentsListQueryKey} so paginated pages never share a cache entry with single-page reads. */
+export function getAgentsInfiniteListQueryKey(
+  environmentId: string | undefined,
+  params: { limit: number; identifier: string }
+) {
+  return [AGENTS_LIST_QUERY_KEY, 'infinite', environmentId, params] as const;
+}
+
 export function getAgentRuntimeConfigQueryKey(environmentId: string | undefined, agentIdentifier: string | undefined) {
   return [AGENT_RUNTIME_CONFIG_QUERY_KEY, environmentId, agentIdentifier] as const;
 }
@@ -53,9 +66,25 @@ export type AgentIntegrationSummary = {
   active: boolean;
 };
 
+export type AgentSubscriberAccess = `${AgentSubscriberAccessEnum}`;
+
+export type AgentReplyPolicy = `${AgentReplyPolicyEnum}`;
+
 export type AgentBehavior = {
   acknowledgeOnReceived?: boolean;
   reactionOnResolved?: string | null;
+  /**
+   * Channel-agnostic. `open` on managed agents auto-creates a lightweight
+   * subscriber from an anonymous sender; on custom-code agents the turn is
+   * forwarded to the bridge with a null subscriber. `restricted` rejects
+   * anonymous senders. Managed creates default to `open`; self-hosted to
+   * `restricted`. Always present on persisted agents.
+   */
+  subscriberAccess: AgentSubscriberAccess;
+  /**
+   * Shared-room reply policy. Absent on GET is treated as `auto_reply`.
+   */
+  replyPolicy?: AgentReplyPolicy;
 };
 
 export type ManagedRuntimeResponse = {
@@ -65,6 +94,9 @@ export type ManagedRuntimeResponse = {
   externalEnvironmentId?: string;
   externalWorkspaceId?: string;
   consoleUrl?: string;
+  tools?: AgentTool[];
+  mcpServers?: AgentMcpServer[];
+  systemPrompt?: string;
 };
 
 export type AgentResponse = {
@@ -73,7 +105,7 @@ export type AgentResponse = {
   identifier: string;
   description?: string;
   active: boolean;
-  behavior?: AgentBehavior;
+  behavior: AgentBehavior;
   bridgeUrl?: string;
   devBridgeUrl?: string;
   devBridgeActive?: boolean;
@@ -84,6 +116,12 @@ export type AgentResponse = {
   createdAt: string;
   updatedAt: string;
   integrations?: AgentIntegrationSummary[];
+  /**
+   * Cloud only. `true` when the agent falls outside the organization plan agent
+   * limit (by creation order) and won't respond to inbound messages. Only plan
+   * limits produce this flag — system-capped organizations are never over-limit.
+   */
+  exceedsPlanLimit?: boolean;
 };
 
 export type ListAgentsResponse = {
@@ -92,6 +130,7 @@ export type ListAgentsResponse = {
   previous: string | null;
   totalCount: number;
   totalCountCapped: boolean;
+  planUsage?: AgentPlanUsage;
 };
 
 type AgentSkillInputDto = {
@@ -133,7 +172,7 @@ export type UpdateAgentBody = {
   name?: string;
   description?: string;
   active?: boolean;
-  behavior?: AgentBehavior;
+  behavior?: Partial<AgentBehavior>;
   bridgeUrl?: string;
   devBridgeUrl?: string;
   devBridgeActive?: boolean;
@@ -231,6 +270,39 @@ export async function getAgentDemoQuota(
   return 'data' in response ? response.data : response;
 }
 
+export async function getAgentWebChatHash(
+  environment: IEnvironment,
+  agentIdentifier: string,
+  signal?: AbortSignal
+): Promise<string> {
+  const { data } = await get<{ data: { agentHash: string } }>(
+    `/agents/${encodeURIComponent(agentIdentifier)}/web-chat-hash`,
+    { environment, signal }
+  );
+
+  return data.agentHash;
+}
+
+export type ConversationUsage = {
+  current: number;
+  /** `null` when the tier is unlimited. */
+  included: number | null;
+  periodStart: string;
+  periodEnd: string;
+};
+
+export async function getConversationUsage(
+  environment: IEnvironment,
+  signal?: AbortSignal
+): Promise<ConversationUsage> {
+  const response = await get<{ data: ConversationUsage } | ConversationUsage>('/agents/usage/conversations', {
+    environment,
+    signal,
+  });
+
+  return 'data' in response ? response.data : response;
+}
+
 export async function migrateAgentRuntime(
   environment: IEnvironment,
   agentIdentifier: string,
@@ -247,8 +319,16 @@ export async function migrateAgentRuntime(
   return 'data' in response ? response.data : response;
 }
 
-export async function createAgent(environment: IEnvironment, body: CreateAgentBody): Promise<AgentResponse> {
-  const response = await post<AgentApiEnvelope>('/agents', { environment, body });
+export async function createAgent(
+  environment: IEnvironment,
+  body: CreateAgentBody,
+  options?: { analyticsSource?: AgentAnalyticsSource }
+): Promise<AgentResponse> {
+  const response = await post<AgentApiEnvelope>('/agents', {
+    environment,
+    body,
+    headers: options?.analyticsSource ? { [NOVU_ANALYTICS_SOURCE_HEADER]: options.analyticsSource } : undefined,
+  });
 
   return response.data;
 }
@@ -282,6 +362,7 @@ export type GeneratedManagedAgentSkill = {
 export type GeneratedManagedAgent = {
   name: string;
   identifier: string;
+  description: string;
   systemPrompt: string;
   tools: string[];
   mcpServers: string[];
@@ -333,6 +414,24 @@ export function deleteAgent(
   return del(`/agents/${encodeURIComponent(identifier)}${params}`, { environment });
 }
 
+export type AgentWorkflowUsageInfo = {
+  name: string;
+  workflowId: string;
+};
+
+export type GetAgentUsageResponse = {
+  workflows: AgentWorkflowUsageInfo[];
+};
+
+export async function getAgentUsage(environment: IEnvironment, identifier: string): Promise<GetAgentUsageResponse> {
+  const response = await get<{ data: GetAgentUsageResponse } | GetAgentUsageResponse>(
+    `/agents/${encodeURIComponent(identifier)}/usage`,
+    { environment }
+  );
+
+  return 'data' in response ? response.data : response;
+}
+
 /** Picked integration fields on an agent–integration link (matches API `integration`). */
 export type AgentIntegrationEmbedded = {
   _id: string;
@@ -370,6 +469,11 @@ export type AgentIntegrationLink = {
   connectedAt?: string | null;
   createdAt: string;
   updatedAt: string;
+  /**
+   * Cloud only. `true` when this channel falls outside the organization plan
+   * active-channel limit (by connection order) — the agent won't respond on it.
+   */
+  exceedsPlanLimit?: boolean;
 };
 
 export type ListAgentIntegrationsResponse = {
@@ -378,6 +482,7 @@ export type ListAgentIntegrationsResponse = {
   previous: string | null;
   totalCount: number;
   totalCountCapped: boolean;
+  planUsage?: PlanUsage;
 };
 
 export type ListAgentIntegrationsParams = {
@@ -438,17 +543,6 @@ export function removeAgentIntegration(
 ): Promise<void> {
   return del(`/agents/${encodeURIComponent(agentIdentifier)}/integrations/${encodeURIComponent(agentIntegrationId)}`, {
     environment,
-  });
-}
-
-export async function sendAgentTestEmail(
-  environment: IEnvironment,
-  agentIdentifier: string,
-  targetAddress: string
-): Promise<{ success: boolean }> {
-  return post<{ success: boolean }>(`/agents/${encodeURIComponent(agentIdentifier)}/test-email`, {
-    environment,
-    body: { targetAddress },
   });
 }
 
@@ -533,19 +627,6 @@ export async function listAgentMcpServers(
   return response.data;
 }
 
-export async function enableAgentMcpServer(
-  environment: IEnvironment,
-  agentIdentifier: string,
-  mcpId: string
-): Promise<AgentMcpServerEnablement> {
-  const response = await post<{ data: AgentMcpServerEnablement }>(
-    `/agents/${encodeURIComponent(agentIdentifier)}/mcp-servers`,
-    { environment, body: { mcpId } }
-  );
-
-  return response.data;
-}
-
 export function disableAgentMcpServer(
   environment: IEnvironment,
   agentIdentifier: string,
@@ -582,6 +663,32 @@ export async function setAgentMcpServers(
     environment,
     body: { mcpIds },
   });
+}
+
+export type EnsureProviderManagedVaultResponse = {
+  /** Deep link the dashboard opens in a new tab so the user can finish connector OAuth in Claude. */
+  vaultUrl: string;
+  /** Provider-side vault container id (e.g. Anthropic `vlt_…`) Novu provisioned for the current subscriber + agent. */
+  externalVaultId: string;
+};
+
+/**
+ * Idempotent "ensure provider-managed enablement + vault" call. Used by the
+ * dashboard's "Add from Claude" flow for MCPs whose catalog
+ * `oauth.mode === 'provider-managed'`. Open `vaultUrl` in a new tab so the
+ * user can finish connector OAuth in the provider's vault UI.
+ */
+export async function ensureProviderManagedVault(
+  environment: IEnvironment,
+  agentIdentifier: string,
+  mcpId: string
+): Promise<EnsureProviderManagedVaultResponse> {
+  const response = await post<{ data: EnsureProviderManagedVaultResponse } | EnsureProviderManagedVaultResponse>(
+    `/agents/${encodeURIComponent(agentIdentifier)}/mcp-servers/${encodeURIComponent(mcpId)}/provider-vault`,
+    { environment }
+  );
+
+  return 'data' in response ? response.data : response;
 }
 
 type AgentIntegrationResponseEnvelope = { data: AgentIntegrationLink };
@@ -710,6 +817,7 @@ export type SendWhatsAppTestTemplateError = {
     | 'recipient_not_allowed'
     | 'token_expired'
     | 'template_unavailable'
+    | 'template_pending_approval'
     | 'invalid_recipient'
     | 'rate_limited'
     | 'meta_rejected'
@@ -738,6 +846,202 @@ export async function sendWhatsAppTestTemplate(
   return response.data;
 }
 
+export type SendSendblueTestMessageError = {
+  code: 'missing_credentials' | 'invalid_recipient' | 'recipient_not_verified' | 'sendblue_rejected' | 'unknown';
+  message: string;
+};
+
+export type SendSendblueTestMessageResponse = {
+  success: boolean;
+  messageId?: string;
+  error?: SendSendblueTestMessageError;
+};
+
+export async function sendSendblueTestMessage(
+  environment: IEnvironment,
+  agentIdentifier: string,
+  integrationIdentifier: string,
+  subscriberId: string
+): Promise<SendSendblueTestMessageResponse> {
+  const response = await post<{ data: SendSendblueTestMessageResponse }>(
+    `/agents/${encodeURIComponent(agentIdentifier)}/integrations/${encodeURIComponent(integrationIdentifier)}/sendblue/test-message`,
+    { environment, body: { subscriberId } }
+  );
+
+  return response.data;
+}
+
+export type ConfigureSendblueWebhookFailure = {
+  code: 'missing_credentials' | 'sendblue_rejected' | 'unknown';
+  message: string;
+};
+
+export type ConfigureSendblueWebhookResponse = {
+  success: boolean;
+  callbackUrl: string;
+  webhookSecret?: string;
+  fallbackToManual?: boolean;
+  reason?: ConfigureSendblueWebhookFailure;
+  /**
+   * Other Novu agent webhook URLs already registered on this Sendblue account. Sendblue
+   * webhooks are account-level, so every inbound message triggers all of them — surface a
+   * warning and offer to remove the stale entries via {@link removeAgentSendblueWebhooks}.
+   */
+  existingNovuWebhookUrls?: string[];
+};
+
+export async function configureAgentSendblueWebhook(
+  environment: IEnvironment,
+  agentIdentifier: string,
+  integrationIdentifier: string
+): Promise<ConfigureSendblueWebhookResponse> {
+  const response = await post<{ data: ConfigureSendblueWebhookResponse }>(
+    `/agents/${encodeURIComponent(agentIdentifier)}/integrations/${encodeURIComponent(integrationIdentifier)}/sendblue/configure-webhook`,
+    { environment }
+  );
+
+  return response.data;
+}
+
+export type RemoveSendblueWebhooksResponse = {
+  success: boolean;
+  removedWebhookUrls: string[];
+  message?: string;
+};
+
+export async function removeAgentSendblueWebhooks(
+  environment: IEnvironment,
+  agentIdentifier: string,
+  integrationIdentifier: string,
+  webhookUrls: string[]
+): Promise<RemoveSendblueWebhooksResponse> {
+  const response = await post<{ data: RemoveSendblueWebhooksResponse }>(
+    `/agents/${encodeURIComponent(agentIdentifier)}/integrations/${encodeURIComponent(integrationIdentifier)}/sendblue/remove-webhooks`,
+    { environment, body: { webhookUrls } }
+  );
+
+  return response.data;
+}
+
+export type ConfigurePhotonWebhookFailure = {
+  code: 'missing_credentials' | 'photon_rejected' | 'unknown';
+  message: string;
+};
+
+export type ConfigurePhotonWebhookResponse = {
+  success: boolean;
+  callbackUrl: string;
+  fallbackToManual?: boolean;
+  reason?: ConfigurePhotonWebhookFailure;
+  /**
+   * Other Novu agent webhook URLs already registered on this Photon project. Every inbound
+   * message is delivered to all of them — surface a warning and offer to remove the stale
+   * entries via {@link removeAgentPhotonWebhooks}.
+   */
+  existingNovuWebhookUrls?: string[];
+};
+
+export async function configureAgentPhotonWebhook(
+  environment: IEnvironment,
+  agentIdentifier: string,
+  integrationIdentifier: string,
+  options?: { force?: boolean }
+): Promise<ConfigurePhotonWebhookResponse> {
+  const response = await post<{ data: ConfigurePhotonWebhookResponse }>(
+    `/agents/${encodeURIComponent(agentIdentifier)}/integrations/${encodeURIComponent(integrationIdentifier)}/photon/configure-webhook`,
+    { environment, body: { force: options?.force === true } }
+  );
+
+  return response.data;
+}
+
+export type RemovePhotonWebhooksResponse = {
+  success: boolean;
+  removedWebhookUrls: string[];
+  message?: string;
+};
+
+export async function removeAgentPhotonWebhooks(
+  environment: IEnvironment,
+  agentIdentifier: string,
+  integrationIdentifier: string,
+  webhookUrls: string[]
+): Promise<RemovePhotonWebhooksResponse> {
+  const response = await post<{ data: RemovePhotonWebhooksResponse }>(
+    `/agents/${encodeURIComponent(agentIdentifier)}/integrations/${encodeURIComponent(integrationIdentifier)}/photon/remove-webhooks`,
+    { environment, body: { webhookUrls } }
+  );
+
+  return response.data;
+}
+
+export type RegisterPhotonRecipientResponse = {
+  success: boolean;
+  /** The Photon number the recipient can text to opt in. */
+  assignedPhoneNumber?: string;
+  inviteSent?: boolean;
+  message?: string;
+};
+
+export async function registerPhotonRecipient(
+  environment: IEnvironment,
+  agentIdentifier: string,
+  integrationIdentifier: string,
+  recipient: { phoneNumber: string; email?: string }
+): Promise<RegisterPhotonRecipientResponse> {
+  const response = await post<{ data: RegisterPhotonRecipientResponse }>(
+    `/agents/${encodeURIComponent(agentIdentifier)}/integrations/${encodeURIComponent(integrationIdentifier)}/photon/register-recipient`,
+    { environment, body: recipient }
+  );
+
+  return response.data;
+}
+
+export type StartPhotonDeviceAuthResponse = {
+  available: boolean;
+  reason?: string;
+  userCode?: string;
+  verificationUri?: string;
+  verificationUriComplete?: string;
+  deviceCode?: string;
+  interval?: number;
+  expiresIn?: number;
+};
+
+export async function startPhotonDeviceAuth(
+  environment: IEnvironment,
+  agentIdentifier: string,
+  integrationIdentifier: string
+): Promise<StartPhotonDeviceAuthResponse> {
+  const response = await post<{ data: StartPhotonDeviceAuthResponse }>(
+    `/agents/${encodeURIComponent(agentIdentifier)}/integrations/${encodeURIComponent(integrationIdentifier)}/photon/device-auth/start`,
+    { environment }
+  );
+
+  return response.data;
+}
+
+export type PollPhotonDeviceAuthResponse = {
+  status: 'pending' | 'slow_down' | 'complete' | 'expired' | 'denied' | 'error';
+  projectId?: string;
+  warning?: string;
+  error?: { code: string; message: string };
+};
+
+export async function pollPhotonDeviceAuth(
+  environment: IEnvironment,
+  agentIdentifier: string,
+  integrationIdentifier: string,
+  deviceCode: string
+): Promise<PollPhotonDeviceAuthResponse> {
+  const response = await post<{ data: PollPhotonDeviceAuthResponse }>(
+    `/agents/${encodeURIComponent(agentIdentifier)}/integrations/${encodeURIComponent(integrationIdentifier)}/photon/device-auth/poll`,
+    { environment, body: { deviceCode } }
+  );
+
+  return response.data;
+}
+
 export type ConfigureTelegramWebhookResult = {
   webhookUrl: string;
   configuredAt: string;
@@ -748,11 +1052,10 @@ type ConfigureTelegramWebhookEnvelope = { data: ConfigureTelegramWebhookResult }
 
 export async function configureTelegramAgentWebhook(
   environment: IEnvironment,
-  agentIdentifier: string,
-  integrationId: string
+  integrationIdentifier: string
 ): Promise<ConfigureTelegramWebhookResult> {
   const response = await post<ConfigureTelegramWebhookEnvelope>(
-    `/agents/${encodeURIComponent(agentIdentifier)}/integrations/${encodeURIComponent(integrationId)}/telegram/configure`,
+    `/integrations/${encodeURIComponent(integrationIdentifier)}/webhook/configure`,
     { environment }
   );
 
@@ -770,12 +1073,11 @@ type TelegramMobileLinkEnvelope = { data: TelegramMobileLink };
 
 export async function requestTelegramMobileLink(
   environment: IEnvironment,
-  agentIdentifier: string,
-  integrationId: string,
+  integrationIdentifier: string,
   subscriberId?: string
 ): Promise<TelegramMobileLink> {
   const response = await post<TelegramMobileLinkEnvelope>(
-    `/agents/${encodeURIComponent(agentIdentifier)}/integrations/${encodeURIComponent(integrationId)}/telegram/mobile-link`,
+    `/integrations/${encodeURIComponent(integrationIdentifier)}/mobile-link`,
     { environment, body: subscriberId ? { subscriberId } : undefined }
   );
 
@@ -789,7 +1091,12 @@ export type TelegramSubscriberLink = {
   expiresAt: string;
 };
 
-type TelegramSubscriberLinkEnvelope = { data: TelegramSubscriberLink };
+type LinkChannelEndpointEnvelope = {
+  data: {
+    url: string;
+    providerMetadata?: { botUsername?: string; expiresAt?: string };
+  };
+};
 
 /**
  * Issues a `t.me/<bot>?start=<code>` deep-link that, when opened by a subscriber,
@@ -798,16 +1105,21 @@ type TelegramSubscriberLinkEnvelope = { data: TelegramSubscriberLink };
  */
 export async function requestTelegramSubscriberLink(
   environment: IEnvironment,
-  agentIdentifier: string,
-  integrationId: string,
+  integrationIdentifier: string,
   subscriberId: string
 ): Promise<TelegramSubscriberLink> {
-  const response = await post<TelegramSubscriberLinkEnvelope>(
-    `/agents/${encodeURIComponent(agentIdentifier)}/integrations/${encodeURIComponent(integrationId)}/telegram/subscriber-link`,
-    { environment, body: { subscriberId } }
-  );
+  const response = await post<LinkChannelEndpointEnvelope>('/integrations/channel-endpoints/link', {
+    environment,
+    body: { integrationIdentifier, subscriberId },
+  });
 
-  return response.data;
+  const payload = response.data;
+
+  return {
+    deepLinkUrl: payload.url,
+    botUsername: payload.providerMetadata?.botUsername ?? '',
+    expiresAt: payload.providerMetadata?.expiresAt ?? '',
+  };
 }
 
 export type TelegramMobileLinkStatus =
@@ -822,7 +1134,7 @@ export async function getTelegramMobileSetupStatus(
   token: string,
   signal?: AbortSignal
 ): Promise<TelegramMobileLinkStatus> {
-  const url = `${getApiBaseUrl()}/v1/agents/public/telegram/mobile-configure/status?token=${encodeURIComponent(token)}`;
+  const url = `${getApiBaseUrl()}/v1/integrations/mobile-configure/status?token=${encodeURIComponent(token)}`;
   const response = await fetch(url, {
     method: 'GET',
     headers: { 'Content-Type': 'application/json' },
@@ -865,7 +1177,7 @@ export async function submitTelegramMobileCredentials(
   token: string,
   botToken: string
 ): Promise<SubmitTelegramMobileCredentialsResult> {
-  const url = `${getApiBaseUrl()}/v1/agents/public/telegram/mobile-configure`;
+  const url = `${getApiBaseUrl()}/v1/integrations/mobile-configure`;
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -883,9 +1195,76 @@ export async function submitTelegramMobileCredentials(
   return unwrapEnvelope(data) as SubmitTelegramMobileCredentialsResult;
 }
 
-async function safeJson(response: Response): Promise<unknown> {
+export type SlackSetupLinkStatus =
+  | { valid: true; agentName: string; providerName: string }
+  | { valid: false; reason: 'expired' | 'used' | 'invalid' };
+
+export async function getSlackSetupStatus(token: string, signal?: AbortSignal): Promise<SlackSetupLinkStatus> {
+  const url = `${getApiBaseUrl()}/v1/agents/public/slack/setup/status?token=${encodeURIComponent(token)}`;
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+    signal,
+  });
+
+  const data = await safeJson(response);
+
+  if (!response.ok) {
+    throw new NovuApiError(extractErrorMessage(data) ?? 'Failed to load setup link', response.status, data);
+  }
+
+  return unwrapEnvelope(data) as SlackSetupLinkStatus;
+}
+
+export type SubmitSlackSetupCredentialsResult = {
+  success: true;
+  authorizeUrl?: string;
+};
+
+export type SubmitSlackSetupCredentialsError = {
+  code: 'token_invalid' | 'token_expired' | 'token_already_used' | 'unknown';
+  message: string;
+};
+
+export class SlackSetupSubmitError extends Error {
+  constructor(
+    public readonly code: SubmitSlackSetupCredentialsError['code'],
+    message: string,
+    public readonly status: number
+  ) {
+    super(message);
+  }
+}
+
+export async function submitSlackSetupCredentials(
+  token: string,
+  configToken: string
+): Promise<SubmitSlackSetupCredentialsResult> {
+  const url = `${getApiBaseUrl()}/v1/agents/public/slack/setup`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token, configToken }),
+  });
+
+  const data = await safeJson(response);
+
+  if (!response.ok) {
+    const code = extractErrorCode(data) as SubmitSlackSetupCredentialsError['code'];
+    const message = extractErrorMessage(data) ?? 'Failed to configure Slack';
+    throw new SlackSetupSubmitError(code, message, response.status);
+  }
+
+  return unwrapEnvelope(data) as SubmitSlackSetupCredentialsResult;
+}
+
+type JsonBody = Record<string, unknown> | null;
+
+async function safeJson(response: Response): Promise<JsonBody> {
   try {
-    return await response.json();
+    const body = await response.json();
+
+    return body && typeof body === 'object' ? body : null;
   } catch {
     return null;
   }
@@ -896,9 +1275,9 @@ async function safeJson(response: Response): Promise<unknown> {
  * Our authed `post`/`get` helpers go through `api.client` which unwraps it, but the
  * public mobile flow uses raw `fetch` and must unwrap manually.
  */
-function unwrapEnvelope(data: unknown): unknown {
-  if (data && typeof data === 'object' && 'data' in (data as Record<string, unknown>)) {
-    return (data as { data: unknown }).data;
+function unwrapEnvelope(data: JsonBody): JsonBody {
+  if (data && 'data' in data) {
+    return data.data as JsonBody;
   }
 
   return data;

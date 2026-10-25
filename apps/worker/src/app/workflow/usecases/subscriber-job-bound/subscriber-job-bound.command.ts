@@ -2,6 +2,7 @@ import { EnvironmentWithUserCommand, SubscriberTopicPreference } from '@novu/app
 import { SubscriberEntity } from '@novu/dal';
 import { DiscoverWorkflowOutput } from '@novu/framework/internal';
 import {
+  ContextPayload,
   ISubscribersDefine,
   ITenantDefine,
   StatelessControls,
@@ -9,7 +10,17 @@ import {
   TriggerOverrides,
   TriggerRequestCategoryEnum,
 } from '@novu/shared';
-import { IsArray, IsDefined, IsEnum, IsMongoId, IsOptional, IsString, ValidateNested } from 'class-validator';
+import {
+  IsArray,
+  IsBoolean,
+  IsDefined,
+  IsEnum,
+  IsMongoId,
+  IsOptional,
+  IsString,
+  ValidateIf,
+  ValidateNested,
+} from 'class-validator';
 
 export class SubscriberJobBoundCommand extends EnvironmentWithUserCommand {
   @IsString()
@@ -22,6 +33,7 @@ export class SubscriberJobBoundCommand extends EnvironmentWithUserCommand {
   requestId?: string;
 
   @IsDefined()
+  // biome-ignore lint/suspicious/noExplicitAny: the trigger payload is arbitrary customer JSON
   payload: any;
 
   @IsDefined()
@@ -30,6 +42,11 @@ export class SubscriberJobBoundCommand extends EnvironmentWithUserCommand {
 
   @IsDefined()
   overrides: TriggerOverrides;
+
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsMongoId()
+  _agentId?: string | null;
 
   @IsOptional()
   @ValidateNested()
@@ -41,6 +58,9 @@ export class SubscriberJobBoundCommand extends EnvironmentWithUserCommand {
   @IsArray()
   @IsString({ each: true })
   contextKeys: string[];
+
+  @IsOptional()
+  context?: ContextPayload;
 
   @IsDefined()
   @IsMongoId()
@@ -63,4 +83,9 @@ export class SubscriberJobBoundCommand extends EnvironmentWithUserCommand {
   bridge?: { url: string; workflow: DiscoverWorkflowOutput };
 
   controls?: StatelessControls;
+
+  /** Mirrors `IProcessSubscriberDataDto.incrementUsageInWorker`; transitional (NV-8853). */
+  @IsOptional()
+  @IsBoolean()
+  incrementUsageInWorker?: boolean;
 }

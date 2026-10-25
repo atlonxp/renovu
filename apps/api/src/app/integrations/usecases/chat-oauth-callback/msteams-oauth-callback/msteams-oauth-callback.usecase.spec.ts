@@ -208,7 +208,7 @@ describe('MsTeamsOauthCallback', () => {
       const result = await usecase.execute(command);
 
       expect(generateMsTeamsOauthUrl.execute.called).to.be.false;
-      expect(result.result).to.include('window.close()');
+      expect(result.result).to.include('Microsoft Teams is connected');
     });
 
     it('should fall through to close-tab when autoLinkUser=false even if subscriberId is present', async () => {
@@ -232,7 +232,7 @@ describe('MsTeamsOauthCallback', () => {
       const result = await usecase.execute(command);
 
       expect(generateMsTeamsOauthUrl.execute.called).to.be.false;
-      expect(result.result).to.include('window.close()');
+      expect(result.result).to.include('Microsoft Teams is connected');
     });
 
     it('should fall through to close-tab when autoLinkUser is absent (raw API callers default to false)', async () => {
@@ -255,7 +255,7 @@ describe('MsTeamsOauthCallback', () => {
       const result = await usecase.execute(command);
 
       expect(generateMsTeamsOauthUrl.execute.called).to.be.false;
-      expect(result.result).to.include('window.close()');
+      expect(result.result).to.include('Microsoft Teams is connected');
     });
 
     it('should fall through to close-tab and not throw when link_user chaining fails', async () => {
@@ -279,7 +279,7 @@ describe('MsTeamsOauthCallback', () => {
 
       const result = await usecase.execute(command);
 
-      expect(result.result).to.include('window.close()');
+      expect(result.result).to.include('Microsoft Teams is connected');
     });
 
     it('should throw if tenant is missing', async () => {
@@ -382,6 +382,57 @@ describe('MsTeamsOauthCallback', () => {
         expect(err).to.be.instanceOf(BadRequestException);
         expect((err as BadRequestException).message).to.include('Missing authorization code for link_user mode');
       }
+    });
+
+    function buildAxiosError(status: number, data: Record<string, unknown>) {
+      return Object.assign(new Error(`Request failed with status code ${status}`), {
+        isAxiosError: true,
+        response: { status, data },
+      });
+    }
+
+    it('should return an error page (not 500) when the code exchange is rejected by Azure AD', async () => {
+      axiosPost.onFirstCall().rejects(
+        buildAxiosError(400, {
+          error: 'invalid_grant',
+          error_description: 'AADSTS54005: OAuth2 Authorization code was already redeemed.',
+        })
+      );
+
+      const command = MsTeamsOauthCallbackCommand.create({
+        providerCode: 'auth-code-abc',
+        state: buildLinkUserState(),
+      });
+
+      const result = await usecase.execute(command);
+
+      // Apostrophes are HTML-escaped in the rendered page, so match the escape-free part
+      expect(result.result).to.include('set up Microsoft Teams');
+      expect(result.result).to.include('AADSTS54005');
+      expect(createChannelEndpoint.execute.called).to.be.false;
+    });
+
+    it('should return an error page (not 500) when acquiring the Graph token fails', async () => {
+      stubTokenExchange();
+      msTeamsTokenService.getGraphToken.rejects(
+        buildAxiosError(400, {
+          error: 'unauthorized_client',
+          error_description: `AADSTS700016: Application with identifier '${MOCK_CLIENT_ID}' was not found in the directory.`,
+        })
+      );
+
+      const command = MsTeamsOauthCallbackCommand.create({
+        providerCode: 'auth-code-abc',
+        state: buildLinkUserState(),
+      });
+
+      const result = await usecase.execute(command);
+
+      expect(result.result).to.include('set up Microsoft Teams');
+      expect(result.result).to.include('AADSTS700016');
+      // Propagation-delay hint for the fresh-consent case
+      expect(result.result).to.include('Azure permission changes can take up to 60 minutes');
+      expect(createChannelEndpoint.execute.called).to.be.false;
     });
 
     it('should throw if id_token is missing from token response', async () => {

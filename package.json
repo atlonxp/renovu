@@ -1,7 +1,7 @@
 {
   "name": "root",
   "private": true,
-  "packageManager": "pnpm@11.0.9",
+  "packageManager": "pnpm@11.28.2",
   "scripts": {
     "bootstrap": "npm run setup:dev",
     "build:api": "nx build @novu/api-service",
@@ -20,7 +20,10 @@
     "clean:cache": "pnpm nx reset && pnpm store prune",
     "commit": "cz",
     "dev-environment-setup": "./scripts/dev-environment-setup.sh",
-    "dev:portless": "mprocs",
+    "dev:portless": "node scripts/mprocs-dev.mjs",
+    "dev:config": "node scripts/novu-dev-config.mjs",
+    "dev:thalamus-observer": "pnpm --filter @novu/thalamus-observer-worker dev",
+    "dev:socket-worker": "pnpm --filter @novu/socket-worker dev",
     "docker:build": "pnpm -r --if-present --parallel docker:build",
     "docker:ghcr:build": "docker build -t ghcr.io/atlonxp/renovu-api:latest -f docker/Dockerfile.api . && docker build -t ghcr.io/atlonxp/renovu-worker:latest -f docker/Dockerfile.worker . && docker build -t ghcr.io/atlonxp/renovu-ws:latest -f docker/Dockerfile.ws . && docker build -t ghcr.io/atlonxp/renovu-dashboard:latest -f docker/Dockerfile.dashboard . && docker build -t ghcr.io/atlonxp/renovu-admin-tools:latest -f docker/Dockerfile.admin-tools .",
     "docker:ghcr:push": "docker push ghcr.io/atlonxp/renovu-api:latest && docker push ghcr.io/atlonxp/renovu-worker:latest && docker push ghcr.io/atlonxp/renovu-ws:latest && docker push ghcr.io/atlonxp/renovu-dashboard:latest && docker push ghcr.io/atlonxp/renovu-admin-tools:latest",
@@ -44,6 +47,7 @@
     "install:with-ee": "pnpm install && pnpm symlink:submodules",
     "jarvis": "node scripts/jarvis.js",
     "lint-staged": "lint-staged",
+    "prepare": "husky install",
     "lint": "nx run-many --target=lint --all --exclude=nextjs",
     "lint:fix": "biome check --write .",
     "format": "biome format .",
@@ -57,13 +61,15 @@
     "packages:set-workspace-protocol": "node scripts/set-package-dependencies.mjs workspace:*",
     "pnpm-context": "node scripts/pnpm-context.mjs",
     "portless:setup": "pnpm exec portless trust && pnpm exec portless service install",
+    "portless:ngrok:url": "node scripts/portless-ngrok.mjs url api.novu",
+    "portless:ngrok:watch": "node scripts/portless-ngrok.mjs watch api.novu",
     "prebuild": "nx run-many --target=prebuild --all",
     "preinstall": "npx only-allow pnpm",
     "preview:pkg:build": "IS_PREVIEW=true nx affected -t build --base=origin/next --head=HEAD --exclude='*,!tag:type:package'",
     "preview:pkg:publish": "node scripts/publish-preview-packages.mjs",
     "release": "node scripts/release.mjs",
     "release:version:apps": "nx release version --projects=tag:type:app",
-    "setup:project": "npx --yes pnpm@11.0.9 i && node scripts/setup-env-files.js && pnpm build",
+    "setup:project": "npx --yes pnpm@11.28.2 i && node scripts/setup-env-files.js && pnpm build",
     "seed:agent": "node scripts/seed-agent-data.mjs",
     "setup:agent": "bash scripts/setup-agent.sh",
     "start:api:dev": "cross-env nx run @novu/api-service:start:dev",
@@ -71,6 +77,7 @@
     "start:api": "cross-env nx run @novu/api-service:start",
     "start:dal": "cross-env nx run @novu/dal:start",
     "start:dashboard": "cross-env nx run @novu/dashboard:start",
+    "start:human-dashboard": "cross-env nx run @novu/human-dashboard:start",
     "start:integration:api": "cd apps/api && pnpm run test",
     "start:shared": "cross-env nx run @novu/shared:start",
     "start:webhook:test": "cross-env nx run-many --target=start:test --projects=@novu/webhook",
@@ -92,10 +99,10 @@
     "@auto-it/released": "^10.36.5",
     "@biomejs/biome": "^2.2.0",
     "@gitopslovers/nx-biome": "^1.5.0",
-    "@nx/jest": "21.3.11",
-    "@nx/js": "21.3.11",
-    "@nx/plugin": "21.3.11",
-    "@nx/workspace": "21.3.11",
+    "@nx/jest": "22.7.12",
+    "@nx/js": "22.7.12",
+    "@nx/plugin": "22.7.12",
+    "@nx/workspace": "22.7.12",
     "@octokit/core": "^4.0.0",
     "@pnpm/filter-workspace-packages": "^7.0.6",
     "@pnpm/logger": "^5.0.0",
@@ -130,17 +137,17 @@
     "meow": "^10.1.3",
     "mississippi": "^4.0.0",
     "mprocs": "^0.9.2",
-    "nx": "21.3.11",
+    "nx": "22.7.12",
     "nx-cloud": "19.1.0",
     "ora": "~5.4.1",
     "pkg-pr-new": "^0.0.24",
-    "pnpm": "11.0.9",
-    "portless": "^0.13.0",
+    "pnpm": "11.28.2",
+    "portless": "^0.14.0",
     "process": "^0.11.10",
     "rimraf": "^3.0.2",
     "shelljs": "^0.8.5",
     "stop-only": "^3.1.2",
-    "tar": "^7.5.13",
+    "tar": "^7.5.19",
     "ts-jest": "29.4.1",
     "ts-node": "~10.9.1",
     "tsconfig-paths": "^4.2.0",
@@ -158,14 +165,9 @@
       "playground/*"
     ]
   },
-  "husky": {
-    "hooks": {
-      "pre-commit": "lint-staged"
-    }
-  },
   "engines": {
     "node": ">=22 <23",
-    "pnpm": "^11.0.0"
+    "pnpm": "^11.28.0"
   },
   "dependencies": {
     "tslib": "^2.4.0"

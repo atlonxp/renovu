@@ -75,7 +75,7 @@ function TriggerStepContent() {
   return (
     <div className="space-y-3">
       <div className="text-foreground-400 text-xs">
-        A trigger is the starting point of every workflow — an action or event that kicks it off. To initiate this, you
+        A trigger is the starting point of every workflow: an action or event that kicks it off. To initiate this, you
         call the Novu API using workflow_id.
       </div>
       <div className="text-foreground-400 text-xs">
@@ -177,6 +177,10 @@ export function TestWorkflowInstructions({ isOpen, onClose, workflow, to, payloa
     const snippetUtil = LANGUAGE_TO_SNIPPET_UTIL[language];
     const secretKey = language === 'shell' && canReadApiKeys && apiKey ? apiKey : undefined;
     const payloadString = typeof payload === 'string' ? payload : JSON.stringify(payload ?? {}, null, 2);
+
+    if (!snippetUtil) {
+      return '';
+    }
 
     return snippetUtil({ identifier, to: to ?? {}, payload: payloadString, secretKey });
   };
