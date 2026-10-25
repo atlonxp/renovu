@@ -1,6 +1,7 @@
 import type { mongo } from 'mongoose';
 
 import { moveOpenAiToAiSettingsCore } from './move-openai-to-ai-settings/core';
+import { recreateAgentInboxRoutingKeyIndexCore } from './recreate-agent-inbox-routing-key-index/core';
 
 type Db = mongo.Db;
 
@@ -28,5 +29,9 @@ export const MIGRATION_REGISTRY: RegisteredMigration[] = [
   {
     name: 'move-openai-to-ai-settings',
     run: moveOpenAiToAiSettingsCore,
+  },
+  {
+    name: 'recreate-agent-inbox-routing-key-index',
+    run: recreateAgentInboxRoutingKeyIndexCore,
   },
 ];
